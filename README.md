@@ -26,7 +26,6 @@ prefix.
 
 ### Build From Source
 
-
 To build via `rebuild.luau`, you need [CMake](https://cmake.org/), git and [seal 0.8.x](https://github.com/seal-runtime/seal/releases/tag/v0.8.1).
 You can install `seal` manually or via a toolchain manager such as Rokit.
 
