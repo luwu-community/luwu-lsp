@@ -203,6 +203,7 @@ target_compile_definitions(Luwu.LanguageServer PUBLIC
     LSP_VERSION="${LSP_VERSION}"
     LSP_NAME="${LSP_NAME}"
     LSP_KEYWORD_HOVERS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/keyword_hovers.json"
+    LSP_LUWU_DOCS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json"
     $<$<BOOL:${LSP_BUILD_WITH_SENTRY}>:LSP_BUILD_WITH_SENTRY>
 )
 target_include_directories(Luwu.LanguageServer PUBLIC src/include)

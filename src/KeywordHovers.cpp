@@ -159,6 +159,20 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
         if (stat->elseLocation && contains(*stat->elseLocation))
             return match("else", *stat->elseLocation);
     }
+    else if (auto expr = node->as<Luau::AstExprIfElse>())
+    {
+        // Documented separately from the statement: an `if` expression evaluates to a value, takes
+        // exactly one expression per branch, and has no `end`. An `elseif` clause parses into a
+        // nested AstExprIfElse whose own `ifLocation` is the `elseif` token, so tell the two apart
+        // by token length the same way the statement case does.
+        if (contains(expr->ifLocation))
+            return expr->ifLocation.end.column - expr->ifLocation.begin.column == 2 ? match("if_expr", expr->ifLocation)
+                                                                                    : match("elseif", expr->ifLocation);
+        if (expr->thenLocation && contains(*expr->thenLocation))
+            return match("then", *expr->thenLocation);
+        if (expr->elseLocation && contains(*expr->elseLocation))
+            return match("else", *expr->elseLocation);
+    }
     else if (auto stat = node->as<Luau::AstStatWhile>())
     {
         if (contains(stat->whileLocation))

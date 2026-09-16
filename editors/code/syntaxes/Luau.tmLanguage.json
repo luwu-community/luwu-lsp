@@ -176,7 +176,7 @@
     },
     "local-declaration": {
       "begin": "\\b(?:(export)\\s+)?(local)\\b",
-      "end": "(?=\\s*do\\b|\\s*[=;]|\\s*$)",
+      "end": "(?=\\s*do\\b|\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luau"
@@ -199,7 +199,7 @@
               "name": "keyword.operator.type.luau"
             }
           },
-          "end": "(?=\\s*do\\b|\\s*[=;,]|\\s*$)",
+          "end": "(?=\\s*do\\b|\\s*[=;,])|^(?!\\s*[|&])",
           "patterns": [
             {
               "include": "#type_literal"
@@ -218,7 +218,7 @@
     },
     "const-declaration": {
       "begin": "\\b(?:(export)\\s+)?(const)\\b",
-      "end": "(?=\\s*[=;]|\\s*$)",
+      "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luau"
@@ -241,7 +241,7 @@
               "name": "keyword.operator.type.luau"
             }
           },
-          "end": "(?=\\s*[=;,]|\\s*$)",
+          "end": "(?=\\s*[=;,])|^(?!\\s*[|&])",
           "patterns": [
             {
               "include": "#type_literal"
@@ -472,7 +472,7 @@
     },
     "public-declaration": {
       "begin": "\\b(public)\\b(?:\\s+(const)\\b)?",
-      "end": "(?=\\s*[=;]|\\s*$)",
+      "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.access.luau"
@@ -495,7 +495,7 @@
               "name": "keyword.operator.type.luau"
             }
           },
-          "end": "(?=\\s*[=;,]|\\s*$)",
+          "end": "(?=\\s*[=;,])|^(?!\\s*[|&])",
           "patterns": [
             {
               "include": "#type_literal"
@@ -514,7 +514,7 @@
     },
     "private-declaration": {
       "begin": "\\b(private)\\b(?:\\s+(const)\\b)?",
-      "end": "(?=\\s*[=;]|\\s*$)",
+      "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.access.luau"
@@ -537,7 +537,7 @@
               "name": "keyword.operator.type.luau"
             }
           },
-          "end": "(?=\\s*[=;,]|\\s*$)",
+          "end": "(?=\\s*[=;,])|^(?!\\s*[|&])",
           "patterns": [
             {
               "include": "#type_literal"

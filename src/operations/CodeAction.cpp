@@ -58,162 +58,359 @@ Luau::AstStat* findStatementContainingLocal(Luau::AstStatBlock* root, const Luau
     return finder.result;
 }
 
-void generateClassMemberPublicFix(const lsp::DocumentUri& uri, Luau::AstStatClass* classStat, const TextDocument& textDocument,
-    const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
+// The leading whitespace of a source line, used to match the document's existing indentation
+std::string getLineIndentation(const TextDocument& textDocument, size_t line)
 {
-    std::vector<lsp::TextEdit> edits;
+    std::string lineText = textDocument.getLine(line);
+    size_t indent = 0;
+    while (indent < lineText.size() && (lineText[indent] == ' ' || lineText[indent] == '\t'))
+        ++indent;
+    return lineText.substr(0, indent);
+}
+
+// The parameter list of whatever function (or class primary constructor) `position` sits in, as a
+// source location covering the parentheses themselves.
+struct FindParameterListAtPosition : Luau::AstVisitor
+{
+    Luau::Position targetPosition;
+    std::optional<Luau::Location> result;
+
+    explicit FindParameterListAtPosition(const Luau::Position& position)
+        : targetPosition(position)
+    {
+    }
+
+    bool visit(Luau::AstExprFunction* node) override
+    {
+        if (node->argLocation && node->argLocation->containsClosed(targetPosition))
+            result = node->argLocation;
+        return true;
+    }
+
+    bool visit(Luau::AstStatClass* node) override
+    {
+        if (node->primaryConstructor && node->primaryConstructor->argLocation.containsClosed(targetPosition))
+            result = node->primaryConstructor->argLocation;
+        return true;
+    }
+};
+
+// Splits a parameter list's contents on top-level commas, so commas inside a parameter's own type
+// (a table type, a generic argument list, a function type) don't split it.
+std::vector<std::string> splitParameters(const std::string& parameters)
+{
+    std::vector<std::string> result;
+    int depth = 0;
+    char stringDelimiter = '\0';
+    size_t start = 0;
+
+    for (size_t i = 0; i < parameters.size(); ++i)
+    {
+        char c = parameters[i];
+
+        if (stringDelimiter != '\0')
+        {
+            if (c == '\\')
+                ++i;
+            else if (c == stringDelimiter)
+                stringDelimiter = '\0';
+            continue;
+        }
+
+        if (c == '"' || c == '\'')
+            stringDelimiter = c;
+        else if (c == '(' || c == '{' || c == '[' || c == '<')
+            ++depth;
+        else if (c == ')' || c == '}' || c == ']' || c == '>')
+            --depth;
+        else if (c == ',' && depth == 0)
+        {
+            result.push_back(parameters.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+
+    result.push_back(parameters.substr(start));
+
+    for (auto& parameter : result)
+        trim(parameter);
+
+    return result;
+}
+
+// One level of indentation, as the document already uses it: the leading whitespace of the first
+// indented line, falling back to four spaces.
+std::string detectIndentUnit(const TextDocument& textDocument)
+{
+    for (size_t line = 0; line < textDocument.lineCount(); ++line)
+    {
+        std::string lineText = textDocument.getLine(line);
+        size_t indent = 0;
+        while (indent < lineText.size() && (lineText[indent] == ' ' || lineText[indent] == '\t'))
+            ++indent;
+
+        // Skip blank (or whitespace-only) lines, and continuation lines of an already-wrapped construct
+        if (indent == 0 || indent == lineText.size())
+            continue;
+
+        if (lineText[0] == '\t')
+            return "\t";
+
+        return std::string(indent, ' ');
+    }
+
+    return "    ";
+}
+
+// Rewrites a parameter list between one-per-line (Rust style, closing paren back at the function's
+// own indentation) and all-on-one-line. Offered on any function, method or primary constructor.
+void generateParameterListWrapAction(const lsp::DocumentUri& uri, const Luau::Location& argLocation, const TextDocument& textDocument,
+    std::vector<lsp::CodeAction>& result)
+{
+    lsp::Range range = textDocument.convertLocation(argLocation);
+    std::string text = textDocument.getText(range);
+    if (text.size() < 2 || text.front() != '(' || text.back() != ')')
+        return;
+
+    auto parameters = splitParameters(text.substr(1, text.size() - 2));
+    if (parameters.empty() || (parameters.size() == 1 && parameters[0].empty()))
+        return;
+
+    const bool isMultiline = text.find('\n') != std::string::npos;
+
+    std::string newText;
+    std::string title;
+
+    if (isMultiline)
+    {
+        title = "Put parameters on one line";
+        newText = "(";
+        for (size_t i = 0; i < parameters.size(); ++i)
+            newText += (i == 0 ? "" : ", ") + parameters[i];
+        newText += ")";
+    }
+    else
+    {
+        title = "Put each parameter on its own line";
+        std::string baseIndent = getLineIndentation(textDocument, argLocation.begin.line);
+        std::string parameterIndent = baseIndent + detectIndentUnit(textDocument);
+
+        newText = "(\n";
+        for (size_t i = 0; i < parameters.size(); ++i)
+            newText += parameterIndent + parameters[i] + (i + 1 == parameters.size() ? "\n" : ",\n");
+        newText += baseIndent + ")";
+    }
+
+    lsp::CodeAction action;
+    action.title = title;
+    action.kind = lsp::CodeActionKind::RefactorRewrite;
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::vector{lsp::TextEdit{range, newText}});
+    action.edit = workspaceEdit;
+
+    result.push_back(action);
+}
+
+// True when `position` sits inside the body of some function within `classStat` -- a method body, or
+// a function expression used as a field's default value. Statements live there, so refactorings that
+// extract statements still make sense; everywhere else in a class they don't.
+struct IsInsideClassFunctionBody : Luau::AstVisitor
+{
+    Luau::Position targetPosition;
+    bool result = false;
+
+    explicit IsInsideClassFunctionBody(const Luau::Position& position)
+        : targetPosition(position)
+    {
+    }
+
+    bool visit(Luau::AstExprFunction* node) override
+    {
+        if (node->body && node->body->location.containsClosed(targetPosition))
+            result = true;
+        return true;
+    }
+};
+
+bool isInsideClassFunctionBody(Luau::AstStatClass* classStat, const Luau::Position& position)
+{
+    IsInsideClassFunctionBody visitor(position);
+    classStat->visit(&visitor);
+    return visitor.result;
+}
+
+// Luwu Classes (rfcs/classes.md): access specifiers are all-or-nothing across a class. Either every
+// member (and primary constructor field parameter) says `public`/`private`, or none of them do and
+// the class is entirely public. This describes where a class sits between those two states, so we
+// can offer to move it to whichever one it isn't in.
+struct ClassAccessSpecifiers
+{
+    // Where a `public ` qualifier would be inserted, for each member/parameter that has none
+    std::vector<Luau::Position> unqualified;
+    // The span of each explicit `public ` qualifier, from the keyword up to what it qualifies
+    std::vector<Luau::Location> explicitPublic;
+    // Any `private` member makes both directions meaningless: the specifiers can't be dropped, and
+    // the class already has to qualify everything
+    bool hasPrivateMember = false;
+};
+
+// The position a member's qualifier sits in front of: the `const` modifier when there is one,
+// otherwise the field name or the `function` keyword.
+Luau::Position classMemberQualifierPosition(const Luau::AstClassMember& member)
+{
+    if (const auto* prop = member.get_if<Luau::AstClassProperty>())
+        return prop->constLocation ? prop->constLocation->begin : prop->nameLocation.begin;
+
+    return member.get_if<Luau::AstClassMethod>()->keywordLocation.begin;
+}
+
+ClassAccessSpecifiers computeClassAccessSpecifiers(Luau::AstStatClass* classStat)
+{
+    ClassAccessSpecifiers specifiers;
+
+    auto record = [&](const std::optional<Luau::Location>& qualifierLocation, Luau::AstClassMemberVisibility visibility, Luau::Position start)
+    {
+        if (!qualifierLocation)
+        {
+            specifiers.unqualified.push_back(start);
+            return;
+        }
+
+        if (visibility == Luau::AstClassMemberVisibility::Private)
+            specifiers.hasPrivateMember = true;
+        else
+            specifiers.explicitPublic.push_back(Luau::Location{qualifierLocation->begin, start});
+    };
+
+    std::unordered_set<std::string> membersInBody;
 
     for (const auto& member : classStat->members)
     {
-        std::optional<Luau::Position> insertAt;
+        const Luau::Position start = classMemberQualifierPosition(member);
 
         if (const auto* prop = member.get_if<Luau::AstClassProperty>())
         {
-            if (!prop->qualifierLocation.has_value())
-                insertAt = prop->nameLocation.begin;
+            membersInBody.insert(prop->name.value);
+            record(prop->qualifierLocation, prop->visibility, start);
         }
         else if (const auto* method = member.get_if<Luau::AstClassMethod>())
         {
-            if (!method->qualifierLocation.has_value())
-                insertAt = method->keywordLocation.begin;
+            record(method->qualifierLocation, method->visibility, start);
         }
+    }
 
-        if (!insertAt)
-            continue;
+    // A primary constructor parameter declares a field too, so it carries its own specifier -- unless
+    // the class body restates that field, in which case the body member is the one that qualifies it.
+    // The constructor's own qualifier (`class Account private (...)`) isn't a member specifier.
+    if (const auto* primaryConstructor = classStat->primaryConstructor)
+    {
+        for (size_t i = 0; i < primaryConstructor->args.size; ++i)
+        {
+            const Luau::AstLocal* arg = primaryConstructor->args.data[i];
+            if (membersInBody.find(arg->name.value) != membersInBody.end())
+                continue;
 
-        lsp::Position pos = textDocument.convertPosition(*insertAt);
+            const auto& qualifiers = primaryConstructor->argsQualifiers.data[i];
+            const Luau::Position start = qualifiers.constLocation ? qualifiers.constLocation->begin : arg->location.begin;
+            record(qualifiers.qualifierLocation, qualifiers.visibility, start);
+        }
+    }
+
+    return specifiers;
+}
+
+// "Make specifiers explicit": write `public` in front of everything that doesn't say anything yet.
+std::vector<lsp::TextEdit> makeAccessSpecifiersExplicitEdits(const ClassAccessSpecifiers& specifiers, const TextDocument& textDocument)
+{
+    std::vector<lsp::TextEdit> edits;
+    edits.reserve(specifiers.unqualified.size());
+
+    for (const auto& position : specifiers.unqualified)
+    {
+        lsp::Position pos = textDocument.convertPosition(position);
         edits.push_back(lsp::TextEdit{{pos, pos}, "public "});
     }
 
+    return edits;
+}
+
+// "Make specifiers implicit": delete every explicit `public`, leaving the terse all-public form.
+std::vector<lsp::TextEdit> makeAccessSpecifiersImplicitEdits(const ClassAccessSpecifiers& specifiers, const TextDocument& textDocument)
+{
+    std::vector<lsp::TextEdit> edits;
+    edits.reserve(specifiers.explicitPublic.size());
+
+    for (const auto& location : specifiers.explicitPublic)
+        edits.push_back(lsp::TextEdit{textDocument.convertLocation(location), ""});
+
+    return edits;
+}
+
+void addClassAccessSpecifierAction(const lsp::DocumentUri& uri, std::string title, lsp::CodeActionKind kind, std::vector<lsp::TextEdit> edits,
+    const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
+{
     if (edits.empty())
         return;
 
     lsp::CodeAction action;
-    action.title = "Add 'public' to all implicitly public members";
-    action.kind = lsp::CodeActionKind::QuickFix;
-    action.isPreferred = true;
+    action.title = std::move(title);
+    action.kind = std::move(kind);
+    action.isPreferred = kind == lsp::CodeActionKind::QuickFix;
 
     if (diagnostic)
         action.diagnostics.push_back(*diagnostic);
 
     lsp::WorkspaceEdit workspaceEdit;
-    workspaceEdit.changes.emplace(uri, edits);
+    workspaceEdit.changes.emplace(uri, std::move(edits));
     action.edit = workspaceEdit;
 
     result.push_back(action);
 }
 
-// Returns the leading whitespace of the given source line, used to match the
-// indentation style of the surrounding class body when synthesizing new members.
-std::string getLineIndent(const TextDocument& textDocument, size_t line)
+// The parser reports the all-or-nothing rule once per offending member, with a different message
+// depending on how the class got there (a `private` member, a qualified constructor parameter, or
+// just a mix of explicit and implicit `public`). They all share this phrasing, and they all have the
+// same two possible fixes.
+bool isClassAccessSpecifierSyntaxError(const std::string& message)
 {
-    if (line >= textDocument.lineCount())
-        return "    ";
-
-    std::string lineText = textDocument.getLine(line);
-    size_t i = 0;
-    while (i < lineText.size() && (lineText[i] == ' ' || lineText[i] == '\t'))
-        ++i;
-    return lineText.substr(0, i);
+    return message.find("'public' or 'private'") != std::string::npos;
 }
 
-// The source line a class property's declaration ends on, used to find where to
-// splice in a synthesized `__init` right after the last property.
-size_t classPropertyEndLine(const Luau::AstClassProperty& prop)
+void generateClassAccessSpecifierFix(const lsp::DocumentUri& uri, Luau::AstStatClass* classStat, const TextDocument& textDocument,
+    const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
 {
-    if (prop.defaultValue)
-        return prop.defaultValue->location.end.line;
-    if (prop.ty)
-        return prop.ty->location.end.line;
-    return prop.nameLocation.end.line;
+    auto specifiers = computeClassAccessSpecifiers(classStat);
+
+    addClassAccessSpecifierAction(uri, "Add 'public' to all implicitly public members", lsp::CodeActionKind::QuickFix,
+        makeAccessSpecifiersExplicitEdits(specifiers, textDocument), diagnostic, result);
+
+    // Dropping the specifiers only resolves the ambiguity when nothing is `private`
+    if (!specifiers.hasPrivateMember)
+        addClassAccessSpecifierAction(uri, "Remove 'public' from all members", lsp::CodeActionKind::QuickFix,
+            makeAccessSpecifiersImplicitEdits(specifiers, textDocument), diagnostic, result);
 }
 
-void generateClassInitCodeAction(const lsp::DocumentUri& uri, Luau::AstStatClass* classStat, const TextDocument& textDocument,
-    std::vector<lsp::CodeAction>& result)
+// Offered anywhere inside a class, with or without a syntax error: flip the class between writing
+// `public` on everything and writing it nowhere. A class with a `private` member has neither form
+// available to it, so it gets nothing.
+void generateClassAccessSpecifierToggle(
+    const lsp::DocumentUri& uri, Luau::AstStatClass* classStat, const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
 {
-    auto suggestion = types::computeClassInitSuggestion(classStat, textDocument);
-    if (!suggestion)
-        return; // __init already defined, nothing to suggest
+    auto specifiers = computeClassAccessSpecifiers(classStat);
+    if (specifiers.hasPrivateMember)
+        return;
 
-    const Luau::AstClassProperty* lastProperty = nullptr;
-    const Luau::AstClassMethod* firstMethod = nullptr;
+    // A class that is half-qualified is a syntax error, and the quick fixes for it already offer both
+    // directions attached to the diagnostic; don't offer them a second time here.
+    if (!specifiers.unqualified.empty() && !specifiers.explicitPublic.empty())
+        return;
 
-    for (const auto& member : classStat->members)
-    {
-        if (const auto* prop = member.get_if<Luau::AstClassProperty>())
-            lastProperty = prop;
-        else if (const auto* method = member.get_if<Luau::AstClassMethod>())
-        {
-            if (!firstMethod)
-                firstMethod = method;
-        }
-    }
+    addClassAccessSpecifierAction(uri, "Make access specifiers explicit ('public' on all members)", lsp::CodeActionKind::RefactorRewrite,
+        makeAccessSpecifiersExplicitEdits(specifiers, textDocument), std::nullopt, result);
 
-    std::string classIndent = getLineIndent(textDocument, classStat->location.begin.line);
-    std::string memberIndent = classIndent + "    ";
-
-    std::string paramList = "self";
-    std::string body;
-
-    for (const auto& param : suggestion->params)
-    {
-        paramList += ", " + param.name;
-        if (!param.type.empty())
-        {
-            paramList += ": " + param.type;
-            if (param.hasDefault && param.type.back() != '?')
-                paramList += "?";
-        }
-
-        if (param.hasDefault)
-        {
-            body += memberIndent + "    if " + param.name + " then\n";
-            body += memberIndent + "        self." + param.name + " = " + param.name + "\n";
-            body += memberIndent + "    end\n";
-        }
-        else
-        {
-            body += memberIndent + "    self." + param.name + " = " + param.name + "\n";
-        }
-    }
-
-    std::string block = memberIndent + (suggestion->requiresPublicQualifier ? "public function __init(" : "function __init(") + paramList + ")\n" +
-                         body + memberIndent + "end\n";
-
-    lsp::Position insertPos;
-    std::string text;
-
-    if (firstMethod)
-    {
-        // Splice __init in right before the first existing method
-        insertPos = {firstMethod->keywordLocation.begin.line, 0};
-        text = "\n" + block + "\n";
-    }
-    else if (lastProperty)
-    {
-        // Splice __init in right after the last property
-        insertPos = {static_cast<unsigned int>(classPropertyEndLine(*lastProperty)) + 1, 0};
-        text = "\n" + block;
-    }
-    else
-    {
-        // Empty class body: insert right after the `class Name` header line
-        insertPos = {classStat->location.begin.line + 1, 0};
-        text = block;
-    }
-
-    lsp::CodeAction action;
-    action.title = "Generate __init from class properties";
-    action.kind = lsp::CodeActionKind::RefactorRewrite;
-    action.isPreferred = true;
-
-    lsp::TextEdit edit{{insertPos, insertPos}, text};
-
-    lsp::WorkspaceEdit workspaceEdit;
-    workspaceEdit.changes.emplace(uri, std::vector{edit});
-    action.edit = workspaceEdit;
-
-    result.push_back(action);
+    addClassAccessSpecifierAction(uri, "Make access specifiers implicit (remove 'public' from all members)",
+        lsp::CodeActionKind::RefactorRewrite, makeAccessSpecifiersImplicitEdits(specifiers, textDocument), std::nullopt, result);
 }
 
 // Find a matching diagnostic from the client-provided diagnostics by location
@@ -497,6 +694,8 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             Luau::NotNull(this),
         };
 
+        std::unordered_set<Luau::AstStatClass*> fixedAccessSpecifiersForClasses;
+
         for (const auto& error : cr.errors)
         {
             if (!requestRange.overlaps(error.location))
@@ -534,10 +733,12 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             }
             else if (const auto* syntaxError = Luau::get_if<Luau::SyntaxError>(&error.data))
             {
-                if (syntaxError->message.find("Class contains a 'private' member") != std::string::npos)
+                if (isClassAccessSpecifierSyntaxError(syntaxError->message))
                 {
-                    if (auto* classStat = types::findClassStatContainingPosition(sourceModule->root, error.location.begin))
-                        generateClassMemberPublicFix(params.textDocument.uri, classStat, *textDocument, diagnostic, result);
+                    // The same class is reported once per offending member; only fix it once
+                    if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, error.location.begin);
+                        classStat && fixedAccessSpecifiersForClasses.insert(classStat).second)
+                        generateClassAccessSpecifierFix(params.textDocument.uri, classStat, *textDocument, diagnostic, result);
                 }
             }
         }
@@ -633,16 +834,25 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         }
     }
 
-    // Refactoring actions
+    // Refactoring actions. A class body holds member declarations rather than statements, so
+    // extracting there produces nothing useful and hoists code out of the class; suppress it
+    // everywhere in a class except inside a function body, where statements do live.
     if (params.context.wants(lsp::CodeActionKind::RefactorExtract) || params.context.wants(lsp::CodeActionKind::RefactorInline))
     {
-        computeRefactorings(params, *sourceModule, *textDocument, requestRange, result);
+        auto* enclosingClass = types::findEnclosingClassStat(sourceModule->root, requestRange.begin);
+        if (!enclosingClass || isInsideClassFunctionBody(enclosingClass, requestRange.begin))
+            computeRefactorings(params, *sourceModule, *textDocument, requestRange, result);
     }
 
     if (params.context.wants(lsp::CodeActionKind::RefactorRewrite))
     {
-        if (auto* classStat = types::findClassStatContainingPosition(sourceModule->root, requestRange.begin))
-            generateClassInitCodeAction(params.textDocument.uri, classStat, *textDocument, result);
+        FindParameterListAtPosition parameterListFinder(requestRange.begin);
+        sourceModule->root->visit(&parameterListFinder);
+        if (parameterListFinder.result)
+            generateParameterListWrapAction(params.textDocument.uri, *parameterListFinder.result, *textDocument, result);
+
+        if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, requestRange.begin))
+            generateClassAccessSpecifierToggle(params.textDocument.uri, classStat, *textDocument, result);
     }
 
     platform->handleCodeAction(params, result);

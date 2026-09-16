@@ -246,6 +246,30 @@ end
 
 const cpus = thread.parallelism()
 
+--[[
+    The linker writes the executable in place, so relinking a binary an editor is currently running
+    replaces the pages under the running process and takes it down with SIGBUS -- messily, since
+    the language server dying mid-request can take the editor with it.
+
+    Unlinking first is what makes a rebuild safe: the running process keeps the old inode (and keeps
+    working until it's restarted), while the linker writes a brand new file at the same path.
+]]
+const function unlink_running_binaries()
+    const binaries = {
+        ["Luwu.LanguageServer.CLI"] = fs.path.join(build_dir_path, "luwu-lsp"),
+        ["Luwu.LanguageServer.Test"] = fs.path.join(build_dir_path, "Luwu.LanguageServer.Test"),
+    }
+
+    for _, target in targets do
+        const binary_path = binaries[target]
+        if binary_path and fs.path.exists(binary_path) then
+            fs.file.try_remove(binary_path)
+        end
+    end
+end
+
+unlink_running_binaries()
+
 for _, target in targets do
     const spawned = process.spawn {
         program = "cmake",

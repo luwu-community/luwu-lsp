@@ -63,6 +63,10 @@ using NameOrExpr = std::variant<std::string, Luau::AstExpr*>;
 
 namespace
 {
+// How wide a printed type may be before it's broken across lines -- a hover box is narrower than an
+// editor, and a line past this is read by scrolling sideways or not at all
+static constexpr size_t kMaxLineWidth = 80;
+
 // Finds the byte range of the first top-level "(...)" span in `s` (e.g. the parameter list of
 // "function foo(a: number, b: string): boolean"), tracking paren depth so nested parens (in
 // argument types) don't confuse the match. Returns [openParenIndex, onePastCloseParenIndex).
@@ -119,7 +123,6 @@ std::vector<std::string> splitTopLevelParams(const std::string& s)
 // easily as many short ones.
 std::string formatLongParamList(const std::string& functionString, const std::string& baseIndent)
 {
-    static constexpr size_t kMaxLineWidth = 100;
 
     if (baseIndent.size() + functionString.size() <= kMaxLineWidth)
         return functionString;
@@ -136,15 +139,222 @@ std::string formatLongParamList(const std::string& functionString, const std::st
     auto params = splitTopLevelParams(inner);
 
     std::string result = functionString.substr(0, openParen + 1);
-    for (auto param : params)
+    for (size_t i = 0; i < params.size(); ++i)
     {
+        std::string param = params[i];
         trim(param);
-        result += "\n" + baseIndent + "    " + param + ",";
+        result += "\n" + baseIndent + "    " + param + (i + 1 == params.size() ? "" : ",");
     }
     result += "\n" + baseIndent + functionString.substr(closeParenEnd - 1);
     return result;
 }
+// Luau prints an array or table type tight against its braces (`{string}`), which is denser than
+// how the same type is written by hand; give the braces breathing room. String singletons are
+// stepped over so a `"{"` inside one is left alone, and `{}` stays as it is.
+std::string spaceOutBraces(const std::string& line)
+{
+    std::string result;
+    char stringDelimiter = '\0';
+
+    for (size_t i = 0; i < line.size(); ++i)
+    {
+        char c = line[i];
+
+        if (stringDelimiter != '\0')
+        {
+            result += c;
+            if (c == '\\' && i + 1 < line.size())
+                result += line[++i];
+            else if (c == stringDelimiter)
+                stringDelimiter = '\0';
+            continue;
+        }
+
+        if (c == '"' || c == '\'')
+        {
+            stringDelimiter = c;
+            result += c;
+        }
+        else if (c == '{' && i + 1 < line.size() && line[i + 1] != '}' && line[i + 1] != ' ')
+        {
+            result += "{ ";
+        }
+        else if (c == '}' && !result.empty() && result.back() != '{' && result.back() != ' ')
+        {
+            result += " }";
+        }
+        else
+        {
+            result += c;
+        }
+    }
+
+    return result;
+}
+
+// Finds the first `open`..`close` group in `s` that holds more than one top-level element -- the
+// one worth breaking across lines. A group holding a single element (an array of one table type,
+// say) is skipped in favour of looking inside it, so `{{ a: X, b: Y }}` breaks on the struct rather
+// than on the array wrapping it.
+std::optional<std::pair<size_t, size_t>> findWrappableGroup(const std::string& s, char open, char close, size_t from = 0)
+{
+    for (size_t i = from; i < s.size(); ++i)
+    {
+        if (s[i] != open)
+            continue;
+
+        int depth = 0;
+        for (size_t j = i; j < s.size(); ++j)
+        {
+            if (s[j] == open)
+                depth++;
+            else if (s[j] == close)
+            {
+                depth--;
+                if (depth != 0)
+                    continue;
+
+                std::string inner = s.substr(i + 1, j - i - 1);
+                if (splitTopLevelParams(inner).size() > 1)
+                    return std::make_pair(i, j + 1);
+
+                // Nothing to break here; the interesting group may still be nested inside
+                if (auto nested = findWrappableGroup(s, open, close, i + 1); nested && nested->second <= j + 1)
+                    return nested;
+
+                i = j;
+                break;
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+// Breaks one over-long line at `group`, putting each of the group's elements on its own line and
+// bringing the closing bracket back to the line's own indentation.
+std::string breakGroupAcrossLines(const std::string& line, const std::string& indent, std::pair<size_t, size_t> group)
+{
+    auto [start, end] = group;
+
+    auto elements = splitTopLevelParams(line.substr(start + 1, end - start - 2));
+
+    std::string result = line.substr(0, start + 1);
+    for (size_t i = 0; i < elements.size(); ++i)
+    {
+        std::string element = elements[i];
+        trim(element);
+        result += "\n" + indent + "    " + element + (i + 1 == elements.size() ? "" : ",");
+    }
+    result += "\n" + indent + line.substr(end - 1);
+    return result;
+}
 } // namespace
+
+namespace
+{
+// One line of a printed type, broken up if it runs long: a parameter list (a function signature, a
+// class's primary constructor) first, otherwise a table type -- an array of struct-like tables is
+// unreadable on one line. Runs over what it produces, so a long entry inside a broken-up group gets
+// the same treatment.
+std::string wrapLongLine(const std::string& line, size_t depth = 0)
+{
+    static constexpr size_t kMaxWrapDepth = 3;
+
+    if (depth >= kMaxWrapDepth)
+        return line;
+
+    // An array of struct-like tables is unreadable on one line however short it happens to be, so
+    // it breaks up on shape rather than on width
+    const bool arrayOfStructs = [&]
+    {
+        auto array = findWrappableGroup(line, '{', '}');
+        return array && line.compare(array->first, 2, "{ ") == 0 && line[array->first + 2] == '{';
+    }();
+
+    if (line.size() <= kMaxLineWidth && !arrayOfStructs)
+        return line;
+
+    size_t indentLength = 0;
+    while (indentLength < line.size() && (line[indentLength] == ' ' || line[indentLength] == '\t'))
+        ++indentLength;
+    std::string indent = line.substr(0, indentLength);
+
+    std::string wrapped;
+    if (auto parens = findWrappableGroup(line, '(', ')'))
+        wrapped = breakGroupAcrossLines(line, indent, *parens);
+    else if (auto table = findWrappableGroup(line, '{', '}'))
+        wrapped = breakGroupAcrossLines(line, indent, *table);
+    else
+        return line;
+
+    std::string result;
+    size_t lineStart = 0;
+    while (lineStart <= wrapped.size())
+    {
+        size_t lineEnd = wrapped.find('\n', lineStart);
+        std::string piece = wrapped.substr(lineStart, lineEnd == std::string::npos ? std::string::npos : lineEnd - lineStart);
+
+        result += wrapLongLine(piece, depth + 1);
+
+        if (lineEnd == std::string::npos)
+            break;
+
+        result += '\n';
+        lineStart = lineEnd + 1;
+    }
+
+    return result;
+}
+} // namespace
+
+std::string formatLongFunctionTypeLines(const std::string& typeString)
+{
+    std::string result;
+    size_t lineStart = 0;
+    // The indentation of the last line that began something, so a union broken across lines can be
+    // laid out underneath it
+    std::string enclosingIndent;
+
+    while (lineStart <= typeString.size())
+    {
+        size_t lineEnd = typeString.find('\n', lineStart);
+        std::string line = typeString.substr(lineStart, lineEnd == std::string::npos ? std::string::npos : lineEnd - lineStart);
+
+
+        // Luau prints a long union or intersection one option per line, but flush against the left
+        // margin and with a trailing space left behind on the line that introduced it -- which reads
+        // as broken text (and leaves editors unable to highlight it). Lay the options out under the
+        // line that introduced them instead.
+        while (!line.empty() && (line.back() == ' ' || line.back() == '\t'))
+            line.pop_back();
+
+        size_t indentLength = 0;
+        while (indentLength < line.size() && (line[indentLength] == ' ' || line[indentLength] == '\t'))
+            ++indentLength;
+
+        const bool isContinuation = indentLength < line.size() && (line[indentLength] == '|' || line[indentLength] == '&');
+        if (isContinuation && indentLength == 0)
+        {
+            line = enclosingIndent + "    " + line;
+            indentLength = enclosingIndent.size() + 4;
+        }
+        else if (!isContinuation)
+        {
+            enclosingIndent = line.substr(0, indentLength);
+        }
+
+        result += wrapLongLine(spaceOutBraces(line));
+
+        if (lineEnd == std::string::npos)
+            break;
+
+        result += '\n';
+        lineStart = lineEnd + 1;
+    }
+
+    return result;
+}
 
 // Converts an FTV and function call to a nice string
 // In the format "function NAME(args): ret"
@@ -869,6 +1079,13 @@ std::vector<Luau::Location> types::findClassNameReferences(const Luau::SourceMod
 {
     std::vector<Luau::Location> result = findSymbolReferences(source, Luau::Symbol(classStat->name));
 
+    // Class names aren't pushed as locals (that's what lets classes be hoisted), so every value usage
+    // (`Dog(...)`, `Dog.staticFn`, passing `Dog` around) parses as a global. Classes can't be shadowed
+    // by another class, and a local of the same name would parse as `AstExprLocal`, so any global with
+    // the class's name refers to the class.
+    auto valueReferences = findSymbolReferences(source, Luau::Symbol(classStat->name->name));
+    result.insert(result.end(), valueReferences.begin(), valueReferences.end());
+
     auto typeReferences = findTypeReferences(source, classStat->name->name.value, std::nullopt);
     result.insert(result.end(), typeReferences.begin(), typeReferences.end());
 
@@ -908,6 +1125,37 @@ std::optional<Luau::Location> externTypeDefinitionLocation(Luau::TypeId ty)
     return std::nullopt;
 }
 } // namespace
+
+namespace types
+{
+namespace
+{
+struct FindEnclosingClassStat : Luau::AstVisitor
+{
+    Luau::Position targetPosition;
+    Luau::AstStatClass* result = nullptr;
+
+    explicit FindEnclosingClassStat(const Luau::Position& position)
+        : targetPosition(position)
+    {
+    }
+
+    bool visit(Luau::AstStatClass* node) override
+    {
+        if (node->location.containsClosed(targetPosition))
+            result = node;
+        return true;
+    }
+};
+} // namespace
+
+Luau::AstStatClass* findEnclosingClassStat(Luau::AstStatBlock* root, const Luau::Position& position)
+{
+    FindEnclosingClassStat finder(position);
+    root->visit(&finder);
+    return finder.result;
+}
+} // namespace types
 
 Luau::AstStatClass* types::findClassStatFromExternType(Luau::AstStatBlock* root, Luau::TypeId ty)
 {
@@ -1109,41 +1357,6 @@ std::optional<Luau::TypeId> findCallMetamethod(Luau::TypeId type)
 
 namespace types
 {
-std::optional<ClassInitSuggestion> computeClassInitSuggestion(
-    Luau::AstStatClass* classStat, const TextDocument& textDocument, std::optional<Luau::Position> beforePosition)
-{
-    ClassInitSuggestion suggestion;
-
-    for (const auto& member : classStat->members)
-    {
-        if (const auto* prop = member.get_if<Luau::AstClassProperty>())
-        {
-            if (prop->visibility == Luau::AstClassMemberVisibility::Private)
-                suggestion.requiresPublicQualifier = true;
-
-            if (beforePosition && !(prop->nameLocation.begin < *beforePosition))
-                continue;
-
-            ClassInitParam param;
-            param.name = prop->name.value;
-            if (prop->ty)
-                param.type = textDocument.getText(textDocument.convertLocation(prop->ty->location));
-            param.hasDefault = prop->defaultValue != nullptr;
-            suggestion.params.push_back(std::move(param));
-        }
-        else if (const auto* method = member.get_if<Luau::AstClassMethod>())
-        {
-            if (method->functionName == Luau::AstName("__init"))
-                return std::nullopt;
-
-            if (method->visibility == Luau::AstClassMemberVisibility::Private)
-                suggestion.requiresPublicQualifier = true;
-        }
-    }
-
-    return suggestion;
-}
-
 namespace
 {
 struct FindClassStatContainingPosition : Luau::AstVisitor
@@ -1162,9 +1375,8 @@ struct FindClassStatContainingPosition : Luau::AstVisitor
         {
             // Only consider the position "in" this class if it isn't actually nested inside one of
             // its existing methods (e.g. in the parameter list, in the body, or on a trailing blank
-            // line after the last statement but before that method's own `end`) -- typing
-            // `function _` as a local function, or just sitting inside an unrelated method, shouldn't
-            // suggest generating a class-level `__init`.
+            // line after the last statement but before that method's own `end`) -- sitting inside an
+            // unrelated method shouldn't count as being directly in the class body.
             //
             // We use the method's full location (signature through its own `end`), not just the
             // body's, so this also covers the parameter list and any trailing blank lines the body

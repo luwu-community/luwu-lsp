@@ -341,6 +341,15 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     }
   }
 
+  // Luau compatibility mode: turn off Luwu's own language features
+  if (
+    vscode.workspace
+      .getConfiguration("luau-lsp")
+      .get<boolean>("luauCompatibilityMode")
+  ) {
+    addArg("--luau-compat");
+  }
+
   // Handle FFlags
   const fflags: FFlags = {};
   const fflagsConfig = vscode.workspace.getConfiguration("luau-lsp.fflags");

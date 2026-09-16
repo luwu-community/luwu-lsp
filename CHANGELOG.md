@@ -8,12 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Reworked hovers: the type, then its documentation, then a `References` section linking every type it refers to (grouped by module, each module linking to its file), then the expanded aliases and class summaries in their own code block. A class, object, extern type, or one of their members also says what it belongs to and which file it comes from
+- Hovers now print long function types and multi-line unions readably, and no longer summarize a class twice
+- Added a "Put each parameter on its own line" / "Put parameters on one line" refactor action, offered with the cursor in any function, method, or class primary constructor parameter list. The wrapped form puts one parameter per line and aligns the closing `)` with the function, using the document's own indentation (tabs or spaces)
+- Added "Make access specifiers explicit/implicit" refactor actions, offered anywhere inside a class with no syntax error required, to add `public` to every member and primary constructor field parameter or remove it from all of them. Not offered for a class with a `private` member, which has to qualify everything
 - Added a `blockEndHints` inlay hint (enabled by default) that labels the `end` of long functions, loops, `if`/`elseif`/`else` chains, and classes (e.g. `end function foo`, `end for k, v in pairs(t)`) once a block spans at least `blockEndHintsMinLines` lines (default 35), similar to rust-analyzer's closing brace hints
+
+### Changed
+
+- Luwu's own language features are now enabled by default: every `Luwu`-prefixed FFlag, plus the `DebugLuauUserDefinedClasses`/`DebugLuauUserDefinedClassesRuntime` flags that gate classes. Pass `--luau-compat` (or set `luau-lsp.luauCompatibilityMode`) for Luau compatibility mode, which turns them all off
+- The new type solver (`LuauSolverV2`) is now enabled in every configuration, including Luau compatibility mode. `luau-lsp.fflags.enableNewSolver` now defaults to `true`. Both remain overridable via `--flag:LuauSolverV2=false` / `luau-lsp.fflags.override`
+- `platform.type` now defaults to `standard` instead of `roblox`; set it to `roblox` to enable Roblox support (sourcemaps, DataModel types, Roblox definitions)
+
+### Removed
+
+- Removed the "Generate `__init` from class properties" autocomplete suggestion and code action, as primary constructors (`class Cat(name: string)`) now cover this use case
 
 ### Fixed
 
+- Fixed the `local`/`const`/`public`/`private` rules in the bundled TextMate grammar ending at the first line break, leaving a type annotation continued across lines unhighlighted
+- Fixed the class access specifier quick fix never appearing: it matched an error message Luwu no longer emits. It now covers every form of the all-or-nothing rule (a `private` member, a qualified primary constructor parameter, or a mix of explicit and implicit `public`), fixes primary constructor parameters as well as class body members, and is offered once per class rather than once per offending member
+- "Extract to local variable"/"Extract to function" are no longer offered inside a class outside of a function body, where they produce nothing useful and hoist code out of the class
+- Fixed renaming a class not renaming its value usages (constructor calls like `Cat("tom")`, `Cat.staticFn`, passing `Cat` around), and renaming from a `: Cat` type annotation only renaming that one annotation
 - Fixed `@self` string-require aliases resolving from the filesystem instead of the sourcemap tree for non-DataModel roots ([#1511](https://github.com/JohnnyMorganz/luau-lsp/issues/1511))
-- Fixed the "Generate `__init` from class properties" autocomplete suggestion popping up inside unrelated method bodies, parameter lists, and after table constructors, instead of only directly in a class body
 - Fixed hovering over `vector` showing "extern type vector" instead of `vector`
 
 ## [1.69.0] - 2026-07-14

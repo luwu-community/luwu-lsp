@@ -4,7 +4,7 @@
 #include "LSP/KeywordHovers.hpp"
 
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuauBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
 
 TEST_SUITE_BEGIN("Hover");
 
@@ -804,7 +804,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_index_member_of_setmetata
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_const_class_property_shows_const")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -834,7 +834,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_
     // `class`) as AstStatClass::keywordLocation, so hovering the literal `class` keyword found no
     // match here and hovering `export` matched against text that isn't in keyword_hovers.json --
     // in both cases, nothing showed up.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -860,7 +860,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_class_name_shows_class_value_summary_with_constructor")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -896,7 +896,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_private_before_primary_constructor_sho
     // The `private` between a class's name and its primary constructor's parameter list qualifies
     // the constructor, not the class or a field, so it must not fall back to the plain `private`
     // docs -- those describe something else entirely at this position.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -921,7 +921,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_private_before_primary_constructor_sho
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_public_before_primary_constructor_shows_public_constructor_docs")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -942,7 +942,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_public_before_primary_constructor_show
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_public_primary_constructor_parameter_shows_param_docs")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -967,7 +967,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_public_primary_constructor_parameter_s
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_private_primary_constructor_parameter_shows_param_docs")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -992,7 +992,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_private_primary_constructor_parameter_
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_const_primary_constructor_parameter_shows_param_const_docs")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1019,7 +1019,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_class_name_with_primary_constructor_sh
     // A primary constructor is a terser spelling of `function __init`, so the summary should show
     // the same positional argument list -- not the `Name{ field = value }` table-literal shape a
     // class with no constructor at all gets.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1043,7 +1043,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_object_of_class_with_primary_construct
 {
     // The fields of this class are declared entirely by its primary constructor's parameters --
     // they're not AstClassMembers at all, so the summary has to pick them up from the constructor.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1076,7 +1076,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_object_of_class_with_primary_construct
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_primary_constructor_parameter_name_shows_the_field_it_declares")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1101,7 +1101,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_primary_constructor_parameter_name_sho
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_private_const_primary_constructor_parameter_name_shows_qualifiers")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1127,7 +1127,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_unannotated_primary_constructor_parame
 {
     // No annotation on the parameter, so the field's type has to be read back off the class's own
     // instance type rather than off an AstType node that doesn't exist.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1153,7 +1153,7 @@ TEST_CASE_FIXTURE(Fixture, "class_summary_lists_all_fields_before_any_function")
     // Source order puts a static function first and interleaves a method between the fields; the
     // summary should still read fields-then-functions, with the static function ahead of the
     // instance methods.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1205,7 +1205,7 @@ TEST_CASE_FIXTURE(Fixture, "class_value_summary_shows_private_members_but_object
     // The class value is hovered from inside the scope its privates are reachable in, so hiding
     // them there makes the summary lie about the class's shape; an object is typically held from
     // outside that scope, where they aren't reachable at all.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, classMarker] = sourceWithMarker(R"(
@@ -1269,7 +1269,7 @@ TEST_CASE_FIXTURE(Fixture, "class_summary_marks_a_private_primary_constructor_in
 {
     // Without the `private`, the header reads as an invitation to call `ParticleSystem(...)` --
     // which would fail at runtime -- and makes the `new` factory below it look redundant.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1303,7 +1303,7 @@ TEST_CASE_FIXTURE(Fixture, "generic_class_value_summary_shows_its_generic_parame
     // The class value is the factory, not an instance, so it has nothing instantiated to print and
     // used to render as a bare `class List` -- leaving the `{T}` in its own constructor signature
     // and field lines referring to a parameter the header never introduced.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1331,7 +1331,7 @@ TEST_CASE_FIXTURE(Fixture, "primary_constructor_parameter_hover_uses_visibility_
 {
     // The parameter list is bare here, so the parameter's own qualifiers say "public" by default --
     // but the class body restates the field as private, and that restatement is the declaration.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1355,7 +1355,7 @@ TEST_CASE_FIXTURE(Fixture, "primary_constructor_parameter_hover_prefers_its_own_
 {
     // The other direction: an explicit qualifier on the parameter is the declaration, and a
     // restatement in the body may only agree with it (the parser rejects a contradiction).
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1383,7 +1383,7 @@ TEST_CASE_FIXTURE(Fixture, "class_summary_works_for_a_class_required_from_anothe
     // The summary is built from the class's AST, which lives in the module that declared it -- this
     // used to bail out whenever that wasn't the module being hovered in, so a class reached through
     // a require (the ordinary way to use one) fell back to printing just its name.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     newDocument("list.luau", R"(
@@ -1424,7 +1424,7 @@ TEST_CASE_FIXTURE(Fixture, "hover_includes_summary_of_class_referenced_by_the_ty
     // A class referenced inside a hovered type (here, one side of a union) prints as a bare name --
     // the summary below the type is the only place its shape shows up, same as a `where` clause
     // does for a type alias.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1471,7 +1471,7 @@ TEST_CASE_FIXTURE(Fixture, "hover_includes_summary_of_extern_type_referenced_by_
 
 TEST_CASE_FIXTURE(Fixture, "hover_truncates_summaries_of_referenced_classes_more_than_the_hovered_class")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuauBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(

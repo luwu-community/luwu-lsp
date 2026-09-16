@@ -50,7 +50,9 @@ const function regen()
     end
     
     -- print(keywords)
-    json.writefile("./keyword_hovers.json", keywords)
+    -- sorted: Luau table iteration order isn't stable between runs, so without this every
+    -- regeneration reshuffles the keys and shows up as a diff of the whole file
+    json.writefile("./keyword_hovers.json", keywords, { sorted = true })
 end
 
 if script:path() == script.entry_path then

@@ -50,6 +50,24 @@ const thing_to_add =
 Unlike `if` statements, `if` expressions must contain only one expression in each of its branches, evaluate to at least one value, require an `else` branch, and do not terminate with `end`.
 <!-- /keyword -->
 
+<!-- keyword: if_expr -->
+Choose between two expressions based on a condition; `if` *expressions* evaluate to a value rather than branching control flow.
+
+```luau
+const name = if typeof(value) == "string" then value else tostring(value)
+
+const level =
+    if score > 100 then
+        "Expert"
+    elseif score > 50 then
+        "Intermediate"
+    else
+        "Beginner"
+```
+
+Unlike `if` statements, `if` expressions contain exactly one expression per branch, evaluate to at least one value, require an `else` branch, and do not terminate with `end`.
+<!-- /keyword -->
+
 <!-- keyword: else -->
 Add a final, catch-all branch to an `if` statement or expression.
 <!-- /keyword -->

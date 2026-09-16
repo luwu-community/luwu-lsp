@@ -136,6 +136,17 @@ int startLanguageServer(const argparse::ArgumentParser& program)
     client.documentationFiles = documentationFiles;
     parseDocumentation(documentationFiles, client.documentation, &client);
 
+    // Luwu's own documentation goes in last so it wins over the entries the client supplied: those
+    // come from upstream's database, where `require` is documented as taking a Roblox Instance and
+    // Luwu's own libraries aren't documented at all.
+#ifdef LSP_LUWU_DOCS_PATH
+    if (luwuFeaturesEnabled())
+    {
+        std::vector<std::string> luwuDocumentationFiles{LSP_LUWU_DOCS_PATH};
+        parseDocumentation(luwuDocumentationFiles, client.documentation, &client);
+    }
+#endif
+
     // Parse LSP Settings
     if (auto settingsPath = program.present<std::string>("--settings"))
     {
@@ -181,6 +192,8 @@ void processFFlags(const argparse::ArgumentParser& program)
         fastFlags.emplace(flagName, flagValue);
     }
 
+    applyLuwuFlags(program.get<bool>("--luau-compat"));
+
     if (enableAllFlags)
     {
         for (Luau::FValue<bool>* flag = Luau::FValue<bool>::list; flag; flag = flag->next)
@@ -211,6 +224,10 @@ int main(int argc, char** argv)
         .append()
         .metavar("KEY=VALUE");
     parent_parser.add_argument("--no-flags-enabled").help("do not enable all Luau FFlags by default").default_value(false).implicit_value(true);
+    parent_parser.add_argument("--luau-compat")
+        .help("Luau compatibility mode: disable Luwu's own language features (classes, default arguments, ...)")
+        .default_value(false)
+        .implicit_value(true);
     program.add_argument("--show-flags")
         .help("display all the currently available Luau FFlags and their values")
         .default_value(false)
@@ -323,6 +340,8 @@ int main(int argc, char** argv)
 
     if (program.is_used("--show-flags"))
     {
+        // Show the values the server actually starts with, i.e. with Luwu's features on
+        applyLuwuFlags(/* luauCompatibilityMode: */ false);
         displayFlags();
         return 0;
     }

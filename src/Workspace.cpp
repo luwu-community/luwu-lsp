@@ -535,6 +535,21 @@ void WorkspaceFolder::registerTypes(const std::vector<std::string>& disabledGlob
     auto& tagRegisterGlobals = FFlag::LuauSolverV2 ? frontend.globals : frontend.globalsForAutocomplete;
     Luau::attachTag(Luau::getGlobalBinding(tagRegisterGlobals, "require"), "Require");
 
+    // `require` is declared as `(target: any) -> any`, which describes requiring a Roblox Instance.
+    // Outside that platform a module is required by path, and `target: any` both reads as the wrong
+    // thing on hover and accepts anything at all.
+    if (client->getConfiguration(rootUri).platform.type != LSPPlatformConfig::Roblox)
+    {
+        for (auto* globals : {&frontend.globals, &frontend.globalsForAutocomplete})
+        {
+            if (auto* ftv = Luau::getMutable<Luau::FunctionType>(Luau::getGlobalBinding(*globals, "require")))
+            {
+                ftv->argTypes = globals->globalTypes.addTypePack({frontend.builtinTypes->stringType});
+                ftv->argNames = {Luau::FunctionArgument{"path", Luau::Location{}}};
+            }
+        }
+    }
+
     // Register LSPPlugin environment for plugin type checking
     client->sendTrace("workspace initialization: registering LSPPlugin environment");
     frontend.registerBuiltinDefinition(

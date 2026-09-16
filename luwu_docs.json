@@ -1,0 +1,132 @@
+{
+  "@luau/global/class": {
+    "documentation": "Reflection over Luwu classes and the objects built from them.",
+    "keys": {
+      "fields": "@luau/global/class.fields",
+      "isinstance": "@luau/global/class.isinstance",
+      "name": "@luau/global/class.name",
+      "of": "@luau/global/class.of"
+    }
+  },
+  "@luau/global/class.fields": {
+    "documentation": "Returns a table of the public instance fields of a class or object, and whether that table is complete.\n\nGiven an object, each field maps to that object's value for it; given a class, every field maps to <code>none</code>, since there is no instance to read values from. <code>private</code> fields are always skipped, and their absence is what makes the second return <code>false</code>.",
+    "params": [
+      {
+        "documentation": "@luau/global/class.fields/param/0",
+        "name": "o"
+      }
+    ],
+    "returns": [
+      "@luau/global/class.fields/return/0",
+      "@luau/global/class.fields/return/1"
+    ]
+  },
+  "@luau/global/class.fields/param/0": {
+    "documentation": "A class, or an object of one. Anything else raises an error."
+  },
+  "@luau/global/class.fields/return/0": {
+    "documentation": "The public instance fields, keyed by name."
+  },
+  "@luau/global/class.fields/return/1": {
+    "documentation": "<code>true</code> when every field of the class is present, <code>false</code> when one or more <code>private</code> fields were left out."
+  },
+  "@luau/global/class.isinstance": {
+    "documentation": "Returns <code>true</code> if <code>o</code> is an object of the class <code>c</code>.\n\nThis is exact class identity: an object built from a different class is never an instance of <code>c</code>, and a non-object value is never an instance of anything.",
+    "params": [
+      {
+        "documentation": "@luau/global/class.isinstance/param/0",
+        "name": "o"
+      },
+      {
+        "documentation": "@luau/global/class.isinstance/param/1",
+        "name": "c"
+      }
+    ],
+    "returns": [
+      "@luau/global/class.isinstance/return/0"
+    ]
+  },
+  "@luau/global/class.isinstance/param/0": {
+    "documentation": "The value to test. Any value is accepted; anything that isn't an object returns <code>false</code>."
+  },
+  "@luau/global/class.isinstance/param/1": {
+    "documentation": "The class to test against. Must be a class, not an object of one."
+  },
+  "@luau/global/class.isinstance/return/0": {
+    "documentation": "Whether <code>o</code> is an object of exactly the class <code>c</code>."
+  },
+  "@luau/global/class.name": {
+    "documentation": "Returns the name of a class, or of the class an object was built from.\n\nRaises an error when given anything that is neither a class nor an object.",
+    "params": [
+      {
+        "documentation": "@luau/global/class.name/param/0",
+        "name": "o"
+      }
+    ],
+    "returns": [
+      "@luau/global/class.name/return/0"
+    ]
+  },
+  "@luau/global/class.name/param/0": {
+    "documentation": "A class, or an object of one."
+  },
+  "@luau/global/class.name/return/0": {
+    "documentation": "The class's declared name."
+  },
+  "@luau/global/class.of": {
+    "documentation": "Returns the class an object was built from, or <code>nil</code> when <code>o</code> is not an object.",
+    "params": [
+      {
+        "documentation": "@luau/global/class.of/param/0",
+        "name": "o"
+      }
+    ],
+    "returns": [
+      "@luau/global/class.of/return/0"
+    ]
+  },
+  "@luau/global/class.of/param/0": {
+    "documentation": "The value to inspect. Any value is accepted."
+  },
+  "@luau/global/class.of/return/0": {
+    "documentation": "The object's class, or <code>nil</code> if <code>o</code> is not an object."
+  },
+  "@luau/global/require": {
+    "code_sample": "local sibling = require(\"./sibling\")\nlocal uncle = require(\"../uncle\")\nlocal fs = require(\"@std/fs\")",
+    "documentation": "Loads the module at `path` and returns what it returned, running it the first time it is required and reusing that result afterwards.\n\nA path is a string: `\"./sibling\"` and `\"../uncle\"` are relative to the requiring file, and an alias such as `\"@std/fs\"` resolves through the `aliases` of the nearest `.luaurc`.",
+    "params": [
+      {
+        "documentation": "@luau/global/require/param/0",
+        "name": "path"
+      }
+    ],
+    "returns": [
+      "@luau/global/require/return/0"
+    ]
+  },
+  "@luau/global/require/param/0": {
+    "documentation": "Path of the module to load, relative to this file (`./`, `../`) or through a `.luaurc` alias (`@name/...`)."
+  },
+  "@luau/global/require/return/0": {
+    "documentation": "Whatever the required module returned."
+  },
+  "@luau/global/typeof": {
+    "code_sample": "local result = pcall(risky)\nif typeof(result) == \"error\" then\n    -- result is narrowed to the `error` extern type here\n    print(tostring(result))\nend\n\nif typeof(value) == \"DateTime\" then\n    print(value:display())\nend",
+    "documentation": "Returns the name of `value`'s type as a string.\n\nOn primitives it matches `type`, so `\"nil\"`, `\"number\"`, `\"string\"`, `\"table\"` and the rest come back as you'd expect.\n\nUserdata is where it differs: an extern type reports its own name rather than `\"userdata\"`, so comparing against that name both tells you what you have and narrows the value to it.",
+    "params": [
+      {
+        "documentation": "@luau/global/typeof/param/0",
+        "name": "value"
+      }
+    ],
+    "returns": [
+      "@luau/global/typeof/return/0"
+    ]
+  },
+  "@luau/global/typeof/param/0": {
+    "documentation": "The value to inspect. Any value is accepted, including `nil`."
+  },
+  "@luau/global/typeof/return/0": {
+    "documentation": "The name of the value's type.\n\nIt comes from the `__type` metafield if one is set. Only userdata can set it, which in practice means the extern types a host environment hands you. Tables can't rename themselves this way, and classes and objects always report `\"class\"` and `\"object\"`."
+  }
+}

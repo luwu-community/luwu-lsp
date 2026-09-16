@@ -564,8 +564,12 @@ std::optional<std::string> WorkspaceFolder::getDocumentationForType(const Luau::
     {
         return printMoonwaveDocumentation(getComments(ftv->definition->definitionModuleName.value(), ftv->definition->definitionLocation));
     }
-    else if (auto ttv = Luau::get<Luau::TableType>(followedTy); ttv && !ttv->definitionModuleName.empty())
+    else if (auto ttv = Luau::get<Luau::TableType>(followedTy); ttv && !ttv->definitionModuleName.empty() && (ttv->name || ttv->syntheticName))
     {
+        // Only a *named* table type documents itself. An anonymous one (`{ string }` written as a
+        // function's return annotation, say) still records where it was written, and the comment
+        // above that spot belongs to whatever declaration it was written inside -- which is how a
+        // function's documentation used to end up on a local holding the result of calling it.
         return printMoonwaveDocumentation(getComments(ttv->definitionModuleName, ttv->definitionLocation));
     }
     else if (auto etv = Luau::get<Luau::ExternType>(followedTy); etv && !etv->definitionModuleName.empty() && etv->definitionLocation)

@@ -39,6 +39,17 @@ static Luau::AstStatClass* findClassStatByNameLocal(Luau::AstStatBlock* root, Lu
     return nullptr;
 }
 
+// Finds the class statement (always top-level) in `root` named `name`. Class names aren't pushed as
+// locals, so value usages of a class (`Dog(...)`, `Dog.staticFn`) parse as globals with its name.
+static Luau::AstStatClass* findClassStatByName(Luau::AstStatBlock* root, const Luau::AstName& name)
+{
+    for (Luau::AstStat* stat : root->body)
+        if (auto* classStat = stat->as<Luau::AstStatClass>())
+            if (classStat->name->name == name)
+                return classStat;
+    return nullptr;
+}
+
 std::vector<lsp::Location> getReferencesForRenaming(
     WorkspaceFolder* workspaceFolder, const lsp::RenameParams& params, const LSPCancellationToken& cancellationToken)
 {
@@ -79,12 +90,33 @@ std::vector<lsp::Location> getReferencesForRenaming(
         }
     }
 
-    if (auto binding = getBinding(workspaceFolder, moduleName, position); binding && isGlobalBinding(*binding))
-        throw JsonRpcException(lsp::ErrorCode::RequestFailed, "Cannot rename a global variable");
-
     // Find All References can return cross module references of a symbol
     // If this is a local symbol in a file, then just rename that instead
     auto exprOrLocal = findExprOrLocalAtPositionClosed(*sourceModule, position);
+
+    // Renaming a class from a value usage (`Dog(...)`, `Dog.staticFn`), which parses as a global.
+    if (auto expr = exprOrLocal.getExpr())
+    {
+        if (auto global = expr->as<Luau::AstExprGlobal>())
+        {
+            if (auto* classStat = findClassStatByName(sourceModule->root, global->name))
+                return toLspLocations(params.textDocument.uri, *textDocument, types::findClassNameReferences(*sourceModule, classStat));
+        }
+    }
+
+    // Renaming a class from a type annotation usage (`local x: Dog`).
+    if (auto ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position, /* includeTypes= */ true); !ancestry.empty())
+    {
+        if (auto reference = ancestry.back()->as<Luau::AstTypeReference>();
+            reference && !reference->prefix && reference->nameLocation.containsClosed(position))
+        {
+            if (auto* classStat = findClassStatByName(sourceModule->root, reference->name))
+                return toLspLocations(params.textDocument.uri, *textDocument, types::findClassNameReferences(*sourceModule, classStat));
+        }
+    }
+
+    if (auto binding = getBinding(workspaceFolder, moduleName, position); binding && isGlobalBinding(*binding))
+        throw JsonRpcException(lsp::ErrorCode::RequestFailed, "Cannot rename a global variable");
 
     Luau::Symbol symbol;
     if (exprOrLocal.getLocal())

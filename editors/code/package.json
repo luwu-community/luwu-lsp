@@ -239,7 +239,7 @@
             "roblox"
           ],
           "scope": "window",
-          "default": "roblox"
+          "default": "standard"
         },
         "luau-lsp.sourcemap.enabled": {
           "markdownDescription": "Whether Rojo sourcemap parsing is enabled",
@@ -303,11 +303,14 @@
         "luau-lsp.fflags.enableNewSolver": {
           "markdownDescription": "Enables the flags required for Luau's new type solver. These flags can be overriden by `#luau-lsp.fflags.override#`",
           "type": "boolean",
+          "default": true,
+          "scope": "window"
+        },
+        "luau-lsp.luauCompatibilityMode": {
+          "markdownDescription": "Luau compatibility mode: disable Luwu's own language features (classes, default arguments, ...)",
+          "type": "boolean",
           "default": false,
-          "scope": "window",
-          "tags": [
-            "preview"
-          ]
+          "scope": "window"
         },
         "luau-lsp.fflags.sync": {
           "markdownDescription": "Sync currently enabled FFlags with Roblox's published FFlags.\nThis currently only syncs FFlags which begin with 'Luau'",

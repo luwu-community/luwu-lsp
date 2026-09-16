@@ -32,12 +32,32 @@ enum struct AstLocalInfo
     Parameter,
 };
 
-static lsp::SemanticTokenTypes inferTokenType(const Luau::TypeId ty, lsp::SemanticTokenTypes base)
+// A name that refers to a Luwu class: either the class value itself, or the type of objects built
+// from it, which is what a `: UserId` annotation resolves to. Host-declared extern types (Roblox's
+// `Instance` and friends) are ExternTypes too, and aren't classes anyone wrote as one.
+static bool namesUserDefinedClass(const Luau::TypeId ty, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
+{
+    const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    return et && (et->parent == builtinTypes->classType || et->parent == builtinTypes->objectType);
+}
+
+// The class value itself, as opposed to an object of it: `Player` is a class, `local p = Player(…)`
+// is a variable that happens to hold an object.
+static bool isUserDefinedClassValue(const Luau::TypeId ty, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
+{
+    const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    return et && et->parent == builtinTypes->classType;
+}
+
+static lsp::SemanticTokenTypes inferTokenType(const Luau::TypeId ty, lsp::SemanticTokenTypes base, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
 {
     if (!ty)
         return base;
 
     auto followedTy = Luau::follow(ty);
+
+    if (isUserDefinedClassValue(followedTy, builtinTypes))
+        return lsp::SemanticTokenTypes::Class;
 
     if (auto ftv = Luau::get<Luau::FunctionType>(followedTy))
     {
@@ -68,13 +88,17 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
 {
     const Luau::ModulePtr& module;
     const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals;
+    Luau::NotNull<Luau::BuiltinTypes> builtinTypes;
     std::vector<SemanticToken> tokens{};
     std::unordered_map<Luau::AstLocal*, AstLocalInfo> localMap{};
     std::unordered_set<Luau::AstType*> syntheticTypes{};
 
-    explicit SemanticTokensVisitor(const Luau::ModulePtr& module, const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals)
+    explicit SemanticTokensVisitor(
+        const Luau::ModulePtr& module, const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals,
+        Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
         : module(module)
         , builtinGlobals(builtinGlobals)
+        , builtinTypes(builtinTypes)
     {
     }
 
@@ -131,9 +155,14 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             startPosition = {endPosition.line, endPosition.column + 1};
         }
 
-        // Highlight name
+        // Highlight name -- as a class when the annotation names one, so `userid: UserId` colors
+        // `UserId` the same way its `class UserId` declaration is colored
+        auto tokenType = lsp::SemanticTokenTypes::Type;
+        if (auto resolvedTy = module->astResolvedTypes.find(ref); resolvedTy && namesUserDefinedClass(*resolvedTy, builtinTypes))
+            tokenType = lsp::SemanticTokenTypes::Class;
+
         Luau::Position endPosition{startPosition.line, startPosition.column + static_cast<unsigned int>(strlen(ref->name.value))};
-        tokens.emplace_back(SemanticToken{startPosition, endPosition, lsp::SemanticTokenTypes::Type, lsp::SemanticTokenModifiers::None});
+        tokens.emplace_back(SemanticToken{startPosition, endPosition, tokenType, lsp::SemanticTokenModifiers::None});
 
         // Do not highlight parameters as they will be visited later
         return true;
@@ -164,7 +193,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             auto ty = scope->lookup(var);
             if (ty)
             {
-                auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable);
+                auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable, builtinTypes);
                 if (type == lsp::SemanticTokenTypes::Variable)
                     return true; // No special semantic token needed, fall back to syntax highlighting
                 tokens.emplace_back(SemanticToken{var->location.begin, var->location.end, type, lsp::SemanticTokenModifiers::None});
@@ -235,7 +264,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
 
         auto type = defaultType;
         if (auto ty = module->astTypes.find(local))
-            type = inferTokenType(*ty, defaultType);
+            type = inferTokenType(*ty, defaultType, builtinTypes);
 
         if (type == lsp::SemanticTokenTypes::Variable)
             return true;
@@ -264,7 +293,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             }
             else
             {
-                auto type = inferTokenType(it->second, lsp::SemanticTokenTypes::Variable);
+                auto type = inferTokenType(it->second, lsp::SemanticTokenTypes::Variable, builtinTypes);
                 tokens.emplace_back(SemanticToken{global->location.begin, global->location.end, type,
                     lsp::SemanticTokenModifiers::DefaultLibrary | lsp::SemanticTokenModifiers::Readonly});
             }
@@ -275,7 +304,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             if (!ty)
                 return true;
 
-            auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable);
+            auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable, builtinTypes);
             if (type == lsp::SemanticTokenTypes::Variable)
                 return true;
 
@@ -311,7 +340,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             else if (Luau::hasTag(prop.tags, "EnumItem"))
                 defaultType = lsp::SemanticTokenTypes::EnumMember;
 
-            auto type = inferTokenType(*prop.readTy, defaultType);
+            auto type = inferTokenType(*prop.readTy, defaultType, builtinTypes);
             auto modifiers = lsp::SemanticTokenModifiers::None;
             if (parentIsBuiltin)
             {
@@ -335,7 +364,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             {
                 if (auto ty = module->astTypes.find(item.value))
                 {
-                    auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Property);
+                    auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Property, builtinTypes);
                     tokens.emplace_back(SemanticToken{item.key->location.begin, item.key->location.end, type, lsp::SemanticTokenModifiers::None});
                 }
             }
@@ -360,7 +389,7 @@ std::vector<SemanticToken> getSemanticTokens(const Luau::Frontend& frontend, con
     std::unordered_map<Luau::AstName, Luau::TypeId> builtinGlobals{};
     fillBuiltinGlobals(builtinGlobals, *sourceModule->names, frontend.globals.globalScope);
 
-    SemanticTokensVisitor visitor{module, builtinGlobals};
+    SemanticTokensVisitor visitor{module, builtinGlobals, frontend.builtinTypes};
     visitor.visit(sourceModule->root);
     return visitor.tokens;
 }

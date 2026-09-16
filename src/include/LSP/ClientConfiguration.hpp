@@ -249,7 +249,7 @@ struct ClientFFlagsConfiguration
     /// Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luau-lsp.fflags.override#` and `#luau-lsp.fflags.sync#`
     bool enableByDefault = true;
     /// Enables the flags required for Luau's new type solver. These flags can be overriden by `#luau-lsp.fflags.override#`
-    bool enableNewSolver = false;
+    bool enableNewSolver = true;
     // Sync currently enabled FFlags with Roblox's published FFlags.\nThis currently only syncs FFlags which begin with 'Luau'
     bool sync = false;
     // Override FFlags passed to Luau
@@ -307,7 +307,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(LSPPlatformConfig, {
 
 struct ClientPlatformConfiguration
 {
-    LSPPlatformConfig type = LSPPlatformConfig::Roblox;
+    LSPPlatformConfig type = LSPPlatformConfig::Standard;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientPlatformConfiguration, type);

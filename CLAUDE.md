@@ -2,119 +2,143 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## What this repo is
 
-Luau Language Server (luau-lsp) is an implementation of the Language Server Protocol (LSP) for the Luau programming language. It provides IDE features like diagnostics, autocompletion, hover, go-to-definition, etc. The project also includes a standalone CLI (`luau-lsp analyze`) for CI type-checking and linting.
+**`luwu-lsp` is the language server for [Luwu](../luwu), our own community fork of Luau.** It is itself a fork of
+upstream [`JohnnyMorganz/luau-lsp`](https://github.com/JohnnyMorganz/luau-lsp) (git remote `upstream`; our remote is
+`origin` = `luwu-community/luwu-lsp`), and it builds against Luwu instead of upstream Luau.
 
-## Build Commands
+- "Upstream" means `JohnnyMorganz/luau-lsp` (for this repo) or `luau-lang/luau` (for the language). Neither is the
+  source of truth for Luwu semantics.
+- Most of the code, docs (`editors/`, `tests/README.md`) and settings names (`luau-lsp.*`) are still inherited from
+  upstream. Don't assume upstream docs, issue numbers, release process, VSCode Marketplace listing or crash-reporting
+  setup apply here.
+- Luwu-specific work is mostly editor support for Luwu language features, especially **classes** (`class`/`object`,
+  primary constructors like `class Cat(name: string)`, `private`/`public`/`const` members, Kotlin-style access
+  modifiers). The language spec lives in `../luwu/rfcs/classes.md`; read it before changing class-related behavior,
+  and ask before doing anything that implies a semantics change.
+- `../luwu/CLAUDE.md` is the source of truth for the language/VM side. Its "Language server" section applies here.
+
+## The `luwu/` submodule
+
+**Never read or edit the `luwu/` submodule in this repo -- it can be stale.** The Luwu being developed lives at
+`/home/deviaze/Repositories/luwu` (normally exported as `LUWU_TEST_PATH`). Read Luwu sources there.
+
+Analysis/Ast changes the LSP needs (e.g. `ToString`, new AST fields) are made in `../luwu` first, then the LSP side is
+adjusted here. The submodule is only bumped when we deliberately sync (`seal ./rebuild.luau submodule-update`, then
+commit the pointer).
+
+## Building
+
+Use `rebuild.luau` (needs `seal` 0.8.x) from the repo root. It configures `build/`
+with `-DLSP_LUAU_PATH=<luwu dir>`, reconfigures automatically when that path changes, regenerates keyword hover docs
+(`scripts/generate_keywords`, writes `keyword_hovers.json`), and builds the requested targets.
 
 ```bash
-# Initial clone (submodules required)
-git clone https://github.com/JohnnyMorganz/luau-lsp.git --recurse-submodules
+# Dev: build the CLI against LUWU_TEST_PATH (../luwu)
+seal ./rebuild.luau
 
-# Update submodules
-git submodule update --init --recursive
+# Build the tests too
+seal ./rebuild.luau --targets CLI,Test
 
-# Configure build (from repo root)
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug  # Use Debug for faster builds during development
+# Build against the vendored submodule instead (what --release does by default)
+seal ./rebuild.luau --luwu=here
+seal ./rebuild.luau --release
 
-# Build the CLI (use -j for parallel builds)
-NUM_CPUS=$(nproc)
-cmake --build . --target Luwu.LanguageServer.CLI --config Debug -j$NUM_CPUS
-
-# Build tests (use Debug for faster iteration)
-cmake --build . --target Luwu.LanguageServer.Test --config Debug -j$NUM_CPUS
-
-# For release/production builds, use Release mode:
-# cmake .. -DCMAKE_BUILD_TYPE=Release
-# cmake --build . --target Luwu.LanguageServer.CLI --config Release -j$NUM_CPUS
-
-# Build with ASAN (Linux/macOS)
-cmake .. -DLSP_BUILD_ASAN:BOOL=ON
-cmake --build . --target Luwu.LanguageServer.Test -j$NUM_CPUS
+# Stale build artifacts? Wipe build/ and reconfigure
+seal ./rebuild.luau --clean
 ```
 
-## Running Tests
+Build errors are also written to `build_errors.log`.
 
-Tests use the doctest framework. **Important:** Run tests from the repository root directory, as tests read from `tests/testdata/` using relative paths.
+Plain CMake works too (keep `-DCMAKE_BUILD_TYPE=RelWithDebInfo`; Debug-style asserts in Luwu Analysis can crash the
+whole server on known TODOs):
 
 ```bash
-# Run all tests (from repo root)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_LUAU_PATH=$LUWU_TEST_PATH
+cmake --build build --target Luwu.LanguageServer.Test -j8
+```
+
+**Use `-j8` at most** when invoking cmake directly -- full parallelism has crashed the dev machine.
+
+### CMake targets
+
+- `Luwu.LanguageServer`: static library with the LSP implementation
+- `Luwu.LanguageServer.CLI`: executable, output name `luwu-lsp`
+- `Luwu.LanguageServer.Test`: doctest test executable
+
+### CMake options
+
+- `LSP_LUAU_PATH`: Luau/Luwu source tree to build against (defaults to `./luwu`)
+- `LUAU_ENABLE_TIME_TRACE`: Luau time tracing
+- `LSP_BUILD_ASAN`: AddressSanitizer
+- `LSP_STATIC_CRT`: static CRT on Windows
+- `LSP_BUILD_WITH_SENTRY`: crash reporting (off by default; the DSN in `src/main.cpp` is upstream's)
+- `LSP_WERROR`: warnings as errors (default ON)
+
+## Running tests
+
+Run from the repo root (tests read `tests/testdata/` by relative path):
+
+```bash
 ./build/Luwu.LanguageServer.Test
-
-# Run with new type solver
-./build/Luwu.LanguageServer.Test --new-solver
-
-# Run with all FFlags enabled
-./build/Luwu.LanguageServer.Test --fflags=true
-
-# Run specific test by name
 ./build/Luwu.LanguageServer.Test --test-case="TestName"
-
-# List all tests
+./build/Luwu.LanguageServer.Test --new-solver
+./build/Luwu.LanguageServer.Test --fflags=true
 ./build/Luwu.LanguageServer.Test --list-test-cases
 ```
 
+After LSP changes, the user tests in their editor with the freshly built `build/luwu-lsp`; tell them to reload the
+editor.
+
+## Luwu feature flags
+
+Class features are behind fast flags defined in Luwu (see `../luwu/CLAUDE.md` "Feature flags"):
+
+- `FFlag::DebugLuauUserDefinedClasses` -- parser/compiler support (from upstream)
+- `FFlag::DebugLuauUserDefinedClassesRuntime` -- VM runtime (from upstream)
+- `FFlag::LuwuBetterUserDefinedClasses` -- Luwu-specific class features
+
+`applyLuwuFlags()` (`src/Flags.cpp`) turns on every `Luwu`-prefixed flag plus the two class `DebugLuau` flags at
+startup, and `--luau-compat` / `luau-lsp.luauCompatibilityMode` turns them off. It also forces `LuauSolverV2` on in
+every configuration (classes only typecheck under the new solver). It runs before user-supplied flags, so
+`--flag:Name=false` and `luau-lsp.fflags.override` still win.
+
+Flags get renamed in Luwu; when they do, update every `FFlag::` reference and `LUAU_FASTFLAG` declaration here too.
+Check the current name in `../luwu` rather than trusting existing tests.
+
 ## Architecture
 
-### Core Components
+- **LanguageServer** (`src/LanguageServer.cpp`, `src/include/LSP/LanguageServer.hpp`): JSON-RPC dispatcher.
+- **WorkspaceFolder** (`src/Workspace.cpp`, `src/include/LSP/Workspace.hpp`): owns the Luau `Frontend`; LSP
+  operations are methods on it.
+- **WorkspaceFileResolver** (`src/WorkspaceFileResolver.cpp`): Luau `FileResolver` -- file reading, module
+  resolution, config loading.
+- **LSPPlatform** / **RobloxPlatform** (`src/include/Platform/`): platform hooks; the Roblox one (sourcemaps,
+  DataModel types) is inherited from upstream.
+- **Operations** (`src/operations/`): one file per LSP feature (Completion, Hover, CodeAction, Rename, InlayHints, ...).
+- **LuauExt** (`src/LuauExt.cpp`, `src/include/LSP/LuauExt.hpp`): AST/type helpers, including the class helpers
+  (`findClassStatContainingPosition`, `findClassNameReferences`, `findClassMemberReferences`).
+- **Transport** (`src/transport/`): stdio and named-pipe JSON-RPC.
+- **Protocol** (`src/include/Protocol/`): LSP structs with nlohmann/json serialization.
+- **Dependencies**: `luwu/` (don't touch, see above), `extern/` (json, glob, argparse, toml, doctest).
+- **Editor clients** (`editors/`): still upstream's VSCode/nvim/zed/IntelliJ clients.
 
-- **LanguageServer** (`src/LanguageServer.cpp`, `src/include/LSP/LanguageServer.hpp`): Main LSP message dispatcher. Handles JSON-RPC requests/notifications and routes to appropriate handlers.
+## Code style
 
-- **WorkspaceFolder** (`src/Workspace.cpp`, `src/include/LSP/Workspace.hpp`): Represents a workspace folder. Contains the Luau `Frontend` for type checking. Implements all LSP operations (completion, hover, diagnostics, etc.).
+- C++17, Allman braces (`.clang-format`), 4-space indent, 150 column limit
+- Luau scripts (e.g. `rebuild.luau`) are Luwu/seal code using `const`; format with StyLua
 
-- **WorkspaceFileResolver** (`src/WorkspaceFileResolver.cpp`): Implements Luau's `FileResolver` interface. Handles file reading, module resolution, and configuration loading.
+## Changelog and commits
 
-- **LSPPlatform** (`src/include/Platform/LSPPlatform.hpp`): Base class for platform-specific behavior. Factory method `getPlatform()` returns either the base implementation or `RobloxPlatform`.
+- Add a `CHANGELOG.md` entry under `[Unreleased]` for user-facing changes. Everything below `[Unreleased]` is
+  upstream's history.
+- Never commit unless the user asks for it in that turn.
+- Upstream GitHub issue numbers don't apply to this fork; only reference issues from `luwu-community/luwu-lsp`.
 
-- **RobloxPlatform** (`src/include/Platform/RobloxPlatform.hpp`): Extends `LSPPlatform` with Roblox-specific features - sourcemap parsing, DataModel types, service auto-imports, Color3/BrickColor handling.
+## Testing patterns
 
-### LSP Operations
-
-Located in `src/operations/`:
-
-- Each file implements a specific LSP feature (Completion, Hover, GotoDefinition, References, Rename, etc.)
-- Operations are methods on `WorkspaceFolder` that take LSP params and return LSP results
-
-### Transport Layer
-
-`src/transport/`: Handles JSON-RPC communication
-
-- `StdioTransport`: Standard input/output for primary usage
-- `PipeTransport`: Named pipe for alternative IDE integration
-
-### Protocol Types
-
-`src/include/Protocol/`: LSP protocol structures with nlohmann/json serialization
-
-### External Dependencies
-
-Located in `extern/` and `luwu/`:
-
-- `luwu/`: Luau compiler and type checker (submodule)
-- `extern/json/`: nlohmann/json for JSON handling
-- `extern/glob/`: Glob pattern matching
-- `extern/argparse/`: CLI argument parsing
-- `extern/toml/`: TOML parsing
-- `extern/doctest/`: Test framework
-
-## Code Style
-
-- C++17 standard
-- Uses Allman brace style (configured in `.clang-format`)
-- 4-space indentation, no tabs
-- 150 column limit
-- Luau code uses StyLua for formatting
-
-## Committing Changes
-
-- For user-facing changes (particularly when responding to a GitHub issue), make sure there is always an entry in `CHANGELOG.md`
-- Commit messages should reference the GitHub issue in the commit body, not the header (e.g., `Fixes #1234`, `Closes #1234`)
-
-## Testing Patterns
-
-Tests use the `Fixture` class from `tests/Fixture.h` with doctest's `TEST_CASE_FIXTURE`:
+Tests use `Fixture` from `tests/Fixture.h` with doctest's `TEST_CASE_FIXTURE`:
 
 ```cpp
 TEST_CASE_FIXTURE(Fixture, "FeatureName")
@@ -124,38 +148,22 @@ TEST_CASE_FIXTURE(Fixture, "FeatureName")
 }
 ```
 
-- `newDocument()`: Create and register a test document
-- `check()`: Type check source code
-- `loadDefinition()`: Load type definition files
-- `loadSourcemap()`: Load Rojo sourcemap for Roblox tests
-- `sourceWithMarker()`: Parse source with `|` cursor position marker
+- `newDocument()`: create and register a test document
+- `check()`: type check source
+- `loadDefinition()`: load definition files
+- `loadSourcemap()`: load a Rojo sourcemap
+- `sourceWithMarker()`: parse source with a `|` cursor marker
 
-### Testing with the New Type Solver
-
-When writing tests that require the new Luau type solver (`LuauSolverV2`), use the `ENABLE_NEW_SOLVER()` macro at the start of the test:
+Class tests need the class flags and the new solver:
 
 ```cpp
-TEST_CASE_FIXTURE(Fixture, "feature_requiring_new_solver")
+TEST_CASE_FIXTURE(Fixture, "class_feature")
 {
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
-
-    auto uri = newDocument("test.luau", "local x = 1");
-    // Test code...
+    // ...
 }
 ```
 
-**Important:** Do not use `ScopedFastFlag{FFlag::LuauSolverV2, true}` directly. The Frontend caches the solver mode at construction time, so the `ENABLE_NEW_SOLVER()` macro is required to properly update both the FFlag and the Frontend's cached solver mode.
-
-## Key CMake Targets
-
-- `Luwu.LanguageServer`: Static library containing LSP implementation
-- `Luwu.LanguageServer.CLI`: Executable (`luwu-lsp`)
-- `Luwu.LanguageServer.Test`: Test executable
-
-## CMake Options
-
-- `LUAU_ENABLE_TIME_TRACE`: Enable Luau time tracing
-- `LSP_BUILD_ASAN`: Build with AddressSanitizer
-- `LSP_STATIC_CRT`: Link with static CRT on Windows
-- `LSP_BUILD_WITH_SENTRY`: Enable crash reporting (Windows/macOS only)
-- `LSP_WERROR`: Treat warnings as errors (default: ON)
+Use `ENABLE_NEW_SOLVER()`, never `ScopedFastFlag{FFlag::LuauSolverV2, true}` -- the Frontend caches the solver mode at
+construction, and the macro updates both.

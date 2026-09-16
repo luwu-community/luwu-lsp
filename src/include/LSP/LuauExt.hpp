@@ -40,6 +40,11 @@ struct ToStringNamedFunctionOpts
     std::string baseIndent = "";
 };
 
+// Wraps any over-long function-type line of a printed type (a table property whose type is a
+// function, say) Rust-style with one parameter per line -- the same treatment a long named function
+// signature gets -- so a hover doesn't run off the side of the screen.
+std::string formatLongFunctionTypeLines(const std::string& typeString);
+
 std::string toStringNamedFunction(const Luau::ModulePtr& module, const Luau::FunctionType* ftv, const NameOrExpr nameOrFuncExpr,
     std::optional<Luau::ScopePtr> scope = std::nullopt, const ToStringNamedFunctionOpts& opts = {});
 
@@ -51,29 +56,9 @@ std::optional<Luau::AstExpr*> matchRequire(const Luau::AstExprCall& call);
 
 std::optional<lsp::Location> getTypeLocation(Luau::TypeId ty, WorkspaceFileResolver* fileResolver);
 
-// A single parameter that a synthesized `__init` would take, derived from a class property.
-struct ClassInitParam
-{
-    std::string name;
-    std::string type; // raw source text of the property's type annotation; empty if untyped
-    bool hasDefault = false;
-};
-
-struct ClassInitSuggestion
-{
-    std::vector<ClassInitParam> params;
-    // True if any existing member is `private`, meaning the synthesized `__init` must also be
-    // explicitly qualified `public` to avoid the "class contains a 'private' member" ambiguity error.
-    bool requiresPublicQualifier = false;
-};
-
-// Returns the properties available to fill in a synthesized `__init`, or nullopt if `classStat`
-// already declares one. If `beforePosition` is set, only properties declared before it are
-// included as parameters (guards against parser error-recovery artifacts from an in-progress
-// edit, e.g. typing an incomplete `function` keyword can cause the parser to swallow unrelated
-// trailing source as bogus properties).
-std::optional<ClassInitSuggestion> computeClassInitSuggestion(
-    Luau::AstStatClass* classStat, const TextDocument& textDocument, std::optional<Luau::Position> beforePosition = std::nullopt);
+// Finds the innermost class statement in `root` containing `position`, including positions inside
+// its methods -- unlike `findClassStatContainingPosition`, which only counts the class body itself.
+Luau::AstStatClass* findEnclosingClassStat(Luau::AstStatBlock* root, const Luau::Position& position);
 
 // Finds the innermost class statement in `root` whose body contains `position`, if any.
 Luau::AstStatClass* findClassStatContainingPosition(Luau::AstStatBlock* root, const Luau::Position& position);

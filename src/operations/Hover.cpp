@@ -126,6 +126,47 @@ struct FindClassStatByName : Luau::AstVisitor
 // rest. A summary of a type the hover merely *refers to* uses the smaller cap, so several of them
 // fit in one hover alongside the hovered type itself.
 static constexpr size_t kMaxSummaryMembers = 5;
+// A hover over a type from a wide module can pull in a lot of aliases, and everything below the
+// expansion -- the documentation in particular -- gets pushed off the screen. Keep the first few
+// whole, and let the `References` links above stand in for the rest.
+static constexpr size_t kMaxExpandedReferencedTypes = 5;
+
+// Keeps the first `limit` `type X = ...` clauses of a `where` section, each of which may span
+// several lines, and replaces the rest with a count.
+std::string truncateWhereClauses(const std::string& whereClauses, size_t limit)
+{
+    size_t kept = 0;
+    size_t cutoff = std::string::npos;
+    size_t total = 0;
+
+    for (size_t lineStart = 0; lineStart < whereClauses.size();)
+    {
+        size_t lineEnd = whereClauses.find('\n', lineStart);
+
+        if (whereClauses.compare(lineStart, 5, "type ") == 0)
+        {
+            total += 1;
+            if (kept == limit)
+                cutoff = (cutoff == std::string::npos ? lineStart : cutoff);
+            else
+                kept += 1;
+        }
+
+        if (lineEnd == std::string::npos)
+            break;
+        lineStart = lineEnd + 1;
+    }
+
+    if (cutoff == std::string::npos)
+        return whereClauses;
+
+    std::string result = whereClauses.substr(0, cutoff);
+    while (!result.empty() && result.back() == '\n')
+        result.pop_back();
+
+    return result + "\n\n-- ... and " + std::to_string(total - kept) + " more referenced types";
+}
+
 static constexpr size_t kMaxReferencedSummaryMembers = 3;
 
 static bool isDunderName(std::string_view name)
@@ -223,6 +264,29 @@ static std::string extractArgList(const std::string& namedFunctionString)
 //
 // Works across modules: the summary is built from the AST of whichever module declared the class,
 // not the one being hovered in.
+// What to call the module a file holds. A module name isn't a file name: the extension isn't part
+// of it, and a folder's `init.luau` is the folder's module rather than a module called `init`.
+static std::string moduleNameForUri(const lsp::DocumentUri& uri)
+{
+    std::string name = uri.filename();
+
+    for (const char* extension : {".d.luau", ".luau", ".lua"})
+    {
+        size_t length = strlen(extension);
+        if (name.size() > length && name.compare(name.size() - length, length, extension) == 0)
+        {
+            name.resize(name.size() - length);
+            break;
+        }
+    }
+
+    if (name == "init")
+        if (auto parent = uri.parent())
+            return parent->filename();
+
+    return name;
+}
+
 static std::optional<std::string> buildClassFieldSummary(
     Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::ModuleName& moduleName, Luau::TypeId typeId, const Luau::ExternType* et,
     const Luau::ScopePtr& scope, bool showTableKinds, bool isClassValue, size_t maxMembers = kMaxSummaryMembers
@@ -1063,6 +1127,14 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     Luau::ToStringResult typeResult = Luau::toStringDetailed(*type, opts);
     std::string typeString = typeResult.name;
 
+    // Inside a class, the class itself is the one thing the reader doesn't need told: both its
+    // summary and a link to it are noise in every hover written within its own body
+    Luau::AstStatClass* enclosingClassStat = types::findEnclosingClassStat(sourceModule->root, position);
+    auto isEnclosingClass = [&](Luau::TypeId ty) -> bool
+    {
+        return enclosingClassStat && types::findClassStatFromExternType(sourceModule->root, ty) == enclosingClassStat;
+    };
+
     // A class or extern type referenced by the hovered type prints as a bare name, which says nothing
     // about its shape -- and unlike an alias, ToString has no body to expand it into for a `where`
     // clause. So give each one the same summary hovering the type directly would show, below the
@@ -1090,7 +1162,25 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
                 continue;
             seen.insert(spanTy);
 
+            // A class and its instances are two extern types (`class Foo` and objects of it) tied by
+            // the nominal relation, and a hover that mentions both would otherwise summarize the same
+            // declaration twice. Whichever one is printed first stands for the pair.
+            if (et->relation)
+            {
+                Luau::TypeId relatedTy = nullptr;
+                if (const auto* obj = et->relation->get_if<Luau::Obj>())
+                    relatedTy = obj->ty;
+                else if (const auto* klass = et->relation->get_if<Luau::Klass>())
+                    relatedTy = klass->ty;
+
+                if (relatedTy)
+                    seen.insert(Luau::follow(relatedTy));
+            }
+
             if (spanTy == builtins->externType || spanTy == builtins->objectType || spanTy == builtins->classType || spanTy == builtins->vectorType)
+                continue;
+
+            if (isEnclosingClass(spanTy))
                 continue;
 
             std::optional<std::string> summary;
@@ -1105,22 +1195,309 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             if (!summary)
                 continue;
             if (!externTypeSummaries.empty())
-                externTypeSummaries += "\n";
+                externTypeSummaries += "\n\n";
             externTypeSummaries += *summary;
         }
     }
 
-    // appends the `where` clauses that include all type aliases that are referred to within this hover
-    // (such as type Pathlike = string | Path | FilePath... for (path: Pathlike) -> string | error<info>),
-    // followed by summaries of the classes/extern types it refers to
-    auto withWhereClauses = [&](const std::string& body) -> std::string
+    // A referenced type prints as a bare name, so collect a link to where each one is defined --
+    // including types from this same file, which may still be hundreds of lines away. `typeSpans` gives the named types the hover emitted along with
+    // their TypeIds, which covers both the aliases expanded into `where` clauses and the extern
+    // types summarized above. These go on one line above the referenced types themselves: a hover
+    // over a type from a big module can pull in a lot of them, and the reader's documentation is
+    // below all of it.
+    // A binding holding a required module is the module, and the hover otherwise shows a wall of
+    // its members without ever saying where they came from
+    std::string importedModuleLine;
     {
-        std::string result = body;
-        if (!typeResult.whereClauses.empty())
-            result += "\n\n" + typeResult.whereClauses;
-        if (!externTypeSummaries.empty())
-            result += (typeResult.whereClauses.empty() ? "\n\n" : "\n") + externTypeSummaries;
-        return result;
+        Luau::AstLocal* bindingLocal = nullptr;
+        if (auto local = exprOrLocal.getLocal())
+            bindingLocal = local;
+        else if (auto localExpr = node->as<Luau::AstExprLocal>())
+            bindingLocal = localExpr->local;
+
+        std::optional<std::string> bindingName;
+        if (bindingLocal)
+            bindingName = bindingLocal->name.value;
+
+        const auto& importedModules = module->getModuleScope()->importedModules;
+        if (bindingName)
+        {
+            if (auto importedModule = importedModules.find(*bindingName); importedModule != importedModules.end())
+            {
+                // The path the reader wrote (`@std/str`) rather than the resolved module name
+                std::string requirePath;
+                for (Luau::AstStat* stat : sourceModule->root->body)
+                {
+                    auto localStat = stat->as<Luau::AstStatLocal>();
+                    if (!localStat)
+                        continue;
+
+                    for (size_t i = 0; i < localStat->vars.size && i < localStat->values.size; ++i)
+                    {
+                        if (localStat->vars.data[i] != bindingLocal)
+                            continue;
+
+                        if (auto call = localStat->values.data[i]->as<Luau::AstExprCall>())
+                            if (auto required = types::matchRequire(*call))
+                                if (auto path = (*required)->as<Luau::AstExprConstantString>())
+                                    requirePath = std::string(path->value.data, path->value.size);
+                    }
+                }
+
+                std::string moduleLink = requirePath.empty() ? "" : "`" + requirePath + "`";
+                if (auto document = fileResolver.getOrCreateTextDocumentFromModuleName(importedModule->second))
+                {
+                    std::string label = requirePath.empty() ? moduleNameForUri(document->uri()) : requirePath;
+                    moduleLink = "[" + label + "](" + document->uri().toString() + ")";
+                }
+
+                // The binding almost always carries the module's own name, so naming it again here
+                // just repeats the line below
+                if (!moduleLink.empty())
+                    importedModuleLine = "*module at* " + moduleLink + "\n";
+            }
+        }
+    }
+
+    // Where a type was declared, and what to call the place it came from. A type from a definitions
+    // file isn't a module the file resolver knows about, but the package's loaded document is kept
+    // around, so those get a link too -- labelled by package (`@seal global definitions`) rather
+    // than by file name, since that's how the reader refers to them.
+    struct TypeSource
+    {
+        lsp::Location location;
+        std::string moduleLabel;
+    };
+
+    auto resolveTypeSource = [&](Luau::TypeId ty) -> std::optional<TypeSource>
+    {
+        if (auto location = types::getTypeLocation(ty, &fileResolver))
+            return TypeSource{*location, moduleNameForUri(location->uri)};
+
+        auto definitionModuleName = Luau::getDefinitionModuleName(Luau::follow(ty));
+        auto definitionLocation = getLocation(Luau::follow(ty));
+        if (!definitionModuleName || !definitionLocation)
+            return std::nullopt;
+
+        auto definitionsFile = definitionsFileState.find(*definitionModuleName);
+        if (definitionsFile == definitionsFileState.end())
+            return std::nullopt;
+
+        const TextDocument& document = definitionsFile->second.textDocument;
+        return TypeSource{
+            lsp::Location{document.uri(), lsp::Range{document.convertPosition(definitionLocation->begin),
+                                              document.convertPosition(definitionLocation->end)}},
+            *definitionModuleName + " global definitions"};
+    };
+
+    // Hovering a member accessed off a class or extern type (`Documentation.from`, `comm:extract`)
+    // shows the member alone, which says nothing about what it belongs to or where that lives
+    std::string memberOwnerLine;
+    std::optional<Luau::TypeId> memberOwnerType;
+    if (!classMemberPrefix)
+    {
+        if (auto indexName = node->as<Luau::AstExprIndexName>())
+        {
+            if (auto ownerTy = module->astTypes.find(indexName->expr))
+            {
+                Luau::TypeId owner = Luau::follow(*ownerTy);
+                if (Luau::get<Luau::ExternType>(owner))
+                {
+                    std::string ownerName = Luau::toString(owner);
+                    std::string ownerLink = "`" + ownerName + "`";
+                    std::string ownerModule;
+
+                    if (auto source = resolveTypeSource(owner))
+                    {
+                        ownerLink = "[`" + ownerName + "`](" + source->location.uri.toString() + "#L" +
+                                    std::to_string(source->location.range.start.line + 1) + ")";
+
+                        // Naming the module is only news when it's a different one
+                        if (source->location.uri != textDocument->uri())
+                            ownerModule = " *from* [" + source->moduleLabel + "](" + source->location.uri.toString() + ")";
+                    }
+
+                    const char* kind = "*Field of*";
+                    if (Luau::get<Luau::FunctionType>(Luau::follow(*type)))
+                        kind = indexName->op == ':' ? "*Method of*" : "*Function of*";
+
+                    // Two trailing spaces: a footer can follow another one (a field whose type is
+                    // an object has both), and a plain newline would run them together as one
+                    // paragraph
+                    memberOwnerLine = "  \n" + std::string(kind) + " " + ownerLink + ownerModule;
+                    memberOwnerType = owner;
+                }
+            }
+        }
+    }
+
+    // A summary that stands on its own (a class, an extern type) says nothing about which type it
+    // is really showing, or where that came from -- the same class name can be bound to any local
+    // name, and two modules can each declare their own `Documentation`
+    auto typeIdentityLine = [&](Luau::TypeId ty, const std::string& prefix) -> std::string
+    {
+        std::string name = Luau::toString(Luau::follow(ty));
+        auto source = resolveTypeSource(ty);
+
+        if (!source)
+            return "\n" + prefix + "`" + name + "`";
+
+        const lsp::Location* location = &source->location;
+        const bool sameModule = location->uri == textDocument->uri();
+
+        // Declared in this file, a bare linked name below the summary says nothing about why it's
+        // there; declared elsewhere, naming the module does that job
+        std::string lead = prefix;
+        if (lead.empty() && sameModule)
+            lead = "*Jump to* ";
+
+        std::string line =
+            "\n" + lead + "[`" + name + "`](" + location->uri.toString() + "#L" + std::to_string(location->range.start.line + 1) + ")";
+
+        if (!sameModule)
+            line += " *from* [" + source->moduleLabel + "](" + location->uri.toString() + ")";
+
+        return line;
+    };
+
+    // An object-typed expression says which class it's an object of, the same way a member says what
+    // it belongs to -- but only one of the two, since a member hover already names its owner
+    std::optional<Luau::TypeId> objectOfType;
+    if (memberOwnerLine.empty())
+    {
+        if (auto et = Luau::get<Luau::ExternType>(Luau::follow(*type)); et && et->parent == frontend.builtinTypes->objectType)
+            objectOfType = Luau::follow(*type);
+    }
+
+    std::string referencedTypeLinks;
+    {
+        // A wide type can reference dozens of others; past a handful the links stop being useful
+        static constexpr size_t kMaxReferencedTypeLinks = 12;
+
+        struct ReferencedModule
+        {
+            lsp::DocumentUri uri;
+            std::string name;
+            std::vector<std::string> typeLinks;
+            size_t shown = 0;
+        };
+
+        std::unordered_set<std::string> seenNames;
+        std::vector<ReferencedModule> modules;
+        size_t total = 0;
+
+        for (const auto& span : typeResult.typeSpans)
+        {
+            auto name = types::getTypeName(span.type);
+            if (!name || name->empty())
+                continue;
+
+            auto source = resolveTypeSource(span.type);
+            if (!source)
+                continue;
+            const lsp::Location* location = &source->location;
+
+            // A footer below the type already links its owner (or the class it's an object of);
+            // repeating that as a reference says nothing new
+            if (memberOwnerType && types::getTypeName(*memberOwnerType) == name)
+                continue;
+            if (objectOfType && types::getTypeName(*objectOfType) == name)
+                continue;
+            if (isEnclosingClass(Luau::follow(span.type)))
+                continue;
+
+            if (!seenNames.insert(*name).second)
+                continue;
+
+            auto module = std::find_if(modules.begin(), modules.end(),
+                [&](const ReferencedModule& candidate)
+                {
+                    return candidate.uri == location->uri;
+                });
+
+            if (module == modules.end())
+            {
+                modules.push_back(ReferencedModule{location->uri, source->moduleLabel, {}, 0});
+                module = std::prev(modules.end());
+            }
+
+            module->typeLinks.push_back(
+                "[`" + *name + "`](" + location->uri.toString() + "#L" + std::to_string(location->range.start.line + 1) + ")");
+            total += 1;
+        }
+
+        // Hand the link budget out a module at a time rather than first-come-first-served, so one
+        // wide module can't spend all of it and leave the others unrepresented. Within a module the
+        // order is the order the types were printed in, which puts the outermost ones first.
+        for (size_t remaining = std::min(total, kMaxReferencedTypeLinks); remaining > 0;)
+        {
+            bool progressed = false;
+
+            for (auto& module : modules)
+            {
+                if (module.shown == module.typeLinks.size())
+                    continue;
+
+                module.shown += 1;
+                remaining -= 1;
+                progressed = true;
+
+                if (remaining == 0)
+                    break;
+            }
+
+            if (!progressed)
+                break;
+        }
+
+        if (!modules.empty())
+        {
+            // A bullet per module is only worth the vertical space once there's more than one of
+            // them; a single module reads as one line, with the types first and their module named
+            // once at the end -- the same "<what> from <module>" shape the origin footers use
+            const bool oneModule = modules.size() == 1;
+            referencedTypeLinks = oneModule ? "*References* " : "*References*\n";
+
+            for (const auto& module : modules)
+            {
+                // The module itself links to the top of its file, so a reader can go straight to
+                // where all of this is defined rather than to one type within it
+                std::string moduleLink = "[" + module.name + "](" + module.uri.toString() + ")";
+
+                if (!oneModule)
+                    referencedTypeLinks += "\n- " + moduleLink + ": ";
+
+                for (size_t i = 0; i < module.shown; ++i)
+                    referencedTypeLinks += (i == 0 ? "" : " · ") + module.typeLinks[i];
+
+                // Whatever didn't fit is counted against the module it belongs to, rather than as a
+                // dangling bullet of its own
+                if (size_t omitted = module.typeLinks.size() - module.shown; omitted > 0)
+                    referencedTypeLinks += " · *and " + std::to_string(omitted) + " more*";
+
+                if (oneModule && module.uri != textDocument->uri())
+                    referencedTypeLinks += " *from* " + moduleLink;
+            }
+        }
+    }
+
+    // The type aliases referred to within this hover (such as type Pathlike = string | Path |
+    // FilePath... for (path: Pathlike) -> string | error<info>) and the summaries of the classes and
+    // extern types it refers to, in a code block of their own below the hovered type itself
+    std::string referencedTypes;
+    if (!typeResult.whereClauses.empty())
+        referencedTypes = truncateWhereClauses(typeResult.whereClauses, kMaxExpandedReferencedTypes);
+    if (!externTypeSummaries.empty())
+        referencedTypes += (referencedTypes.empty() ? "" : "\n\n") + externTypeSummaries;
+
+    // Rendered for the hovered type itself; types it referred to follow in their own block. Summaries
+    // that stand on their own (a class, an extern type) don't go through this.
+    bool showReferencedTypes = false;
+    auto typeCodeBlock = [&](const std::string& body) -> std::string
+    {
+        showReferencedTypes = true;
+        return codeBlock("luau", types::formatLongFunctionTypeLines(body));
     };
 
     // If we have a function and its corresponding name
@@ -1132,24 +1509,21 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             funcOpts.hideTableKind = !config.hover.showTableKinds;
             funcOpts.multiline = config.hover.multilineFunctionDefinitions;
             typeString =
-                codeBlock("luau", withWhereClauses(*classMemberPrefix + types::toStringNamedFunction(module, ftv, *classMemberName, scope, funcOpts)));
+                typeCodeBlock(*classMemberPrefix + types::toStringNamedFunction(module, ftv, *classMemberName, scope, funcOpts));
         }
         else
         {
-            typeString = codeBlock("luau", withWhereClauses(*classMemberPrefix + *classMemberName + ": " + typeString));
+            typeString = typeCodeBlock(*classMemberPrefix + *classMemberName + ": " + typeString);
         }
     }
-    else if (auto et = Luau::get<Luau::ExternType>(*type);
-             et && (et->parent == frontend.builtinTypes->classType || et->parent == frontend.builtinTypes->objectType))
+    else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->parent == frontend.builtinTypes->classType)
     {
-        bool isClassValue = et->parent == frontend.builtinTypes->classType;
-        if (auto summary = buildClassFieldSummary(frontend, module, moduleName, *type, et, scope, config.hover.showTableKinds, isClassValue))
-        {
-            std::string prefix = isClassValue ? "" : "*object of* `" + Luau::toString(Luau::follow(*type)) + "`\n";
-            typeString = prefix + codeBlock("luau", *summary);
-        }
+        // The class value itself: the summary *is* the answer here, rather than something the
+        // hovered expression merely has the type of
+        if (auto summary = buildClassFieldSummary(frontend, module, moduleName, *type, et, scope, config.hover.showTableKinds, true))
+            typeString = codeBlock("luau", types::formatLongFunctionTypeLines(*summary)) + typeIdentityLine(*type, "");
         else
-            typeString = codeBlock("luau", withWhereClauses(typeString));
+            typeString = typeCodeBlock(typeString);
     }
     else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->name == "vector")
     {
@@ -1158,16 +1532,17 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         // instead of as "extern type vector".
         typeString = codeBlock("luau", "vector");
     }
-    else if (auto et = Luau::get<Luau::ExternType>(*type))
+    else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->parent != frontend.builtinTypes->objectType)
     {
         // A "declare extern type"-style extern type (e.g. a host-provided type like Instance), as
         // opposed to one of our user-defined `class`/`object` types handled above.
-        typeString = codeBlock("luau", buildExternTypeSummary(module, *type, et, scope, config.hover.showTableKinds));
+        typeString = codeBlock("luau", types::formatLongFunctionTypeLines(buildExternTypeSummary(module, *type, et, scope, config.hover.showTableKinds))) +
+                     typeIdentityLine(*type, "");
     }
     else if (typeAliasInformation)
     {
         auto [typeName, typeFun] = typeAliasInformation.value();
-        typeString = codeBlock("luau", withWhereClauses("type " + toStringTypeFun(typeName, typeFun) + " = " + typeString));
+        typeString = typeCodeBlock("type " + toStringTypeFun(typeName, typeFun) + " = " + typeString);
     }
     else if (auto ftv = Luau::get<Luau::FunctionType>(*type))
     {
@@ -1180,7 +1555,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         types::ToStringNamedFunctionOpts funcOpts;
         funcOpts.hideTableKind = !config.hover.showTableKinds;
         funcOpts.multiline = config.hover.multilineFunctionDefinitions;
-        typeString = codeBlock("luau", withWhereClauses(types::toStringNamedFunction(module, ftv, name, scope, funcOpts)));
+        typeString = typeCodeBlock(types::toStringNamedFunction(module, ftv, name, scope, funcOpts));
     }
     else if (exprOrLocal.getLocal() || node->as<Luau::AstExprLocal>())
     {
@@ -1196,7 +1571,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         else
             builder += Luau::getIdentifier(node->asExpr()).value;
         builder += ": " + typeString;
-        typeString = codeBlock("luau", withWhereClauses(builder));
+        typeString = typeCodeBlock(builder);
     }
     else if (auto global = node->as<Luau::AstExprGlobal>())
     {
@@ -1204,7 +1579,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         std::string builder = "type ";
         builder += global->name.value;
         builder += " = " + typeString;
-        typeString = codeBlock("luau", withWhereClauses(builder));
+        typeString = typeCodeBlock(builder);
     }
     else if (auto string = node->as<Luau::AstExprConstantString>())
     {
@@ -1222,33 +1597,68 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     }
     else
     {
-        typeString = codeBlock("luau", withWhereClauses(typeString));
+        typeString = typeCodeBlock(typeString);
     }
 
+    std::string objectOfLine;
+    if (objectOfType)
+        objectOfLine = typeIdentityLine(*objectOfType, "*Object of* ");
+
+    typeString = importedModuleLine + typeString + objectOfLine + memberOwnerLine;
+
+    // Documentation comes before the types this one referred to: it's what the reader is actually
+    // here to read, and a wide type's expansion would otherwise push it off the bottom
     if (std::optional<std::string> docs;
         documentationSymbol && (docs = printDocumentation(client->documentation, *documentationSymbol)) && docs && !docs->empty())
     {
-        typeString += kDocumentationBreaker;
+        typeString += "\n" + kDocumentationBreaker;
         typeString += *docs;
     }
     else if (auto documentation = getDocumentationForType(*type); documentation && !documentation->empty())
     {
-        typeString += kDocumentationBreaker;
+        typeString += "\n" + kDocumentationBreaker;
         typeString += *documentation;
     }
     else if (auto documentation = getDocumentationForAstNode(moduleName, node, scope); documentation && !documentation->empty())
     {
-        typeString += kDocumentationBreaker;
+        typeString += "\n" + kDocumentationBreaker;
         typeString += *documentation;
     }
     else if (documentationLocation)
     {
         if (auto text = printMoonwaveDocumentation(getComments(documentationLocation->moduleName, documentationLocation->location)); !text.empty())
         {
-            typeString += kDocumentationBreaker;
+            typeString += "\n" + kDocumentationBreaker;
             typeString += text;
         }
     }
 
-    return lsp::Hover{{lsp::MarkupKind::Markdown, typeString}};
+    if (showReferencedTypes && (!referencedTypeLinks.empty() || !referencedTypes.empty()))
+    {
+        // A rule keeps the referenced types from reading as a continuation of whatever came above --
+        // two code blocks butted up against each other look like one
+        typeString += "\n" + kDocumentationBreaker;
+        if (!referencedTypeLinks.empty())
+            typeString += referencedTypeLinks + "\n";
+        if (!referencedTypes.empty())
+        {
+            // With only the rule above it, a code block's first line sits right against the block's
+            // top border and reads as clipped, so buy a little room with a blank first line. A
+            // `References` line above already provides that room.
+            std::string body = types::formatLongFunctionTypeLines(referencedTypes);
+            if (referencedTypeLinks.empty())
+                body = "\n" + body;
+
+            typeString += "\n" + codeBlock("luau", body);
+        }
+    }
+
+    // Without a range, the editor highlights the word under the cursor -- which inside a string
+    // literal is one word of its contents rather than the string the hover is actually about
+    std::optional<lsp::Range> hoverRange = std::nullopt;
+    if (node->is<Luau::AstExprConstantString>() || node->is<Luau::AstExprConstantNumber>() || node->is<Luau::AstExprConstantBool>() ||
+        node->is<Luau::AstExprInterpString>())
+        hoverRange = textDocument->convertLocation(node->location);
+
+    return lsp::Hover{{lsp::MarkupKind::Markdown, typeString}, hoverRange};
 }
