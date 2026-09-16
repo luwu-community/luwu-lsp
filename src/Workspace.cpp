@@ -540,7 +540,13 @@ void WorkspaceFolder::registerTypes(const std::vector<std::string>& disabledGlob
     // thing on hover and accepts anything at all.
     if (client->getConfiguration(rootUri).platform.type != LSPPlatformConfig::Roblox)
     {
-        for (auto* globals : {&frontend.globals, &frontend.globalsForAutocomplete})
+        // Only the globals registered above carry a `require` binding: under the new solver
+        // `globalsForAutocomplete` is never registered, so looking one up in it asserts.
+        std::vector<Luau::GlobalTypes*> registeredGlobals{&frontend.globals};
+        if (!FFlag::LuauSolverV2)
+            registeredGlobals.push_back(&frontend.globalsForAutocomplete);
+
+        for (auto* globals : registeredGlobals)
         {
             if (auto* ftv = Luau::getMutable<Luau::FunctionType>(Luau::getGlobalBinding(*globals, "require")))
             {
