@@ -1,4 +1,4 @@
-[submodule "luau"]
+[submodule "luwu"]
 	path = luwu
-	url = git@github.com:luwu-community/luwu.git
+	url = https://github.com/luwu-community/luwu.git
 	branch = classes-version-1
