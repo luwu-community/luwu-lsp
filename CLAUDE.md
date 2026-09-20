@@ -13,24 +13,23 @@ upstream [`JohnnyMorganz/luau-lsp`](https://github.com/JohnnyMorganz/luau-lsp) (
 - Most of the code, docs (`editors/`, `tests/README.md`) and settings names (`luau-lsp.*`) are still inherited from
   upstream. Don't assume upstream docs, issue numbers, release process, VSCode Marketplace listing or crash-reporting
   setup apply here.
-- Luwu-specific work is mostly editor support for Luwu language features, especially **classes** (`class`/`object`,
-  primary constructors like `class Cat(name: string)`, `private`/`public`/`const` members, Kotlin-style access
-  modifiers). The language spec lives in `../luwu/rfcs/classes.md`; read it before changing class-related behavior,
-  and ask before doing anything that implies a semantics change.
-- `../luwu/CLAUDE.md` is the source of truth for the language/VM side. Its "Language server" section applies here.
+- `../luwu` refers to `../luwu` or `$LUWU_TEST_PATH`.
+- Luwu-specific work is mostly editor support for Luwu language features
+  (classes, none, destructuring, integers, ? operators), and improving DX.
+- The language spec lives in `$LUWU_TEST_PATH/rfcs` and ask before doing anything that implies a semantics change.
 
 ## The `luwu/` submodule
 
 **Never read or edit the `luwu/` submodule in this repo -- it can be stale.** The Luwu being developed lives at
-`/home/deviaze/Repositories/luwu` (normally exported as `LUWU_TEST_PATH`). Read Luwu sources there.
+`LUWU_TEST_PATH` (usually `../luwu`). Read Luwu sources there.
 
-Analysis/Ast changes the LSP needs (e.g. `ToString`, new AST fields) are made in `../luwu` first, then the LSP side is
+Analysis/Ast changes the LSP needs are made in `../luwu` first, then the LSP side is
 adjusted here. The submodule is only bumped when we deliberately sync (`seal ./rebuild.luau submodule-update`, then
 commit the pointer).
 
 ## Building
 
-Use `rebuild.luau` (needs `seal` 0.8.x) from the repo root. It configures `build/`
+Use `rebuild.luau` (needs `seal` 0.8.1+) from the repo root. It configures `build/`
 with `-DLSP_LUAU_PATH=<luwu dir>`, reconfigures automatically when that path changes, regenerates keyword hover docs
 (`scripts/generate_keywords`, writes `keyword_hovers.json`), and builds the requested targets.
 
@@ -43,7 +42,7 @@ seal ./rebuild.luau --targets CLI,Test
 
 # Build against the vendored submodule instead (what --release does by default)
 seal ./rebuild.luau --luwu=here
-seal ./rebuild.luau --release
+seal ./rebuild.luau --release --luwu=here
 
 # Stale build artifacts? Wipe build/ and reconfigure
 seal ./rebuild.luau --clean
@@ -59,7 +58,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_LUAU_PATH=$LUWU_TEST
 cmake --build build --target Luwu.LanguageServer.Test -j8
 ```
 
-**Use `-j8` at most** when invoking cmake directly -- full parallelism has crashed the dev machine.
+**Use `-j16` at most** when invoking cmake directly -- full parallelism has crashed the dev machine.
 
 ### CMake targets
 
@@ -115,7 +114,7 @@ Check the current name in `../luwu` rather than trusting existing tests.
 - **WorkspaceFileResolver** (`src/WorkspaceFileResolver.cpp`): Luau `FileResolver` -- file reading, module
   resolution, config loading.
 - **LSPPlatform** / **RobloxPlatform** (`src/include/Platform/`): platform hooks; the Roblox one (sourcemaps,
-  DataModel types) is inherited from upstream.
+  DataModel types) is inherited from upstream and kept for backwards compat.
 - **Operations** (`src/operations/`): one file per LSP feature (Completion, Hover, CodeAction, Rename, InlayHints, ...).
 - **LuauExt** (`src/LuauExt.cpp`, `src/include/LSP/LuauExt.hpp`): AST/type helpers, including the class helpers
   (`findClassStatContainingPosition`, `findClassNameReferences`, `findClassMemberReferences`).
@@ -127,12 +126,13 @@ Check the current name in `../luwu` rather than trusting existing tests.
 ## Code style
 
 - C++17, Allman braces (`.clang-format`), 4-space indent, 150 column limit
-- Luau scripts (e.g. `rebuild.luau`) are Luwu/seal code using `const`; format with StyLua
+- Luwu/Luau code: prefer new features like `const` over `local`, snake_case.
+  Luwu/Luau scripts not inherited from upstream are written in the seal runtime.
 
 ## Changelog and commits
 
-- Add a `CHANGELOG.md` entry under `[Unreleased]` for user-facing changes. Everything below `[Unreleased]` is
-  upstream's history.
+- At the end of a session, add a `CHANGELOG.md` entry under `[Unreleased]` for user-facing changes. Ask user before updating
+  `CHANGELOG.md`
 - Never commit unless the user asks for it in that turn.
 - Upstream GitHub issue numbers don't apply to this fork; only reference issues from `luwu-community/luwu-lsp`.
 
