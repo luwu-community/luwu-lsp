@@ -1,6 +1,6 @@
 {
   "@luau/global/class": {
-    "documentation": "Reflection over Luwu classes and the objects built from them.",
+    "documentation": "Refinement and runtime reflection of Luwu classes and objects.",
     "keys": {
       "fields": "@luau/global/class.fields",
       "isinstance": "@luau/global/class.isinstance",
@@ -9,124 +9,122 @@
     }
   },
   "@luau/global/class.fields": {
-    "documentation": "Returns a table of the public instance fields of a class or object, and whether that table is complete.\n\nGiven an object, each field maps to that object's value for it; given a class, every field maps to <code>none</code>, since there is no instance to read values from. <code>private</code> fields are always skipped, and their absence is what makes the second return <code>false</code>.",
+    "documentation": "Returns a table mapping the passed class or object's public fields with their values, as well\nas a boolean describing whether the returned map is a 'complete' representation of the\nfields available.\n\nThis function operates slightly differently on classes and objects. If the passed value\nis an object, returns a map of the object's current fields and values. If any field has a\n`nil` value, assigns `none` instead of `nil` so the field's name can be stored in the table.\nValues in the returned map are shallow clones.\n\nIf the passed value is a `class`, all values of the map will be `none`, including those that have\ndefault values. This is because we don't want `class.fields` to unintentionally initialize default values\n(which could cause side effects).\n",
     "params": [
       {
-        "documentation": "@luau/global/class.fields/param/0",
+        "documentation": "@luau/global/class.fields/params/0",
         "name": "o"
       }
     ],
     "returns": [
-      "@luau/global/class.fields/return/0",
-      "@luau/global/class.fields/return/1"
+      "@luau/global/class.fields/returns/0",
+      "@luau/global/class.fields/returns/1"
     ]
   },
-  "@luau/global/class.fields/param/0": {
-    "documentation": "A class, or an object of one. Anything else raises an error."
+  "@luau/global/class.fields/params/0": {
+    "documentation": "An object or a class."
   },
-  "@luau/global/class.fields/return/0": {
-    "documentation": "The public instance fields, keyed by name."
+  "@luau/global/class.fields/returns/0": {
+    "documentation": "A map of public fields of the object or class, keyed by field name."
   },
-  "@luau/global/class.fields/return/1": {
-    "documentation": "<code>true</code> when every field of the class is present, <code>false</code> when one or more <code>private</code> fields were left out."
+  "@luau/global/class.fields/returns/1": {
+    "documentation": "Whether the map returned is a complete representation of the object's fields; this will be `true` if the class only has public fields and `false` if the class has any private fields."
   },
   "@luau/global/class.isinstance": {
-    "documentation": "Returns <code>true</code> if <code>o</code> is an object of the class <code>c</code>.\n\nThis is exact class identity: an object built from a different class is never an instance of <code>c</code>, and a non-object value is never an instance of anything.",
+    "documentation": "Returns `true` if `o` is an object of class `c`.\n\nIf `o` is not an object, returns `false`. Raises a runtime error if `c` is not a `class`.\n\nIn the type system, you can use this to refine upon an object that could be of one or more classes:\n\n```luau\ntype Animal = Cat | Dog\nclass Cat(name: string, age: number, meows = 2) end\nclass Dog(name: string, age: number, barks = 3) end\n\nconst animal: Animal = get_animal()\nif class.isinstance(animal, Cat) then\n    print(`found a Cat! {animal.name} with {animal.meows} meows`)\nelseif class.isinstance(animal, Dog) then\n    print(`found a Dog! {animal.name} with {animal.barks} barks`)\nend\n```\n\nSince Luwu doesn't support is-a inheritance relationships between classes, you can treat\nthis as an exact check that an object was instantiated from class `c`.\n",
     "params": [
       {
-        "documentation": "@luau/global/class.isinstance/param/0",
+        "documentation": "@luau/global/class.isinstance/params/0",
         "name": "o"
       },
       {
-        "documentation": "@luau/global/class.isinstance/param/1",
+        "documentation": "@luau/global/class.isinstance/params/1",
         "name": "c"
       }
     ],
     "returns": [
-      "@luau/global/class.isinstance/return/0"
+      "@luau/global/class.isinstance/returns/0"
     ]
   },
-  "@luau/global/class.isinstance/param/0": {
-    "documentation": "The value to test. Any value is accepted; anything that isn't an object returns <code>false</code>."
+  "@luau/global/class.isinstance/params/0": {
+    "documentation": "The object you want to test. Anything is accepted here, passing a non-object just causes this function to return `false`."
   },
-  "@luau/global/class.isinstance/param/1": {
-    "documentation": "The class to test against. Must be a class, not an object of one."
+  "@luau/global/class.isinstance/params/1": {
+    "documentation": "The class you want to check against. Must be a `class`."
   },
-  "@luau/global/class.isinstance/return/0": {
-    "documentation": "Whether <code>o</code> is an object of exactly the class <code>c</code>."
+  "@luau/global/class.isinstance/returns/0": {
+    "documentation": "Whether the object `o` is an object of class `c.`"
   },
   "@luau/global/class.name": {
-    "documentation": "Returns the name of a class, or of the class an object was built from.\n\nRaises an error when given anything that is neither a class nor an object.",
+    "documentation": "Returns the identifier name of the class or the class the object is an instance of. Keep in mind this name isn't globally unique, rely on class.isinstance tests instead.",
     "params": [
       {
-        "documentation": "@luau/global/class.name/param/0",
+        "documentation": "@luau/global/class.name/params/0",
         "name": "o"
       }
     ],
     "returns": [
-      "@luau/global/class.name/return/0"
+      "@luau/global/class.name/returns/0"
     ]
   },
-  "@luau/global/class.name/param/0": {
-    "documentation": "A class, or an object of one."
+  "@luau/global/class.name/params/0": {
+    "documentation": "An object or a class you want the name of."
   },
-  "@luau/global/class.name/return/0": {
-    "documentation": "The class's declared name."
+  "@luau/global/class.name/returns/0": {
+    "documentation": "The identifier name of the class or object."
   },
   "@luau/global/class.of": {
-    "documentation": "Returns the class an object was built from, or <code>nil</code> when <code>o</code> is not an object.",
+    "documentation": "Returns the `class` that `o` is an object of.",
     "params": [
       {
-        "documentation": "@luau/global/class.of/param/0",
+        "documentation": "@luau/global/class.of/params/0",
         "name": "o"
       }
     ],
     "returns": [
-      "@luau/global/class.of/return/0"
+      "@luau/global/class.of/returns/0"
     ]
   },
-  "@luau/global/class.of/param/0": {
-    "documentation": "The value to inspect. Any value is accepted."
+  "@luau/global/class.of/params/0": {
+    "documentation": "An object."
   },
-  "@luau/global/class.of/return/0": {
-    "documentation": "The object's class, or <code>nil</code> if <code>o</code> is not an object."
+  "@luau/global/class.of/returns/0": {
+    "documentation": "If `o` is an object, then the object's class. Returns `nil` if `o` is not an object."
   },
   "@luau/global/require": {
-    "code_sample": "local sibling = require(\"./sibling\")\nlocal uncle = require(\"../uncle\")\nlocal fs = require(\"@std/fs\")",
-    "documentation": "Loads the module at `path` and returns what it returned, running it the first time it is required and reusing that result afterwards.\n\nA path is a string: `\"./sibling\"` and `\"../uncle\"` are relative to the requiring file, and an alias such as `\"@std/fs\"` resolves through the `aliases` of the nearest `.luaurc`.",
+    "documentation": "Imports the module at `path`, returning what the module returned. Require paths use require-by-string syntax, which is described below.\n\n```luau\n-- sibling of the requiring module/file.\nconst utils = require(\"./utils\")\n-- sibling of the parent of the requiring file/module.\nconst doc = require(\"../doc\")\n-- `@packages` is a require alias.\nconst html = require(\"@packages/html\")\n-- `@self` is a hardcoded alias only visible in `init` modules.\nconst li = require(\"@self/li\")\n```\nOn the filesystem, the term 'module' is mostly synonymous with 'file'. The term 'require-by-string module' may refer to either a file or\na folder with a file named `init.luau`.\n\n### Caching\n\nRequires are cached. The first time a module's required in your codebase, all top-level code in the module will be evaluated.\nSubsequent requires to the same module will return the cached value without re-evaluating the entire module. This allows modules\nto be used to keep track of state between multiple files in a codebase.\n\n### Require-By-String syntax\n\nLuwu uses Luau's require-by-string syntax for module paths.\n\nAssume you have the following directory structure:\n\n```\nproject/\n├── .luaurc\n├── utils/\n│   ├── list.luau\n│   └── html/\n│       ├── elements.luau\n│       ├── serde.luau\n│       └── init.luau\n└── src/\n    ├── parse_html.luau\n    └── main.luau\n```\n\n- To reach `parse_html.luau` from `main.luau`, use `require(\"./parse_html\")`.\n- To reach `list.luau` from `main.luau` via relative path, use `require(\"../utils/list\")`\n- To reach `html` from `parse_html.luau`, use `require(\"../utils/html\")`. This is allowed because you can directly require a directory if it contains a file named `init.luau`.\n- To reach `elements.luau` from `init.luau`, use `require(\"@self/elements)`. You need `@self` here because `init.luau` is treated *as* its enclosing directory.\n- To reach `list.luau` from `html/init.luau`, use `require(\"./list\")`.\n- To reach `elements.luau` from `serde.luau`, use `require(\"./elements\")`.\n\nIf `.luaurc` defines a require alias `\"utils\": \"./utils\"`:\n- To reach `list.luau` from `main.luau`, use `require(\"@utils/list)`\n- To reach `html` from `parse_html.luau`, use `require(\"@utils/html)`\n\nKeep in mind that not all embedders may support the full require-by-string specification, but relative requires and require-by-alias are typically supported.\nRequire aliases that depend on other require aliases are in the spec but not yet commonly supported.\n\nOn the filesystem, you can define your own require aliases by making a `.luaurc` (jsonc-syntax) or `.config.luau` file.\nKeep in mind some require aliases may be hardcoded by the embedder and cannot be overriden: for example, in *seal*,\n`@std` and `@interop` are hardcoded aliases.\n",
     "params": [
       {
-        "documentation": "@luau/global/require/param/0",
+        "documentation": "@luau/global/require/params/0",
         "name": "path"
       }
     ],
     "returns": [
-      "@luau/global/require/return/0"
+      "@luau/global/require/returns/0"
     ]
   },
-  "@luau/global/require/param/0": {
-    "documentation": "Path of the module to load, relative to this file (`./`, `../`) or through a `.luaurc` alias (`@name/...`)."
+  "@luau/global/require/params/0": {
+    "documentation": "The require-by-string path of the module you want to require. These should start with `.`, `..`, or `@`."
   },
-  "@luau/global/require/return/0": {
-    "documentation": "Whatever the required module returned."
+  "@luau/global/require/returns/0": {
+    "documentation": "The value the module returned; this may be a cached value."
   },
   "@luau/global/typeof": {
-    "code_sample": "local result = pcall(risky)\nif typeof(result) == \"error\" then\n    -- result is narrowed to the `error` extern type here\n    print(tostring(result))\nend\n\nif typeof(value) == \"DateTime\" then\n    print(value:display())\nend",
-    "documentation": "Returns the name of `value`'s type as a string.\n\nOn primitives it matches `type`, so `\"nil\"`, `\"number\"`, `\"string\"`, `\"table\"` and the rest come back as you'd expect.\n\nUserdata is where it differs: an extern type reports its own name rather than `\"userdata\"`, so comparing against that name both tells you what you have and narrows the value to it.",
+    "documentation": "Returns `value`'s embedder-defined or primitive type tag as a string.\n\nOn primitives, this is generally the same string you get with `type`, except for `userdata` and `integer`.\n- For userdata (extern types), this returns the `__type` metafield which can be customized by the embedder.\n- For integers, this returns the specific integer representation: `type(19u16) == \"integer\"; typeof(19u16) == \"u16\"`.\n\nIn the type system, you can use `typeof` to narrow on extern types:\n\n```luau\nconst t: number | Duration = get_dur()\nif typeof(t) == \"Duration\" then\n    -- typechecker refines t to Duration here, no type error\n    print(t:display())\nelse\n    -- typechecker knows t is a number here\n    print(`{t} seconds`)\nend\n```\n",
     "params": [
       {
-        "documentation": "@luau/global/typeof/param/0",
+        "documentation": "@luau/global/typeof/params/0",
         "name": "value"
       }
     ],
     "returns": [
-      "@luau/global/typeof/return/0"
+      "@luau/global/typeof/returns/0"
     ]
   },
-  "@luau/global/typeof/param/0": {
-    "documentation": "The value to inspect. Any value is accepted, including `nil`."
+  "@luau/global/typeof/params/0": {
+    "documentation": "The value to get the typeof tag of."
   },
-  "@luau/global/typeof/return/0": {
-    "documentation": "The name of the value's type.\n\nIt comes from the `__type` metafield if one is set. Only userdata can set it, which in practice means the extern types a host environment hands you. Tables can't rename themselves this way, and classes and objects always report `\"class\"` and `\"object\"`."
+  "@luau/global/typeof/returns/0": {
+    "documentation": "The typeof tag of the value"
   }
 }

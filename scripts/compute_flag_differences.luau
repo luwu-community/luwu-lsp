@@ -1,8 +1,8 @@
 --!strict
 --- Given a `luau-lsp` binary, computes the differences between default flags and flags currently enabled for Roblox
 --- Useful for debugging flag differences
-local net = require("@lune/net")
-local process = require("@lune/process")
+local net = (require)("@lune/net")
+local process = (require)("@lune/process")
 
 local response =
 	net.request("https://clientsettingscdn.roblox.com/v1/settings/application?applicationName=PCDesktopClient")
