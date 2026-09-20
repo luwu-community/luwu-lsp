@@ -378,7 +378,6 @@ const function remove_existing_binaries()
         ["Luwu.LanguageServer.CLI"] = fs.path.join(build_dir_path, "luwu-lsp"),
         ["Luwu.LanguageServer.Test"] = fs.path.join(build_dir_path, "Luwu.LanguageServer.Test"),
     }
-
     for _, target in targets do
         const binary_path = binaries[target]
         if binary_path then
