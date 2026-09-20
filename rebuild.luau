@@ -1,17 +1,41 @@
 --!strict
--- run with seal 0.8.x
+-- run with seal 0.8.1+
+-- see https://github.com/seal-runtime/seal/releases
+
 -- Usage: see seal ./rebuild.luau --help
 const args = require("@std/args")
 const env = require("@std/env")
 const fs = require("@std/fs")
 const colors = require("@std/io/colors")
 const output = require("@std/io/output")
+const prompt = require("@std/io/prompt")
 const process = require("@std/process")
+const semver = require("@std/semver")
 const str = require("@std/str")
 const terminal = require("@std/terminal")
 const cursor = require("@std/terminal/cursor")
 const thread = require("@std/thread")
 const time = require("@std/time")
+
+const function check_seal_semver(minimum: string): boolean
+    if not _RUNTIME then -- 0.0.x seals dont have _RUNTIME
+        return false
+    end
+    local min = semver.from(minimum)
+    const success, seal_version = pcall(semver.from, _RUNTIME.version.display)
+    if not success or typeof(seal_version) == "error" then
+        error(`Can't parse your seal version (got {seal_version})`)
+    end
+    if seal_version >= min then
+        return true
+    end
+    return false
+end
+
+if not check_seal_semver("0.8.1") then
+    error(`Need seal version >= 0.8.1 so we can keep track of child process exit status, download from https://github.com/seal-runtime/seal/releases\n\z
+    (got seal semver {if _RUNTIME then _RUNTIME.version.display else _VERSION})`)
+end
 
 const generate_keywords = require("./scripts/generate_keywords")
 
@@ -75,47 +99,59 @@ const function ensure_dependencies()
     end
 end
 
-const function pick_luwu_path(): string
-    local resp = parsed:get("--luwu") or (
-        if is_release then
-            -- seal ./rebuild.luau --release should compile from submodule dir with 0 hassle
-            "sub"
-        else
-            "test"
-    )
-    const is_submoduley =
-        resp == "sub" 
-        or resp == "submodule"
-        or resp == "./luau"
-        or resp == "./luwu"
-        or resp == "here"
-
-    if resp == "test" or resp == "LUWU_TEST_PATH" then
-        if luwu_test_path then
-            const test_path_type = fs.is(luwu_test_path)
-            if test_path_type == "Directory" then
-                return luwu_test_path
-            else
-                error(`LUWU_TEST_PATH={luwu_test_path} is not a directory (got: {test_path_type})`)
+const function can_crash_editor()
+    -- TODO: need process.find in seal stdlib; this sucks and is something seal is made to fix for cross-platform scripting
+    const function find_exe_path_for_pid(pid: string): string?
+        if env.os == "Linux" then
+            const _, path = pcall(fs.readlink, `/proc/{pid}/exe`)
+            if typeof(path) ~= "string" then
+                return nil
+            end
+            return str.trimback(path, " %(deleted%)")
+        elseif env.os == "MacOS" then
+            const res = process.shell(`ps -o comm= -p {pid}`)
+            if res.ok then
+                return str.trim(res.out)
+            end
+        elseif env.os == "Windows" then
+            error("Windows not supported for PID lookup")
+        end
+        return nil
+    end
+    if env.os == "Linux" or env.os == "MacOS" or env.os == "Android" then
+        if #env.where("pgrep") == 0 then
+            return false -- idk what this system is doing very few systems are missing pgrep
+        end
+        const result = process.run {
+            program = "pgrep",
+            args = { "-x", "luwu-lsp" },
+        }
+        if result.ok then
+            const pids = str.splitlines(result.out)
+            for _, pid in pids do
+                local exe_path = find_exe_path_for_pid(pid)
+                if not exe_path then
+                    continue
+                end
+                if str.trim(exe_path) == luwu_lsp_dir:join("build", "luwu-lsp") then
+                    return true
+                end
             end
         end
-        error(
-            `Environment variable LUWU_TEST_PATH is unset.{eol2}\z
-            - If you just want to compile luwu-lsp for general use outside testing mode, run seal ./rebuild.luau --release{eol2}\z
-            - For rapid iteration during development, set LUWU_TEST_PATH to your local copy of the luwu repository.{eol2}\z
-            - To compile luwu-lsp from the submodule path in this directory instead of LUWU_TEST_PATH, pass --luwu=here`
-        )
-    elseif is_submoduley then
-        return luwu_submodule_path
-    else
-        const requested_dir = resp :: string
-        const requested_path_type = fs.is(requested_dir)
-        if requested_path_type == "Directory" then
-            return requested_dir
-        else
-            error(`--luwu {luwu_test_path} is not a directory (got: {requested_path_type})`)
+    elseif env.os == "Windows" then
+        const res = process.run {
+            program = "powershell",
+            args = { "-NoProfile", "-Command", "(Get-Process -Name luwu-lsp -ErrorAction SilentlyContinue).Path" },
+        }
+        if res.ok then
+            for _, p in str.splitlines(res.out) do
+                if str.trim(p) == luwu_lsp_dir:join("build", "luwu-lsp.exe") then
+                    return true
+                end
+            end
         end
     end
+    return false
 end
 
 const function should_reconfigure(luwu_path: string)
@@ -181,24 +217,60 @@ const function update_submodules()
     if not subdate_result.ok then
         error(`Unable to update submodules due to error {subdate_result.err}`)
     end
+    print("Submodule updated or already up-to-date.")
 end
 
-ensure_dependencies()
+const function pick_luwu_path(): string
+    const resp = parsed:get("--luwu") or (
+        if is_release then
+            -- seal ./rebuild.luau --release should compile from submodule dir with 0 hassle
+            "sub"
+        else
+            "test"
+    )
+    const is_submoduley =
+        resp == "sub" 
+        or resp == "submodule"
+        or resp == "./luau"
+        or resp == "./luwu"
+        or resp == "here"
 
-if parsed.command == "submodule-update" then
-    update_submodules()
-    process.exit(0)
+    if resp == "test" or resp == "LUWU_TEST_PATH" then
+        if luwu_test_path then
+            const test_path_type = fs.is(luwu_test_path)
+            if test_path_type == "Directory" then
+                return luwu_test_path
+            else
+                error(`LUWU_TEST_PATH={luwu_test_path} is not a directory (got: {test_path_type})`)
+            end
+        end
+        local release_command = "seal ./rebuild.luau --release"
+        if colors.enabled() then
+            release_command = colors.codes.BOLD_WHITE .. release_command .. colors.codes.RED
+        end
+        error(
+            `Script is in testing mode but environment variable LUWU_TEST_PATH is unset.{eol2}\z
+            - If you just want to compile luwu-lsp for general use outside testing mode, run {release_command}{eol2}\z
+            - For rapid iteration during development, set LUWU_TEST_PATH to your local copy of the luwu repository.{eol2}\z
+            - To compile luwu-lsp from the submodule path in this directory instead of LUWU_TEST_PATH, pass --luwu=here`
+        )
+    elseif is_submoduley then
+        -- make sure user didnt forget to clone submodules before erroring out somewhere else
+        if not fs.path.exists(luwu_submodule_path) or #fs.listdir(luwu_submodule_path) < 4 then
+            print("./luwu dir is missing or empty; you probably forgot to clone with submodules... updating submodules")
+            update_submodules()
+        end
+        return luwu_submodule_path
+    else
+        const requested_dir = resp :: string
+        const requested_path_type = fs.is(requested_dir)
+        if requested_path_type == "Directory" then
+            return requested_dir
+        else
+            error(`--luwu {luwu_test_path} is not a directory (got: {requested_path_type})`)
+        end
+    end
 end
-
-assert(parsed.command == "default", `Unknown command {parsed.command}, see --help`)
-
-const luwu_path = pick_luwu_path()
-if should_reconfigure(luwu_path) then
-    clean_and_configure(luwu_path)
-end
-
--- update hover docs
-generate_keywords()
 
 const function get_targets(): { string }
     const passed_targets = parsed:expect<<string>>("--targets")
@@ -223,20 +295,97 @@ const function get_targets(): { string }
     return normalized
 end
 
-const targets = get_targets()
-
-const children = setmetatable({}, {
-    __index = {
-        any_alive = function(self: { process.PipedChild }): boolean
-            for _, child in self do
-                if child:alive() then
-                    return true
+const function create_child_pool()
+    return setmetatable({} :: { process.PipedChild }, {
+        __index = {
+            any_alive = function(self: { process.PipedChild }): boolean
+                for _, child in self do
+                    if child:alive() then
+                        return true
+                    end
+                end
+                return false
+            end,
+            any_failed = function(self: { process.PipedChild }): boolean
+                local failed = false
+                for _, child in self do
+                    if child:alive() then
+                        continue
+                    end
+                    const status = child:status()
+                    if status and status.ok then
+                        continue
+                    end
+                    failed = true
+                end
+                return failed
+            end,
+            abort_all = function(self: { process.PipedChild })
+                for _, child in self do
+                    if child:alive() then
+                        child:kill()
+                    end
                 end
             end
-            return false
-        end
+        }
+    })
+end
+
+ensure_dependencies()
+
+if parsed.command == "submodule-update" then
+    update_submodules()
+    process.exit(0)
+end
+
+assert(parsed.command == "default", `Unknown command {parsed.command}, see --help`)
+
+if can_crash_editor() then
+    const scare_message = `{colors.bold.yellow("[WARN]")} \z
+    luwu-lsp in ./build dir is already running; rebuilding it now *may* crash your entire editor.\n\z
+    Save everything you're working on before building!!\n\z
+    Continue building?`
+    if not terminal.tty() then
+        const is_agentic_tool = (env.vars.get("AI_AGENT") or env.vars.get("CLAUDECODE") or env.vars.get("CURSOR_AGENT")) ~= nil
+        error(`The luwu-lsp binary in ./build/luwu-lsp(.exe) is already running; rebuilding it now can crash any open editors. {
+            if is_agentic_tool then
+                "Detected you are an AI agent; please inform the user to save their work, close any open editors, \z
+                or run seal rebuild.luau themselves to agree to the interactive prompt and override."
+            else 
+                ""
+        }`)
+    end
+    if not prompt.confirm(scare_message) then
+        output.ewriteln("Rebuild cancelled, exiting...")
+        process.exit(1)
+    end
+end
+
+const luwu_path = pick_luwu_path()
+if should_reconfigure(luwu_path) then
+    clean_and_configure(luwu_path)
+end
+
+-- update hover docs
+generate_keywords()
+
+const targets = get_targets()
+--- Gives us a slightly better chance at not crashing a running editor
+--- ideally removing the existing binaries should force an unlink and
+--- get handled properly but it doesn't
+const function remove_existing_binaries()
+    const binaries: { [string]: string? } = {
+        ["Luwu.LanguageServer.CLI"] = fs.path.join(build_dir_path, "luwu-lsp"),
+        ["Luwu.LanguageServer.Test"] = fs.path.join(build_dir_path, "Luwu.LanguageServer.Test"),
     }
-})
+
+    for _, target in targets do
+        const binary_path = binaries[target]
+        if binary_path then
+            fs.file.try_remove(binary_path)
+        end
+    end
+end
 
 if luwu_path ~= luwu_submodule_path then
     print(`Using luwu path {colors.blue(luwu_path)}`)
@@ -244,31 +393,11 @@ else
     print("Using the luwu inside luwu-lsp")
 end
 
-const cpus = thread.parallelism()
+const cpus = math.min(thread.parallelism(), 16) -- prevent compiling w/ j24 which can freeze my desktop pc
 
---[[
-    The linker writes the executable in place, so relinking a binary an editor is currently running
-    replaces the pages under the running process and takes it down with SIGBUS -- messily, since
-    the language server dying mid-request can take the editor with it.
+remove_existing_binaries()
 
-    Unlinking first is what makes a rebuild safe: the running process keeps the old inode (and keeps
-    working until it's restarted), while the linker writes a brand new file at the same path.
-]]
-const function unlink_running_binaries()
-    const binaries = {
-        ["Luwu.LanguageServer.CLI"] = fs.path.join(build_dir_path, "luwu-lsp"),
-        ["Luwu.LanguageServer.Test"] = fs.path.join(build_dir_path, "Luwu.LanguageServer.Test"),
-    }
-
-    for _, target in targets do
-        const binary_path = binaries[target]
-        if binary_path and fs.path.exists(binary_path) then
-            fs.file.try_remove(binary_path)
-        end
-    end
-end
-
-unlink_running_binaries()
+const children = create_child_pool()
 
 for _, target in targets do
     const spawned = process.spawn {
@@ -292,15 +421,18 @@ const some_errors = {}
 
 const size = terminal.size()
 
-while children:any_alive() and #some_errors == 0 do
+--- keep track of stdout history because ninja writes errors to stdout instead of stderr
+const history: { string } = {}
+while children:any_alive() and #some_errors == 0 and not children:any_failed() do
     for index, child in children do
         local content = child.stdout:read_to("\n", false, time.milliseconds(1))
         if content then
+            content = str.trimback(content) -- strip \n or \r\n
+            -- strip redundant stuff CMakeFiles/Luwu.LanguageServer.dir
+            content = str.replace(content, "CMakeFiles/Luwu.LanguageServer.dir", "")
+            content = str.replace(content, "luwu/CMakeFiles", "")
+            table.insert(history, content)
             if is_tty then
-                content = str.trimback(content) -- strip \n or \r\n
-                -- strip CMakeFiles/Luwu.LanguageServer.dir
-                content = str.replace(content, "CMakeFiles/Luwu.LanguageServer.dir", "")
-                content = str.replace(content, "luwu/CMakeFiles", "")
                 -- make sure fits in terminal
                 if str.width(content) > size.x then
                     content = str.slice(content, 1, size.x - 4)
@@ -315,6 +447,8 @@ while children:any_alive() and #some_errors == 0 do
                 print(content)
             end
         end
+        -- note ninja (one of cmake's possible underlying build systems) in its infinite wisdom writes errors to stdout instead of stderr
+        -- not caught by this but caught by history + any_failed (hopefully it gives failing status code)
         const errors = child.stderr:read(nil, 0)
         if errors then
             table.insert(some_errors, errors)
@@ -326,18 +460,21 @@ while children:any_alive() and #some_errors == 0 do
     end
 end
 
-if #some_errors > 0 then
+if #some_errors > 0 or children:any_failed() then
     -- uh oh
-    for _, child in children do
-        if child:alive() then
-            child:kill()
-        end
+    children:abort_all()
+    if #some_errors > 0 then
+        const build_errors = table.concat(some_errors, "\n")
+        fs.writefile("./build_errors.log", build_errors)
+        output.ewriteln(build_errors)
+        output.ewriteln(`If this failure looks like it's from stale artifacts, try clearing the build directory by running this script with --clean.`)
+        error(`At least one target threw an error or warning (printed above and saved to file ./build_errors.log)`)
+    else
+        output.ewriteln(`If this failure looks like it's from stale artifacts, try clearing the build directory by running this script with --clean.`)
+        const build_history = table.concat(history, "\n")
+        fs.writefile("./build_errors.log", build_history)
+        error("At least one target exited with a failing status code (without writing to stderr)..., dumping stdout history to ./build_errors.log")
     end
-    const build_errors = table.concat(some_errors)
-    fs.writefile("./build_errors.log", build_errors)
-    output.ewriteln(build_errors)
-    output.ewriteln(`If this failure looks like it's from stale artifacts, try clearing the build directory by running this script with --clean.`)
-    error(`At least one target threw an error or warning (printed above and saved to file ./build_errors.log)`)
 end
 
 print("Rebuilt luwu lsp binary! Please reload your current editor")
