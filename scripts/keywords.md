@@ -701,6 +701,119 @@ end
 ```
 <!-- /keyword -->
 
+<!-- keyword: directive_strict -->
+Enable **strict** typechecking mode for this file. Strict mode helps you catch errors before your program runs into them at runtime.
+
+This is the default in Luwu; use `--!nonstrict` to revert to the Luau default.
+<!-- /keyword -->
+
+<!-- keyword: directive_nonstrict -->
+Use **nonstrict** typechecking mode in this file. Nonstrict mode issues type errors for calls to `@checked` embedder-defined functions,
+unknown globals (mistyped identifiers), unknown types and generics, and parameters used incorrectly that *will* result in runtime errors.
+
+It is purposely very relaxed and is primarily focused on improving the quality of inferring untyped code.
+<!-- /keyword -->
+
+<!-- keyword: directive_nocheck -->
+Skip type checking for this file. You may need this if you're dealing with Lua code or extreme legacy code that throws TypeErrors in **nonstrict** mode.
+<!-- /keyword -->
+
+<!-- keyword: directive_nolint -->
+Disable specific lints for this file, or use with zero arguments to disable all lints.
+
+```luau
+--!nolint LocalUnused
+--!nolint LocalShadow
+```
+
+Available lints: `UnknownGlobal`, `DeprecatedGlobal`, `GlobalUsedAsLocal`, `LocalShadow`, `SameLineStatement`, `MultiLineStatement`, `LocalUnused`, `FunctionUnused`, `ImportUnused`, `BuiltinGlobalWrite`, `PlaceholderRead`, `UnreachableCode`, `UnknownType`, `ForRange`, `UnbalancedAssignment`, `ImplicitReturn`, `DuplicateLocal`, `FormatString`, `TableLiteral`, `UninitializedLocal`, `DuplicateFunction`, `DeprecatedApi`, `TableOperations`, `DuplicateCondition`, `MisleadingAndOr`, `CommentDirective`, `IntegerParsing`, `ComparisonPrecedence`, `RedundantNativeAttribute`
+<!-- /keyword -->
+
+<!-- keyword: directive_optimize -->
+Set the optimization level the compiler uses for this file. Levels are `0`, `1` and `2`.
+
+```luau
+--!optimize 2
+```
+
+The default optimization level is usually 1, but is often set to 2 by embedders in production environments.
+
+- `0` — no optimization; the bytecode follows the source extremely closely.
+- `1` — the default. Optimizes without making the program harder to debug: builtin calls, constant folding.
+- `2` — adds optimizations that harm debuggability, most importantly **function and method inlining** and loop unrolling.
+
+```luau
+-- local and const functions can be inlined
+const function foo(x: number, y: number)
+    return (x * y * 100) // 2
+end
+
+const nums = foo(12, 15) -- this call will always be inlined in O2
+
+class Rectangle(width: number, height: number)
+    function area(self)
+        return self.width * self.height
+    end
+end
+
+const rect = Rectangle(12, 14)
+const area = rect:area() -- this method is inlined because `rect` comes directly from a class constructor
+
+class Item(
+    public name: string,
+    public category: string,
+    public price: number
+)
+    private const id = next_id()
+
+    public function is_expensive(self)
+        return self.price >= 100
+    end
+    private function needs_purchase_auth(self)
+        return self:is_expensive() 
+            or self.category == "Computing"
+            or self.category == "Drinks"
+    end
+    public function purchased(self, user: User)
+        assert(class.isinstance(user, User), "Passed user should be a user")
+        -- needs_purchase_auth and is_expensive should be inlined.
+        if self:needs_purchase_auth() then 
+            -- prompt_purchase_auth may be inlined thanks to the assert call
+            user:prompt_purchase_auth(self)
+        end
+    end
+end
+
+const item = Item("Laptop", "Computing", 1200)
+-- purchased calls a private method `needs_purchase_auth` so it is not inlined here
+item:purchased(user)
+```
+<!-- /keyword -->
+
+<!-- keyword: directive_native -->
+Compile this module to native code. Many embedders enable this by default. If your file is extremely large, you may
+want to put `@native` attributes on each function you want native compilation for instead of enabling it for the entire file itself.
+
+```luau
+--!native
+```
+
+Also raises the type information level, since native code generation uses type annotations to decide what to emit.
+<!-- /keyword -->
+
+<!-- keyword: directive_trust -->
+Should the compiler trust type annotations to inline your code? Requires `--optimize 2` to also be enabled.
+
+This significantly benefits:
+
+- Object-oriented code with classes
+- String metamethods.
+
+When enabled, significantly increases the speed of class-oriented code by allowing greedy inlining of methods based
+on type annotations. When this is enabled, the runtime will check some type annotations, and throw a runtime error
+when a value is not the expected type.
+<!-- /keyword -->
+
 <!-- !stop parsing -->
 <!-- The keywords below only ever appear in embedder declaration/definition files which aren't supported yet in hovers -->
 

@@ -910,6 +910,44 @@
           ]
         },
         {
+          "begin": "(--!)(optimize|native|trust)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.directive.luau"
+            },
+            "2": {
+              "name": "keyword.control.directive.luau"
+            }
+          },
+          "end": "\\n",
+          "name": "meta.directive.codegen.luau",
+          "patterns": [
+            {
+              "match": "\\S+",
+              "name": "variable.parameter.directive.luau"
+            }
+          ]
+        },
+        {
+          "begin": "(--!)(strict|nonstrict|nocheck|nolint)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.directive.luau"
+            },
+            "2": {
+              "name": "storage.modifier.directive.luau"
+            }
+          },
+          "end": "\\n",
+          "name": "meta.directive.luau",
+          "patterns": [
+            {
+              "match": "\\S+",
+              "name": "variable.parameter.directive.luau"
+            }
+          ]
+        },
+        {
           "name": "comment.line.double-dash.documentation.luau",
           "begin": "---",
           "end": "\\n",

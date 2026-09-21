@@ -6,6 +6,7 @@
 
 #include "Luau/Ast.h"
 #include "Luau/Location.h"
+#include "Luau/ParseResult.h"
 
 /// Returns markdown documentation for a keyword doc key (e.g. "if", "local", "class_const"),
 /// loaded from the keyword_hovers.json resource. Returns nullopt if there's no documentation
@@ -42,3 +43,23 @@ struct KeywordHoverMatch
 /// them directly -- instead we walk up `ancestry` to the nearest `AstStatClass` and check its
 /// members' and primary constructor's keyword locations explicitly.
 std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<Luau::AstNode*>& ancestry, Luau::Position position);
+
+/// The keyword_hovers.json key documenting a comment directive (`--!strict`, `--!optimize 2`,
+/// `--!trust`, ...), or nullopt when it is not one we recognise.
+///
+/// The key is the directive's name prefixed with `directive_`, taken from the first word of the
+/// comment, so `--!optimize 2` and `--!nolint LocalShadow` are documented by the directive rather than
+/// by their argument.
+///
+/// Colouring directives is the grammar's job (`meta.directive.luau` and `meta.directive.codegen.luau`
+/// in Luau.tmLanguage.json), not the server's: a static grammar can tell the two kinds apart just as
+/// well, and a semantic token would override it with whatever the theme does for an unmapped type.
+std::optional<std::string> commentDirectiveDocKey(const Luau::HotComment& hotcomment);
+
+/// If `position` lands on a comment directive, returns the key documenting it along with the whole
+/// directive's span.
+///
+/// Directives are not AST nodes, so the keyword lookup above cannot see them: they arrive separately as
+/// `SourceModule::hotcomments`. Hover has to consult this *before* it gives up on positions inside
+/// comments, which is otherwise the right thing to do for an ordinary comment.
+std::optional<KeywordHoverMatch> findCommentDirectiveDocKeyAtPosition(const std::vector<Luau::HotComment>& hotcomments, Luau::Position position);

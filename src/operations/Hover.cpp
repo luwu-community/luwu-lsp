@@ -798,6 +798,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     if (!sourceModule)
         return std::nullopt;
 
+    // A comment directive is documented even though it sits in a comment, so it has to be checked
+    // before we give up on comments generally.
+    if (auto directiveMatch = findCommentDirectiveDocKeyAtPosition(sourceModule->hotcomments, position))
+        if (auto docs = getKeywordHoverDocs(directiveMatch->docKey))
+            return lsp::Hover{{lsp::MarkupKind::Markdown, *docs}, textDocument->convertLocation(directiveMatch->range)};
+
     if (Luau::isWithinComment(*sourceModule, position))
         return std::nullopt;
 

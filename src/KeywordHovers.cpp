@@ -287,3 +287,34 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
 
     return std::nullopt;
 }
+
+std::optional<std::string> commentDirectiveDocKey(const Luau::HotComment& hotcomment)
+{
+    // `content` is everything after the `!`, with trailing space trimmed: "strict", "optimize 2",
+    // "nolint LocalShadow". The directive is its first word; an argument belongs to the directive
+    // rather than standing on its own.
+    size_t nameEnd = hotcomment.content.find_first_of(" \t");
+    std::string name = hotcomment.content.substr(0, nameEnd);
+
+    if (name.empty())
+        return std::nullopt;
+
+    std::string docKey = "directive_" + name;
+
+    // Documentation is what makes a directive worth pointing at, so a directive we cannot explain is
+    // left looking like the ordinary comment it behaves as.
+    if (!getKeywordHoverDocs(docKey))
+        return std::nullopt;
+
+    return docKey;
+}
+
+std::optional<KeywordHoverMatch> findCommentDirectiveDocKeyAtPosition(const std::vector<Luau::HotComment>& hotcomments, Luau::Position position)
+{
+    for (const Luau::HotComment& hc : hotcomments)
+        if (hc.location.containsClosed(position))
+            if (auto docKey = commentDirectiveDocKey(hc))
+                return KeywordHoverMatch{std::move(*docKey), hc.location};
+
+    return std::nullopt;
+}

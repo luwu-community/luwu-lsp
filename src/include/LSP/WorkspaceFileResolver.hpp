@@ -99,10 +99,10 @@ public:
     // Currently opened files where content is managed by client
     mutable std::unordered_map<Uri, TextDocument, UriHash> managedFiles{};
 
-    WorkspaceFileResolver()
-    {
-        defaultConfig.mode = Luau::Mode::Nonstrict;
-    }
+    // Takes Luau::Config's own default, which in Luwu is strict. A .luaurc, a .config.luau or the
+    // file's own `--!` directive still overrides it, so a repo that wants the upstream default says
+    // so once.
+    WorkspaceFileResolver() = default;
 
     // Create a WorkspaceFileResolver with a specific default configuration
     explicit WorkspaceFileResolver(Luau::Config defaultConfig)
