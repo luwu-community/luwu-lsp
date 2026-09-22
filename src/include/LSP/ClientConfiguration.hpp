@@ -319,6 +319,11 @@ struct ClientConfiguration
     /// Whether to automatically autocomplete end
     /// DEPRECATED: Use completion.autocompleteEnd instead
     bool autocompleteEnd = false;
+    /// The file extensions (without a leading dot) this server is responsible for. A file whose
+    /// extension we understand but that isn't listed here belongs to whichever language server
+    /// does own it: we neither index it nor report diagnostics for it. Requires still resolve
+    /// across extensions either way, so a `.luwu` module can require a `.luau` one.
+    std::vector<std::string> fileExtensions{"luwu", "luau", "lua"};
     std::vector<std::string> ignoreGlobs{"**/_Index/**"};
     ClientPlatformConfiguration platform{};
     ClientRobloxSourcemapConfiguration sourcemap{};
@@ -335,5 +340,5 @@ struct ClientConfiguration
     ClientFormatConfiguration format{};
     ClientPluginConfiguration plugins{};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientConfiguration, autocompleteEnd, ignoreGlobs, platform, sourcemap, diagnostics, types,
-    inlayHints, hover, completion, signatureHelp, require, index, fflags, bytecode, format, plugins);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientConfiguration, autocompleteEnd, fileExtensions, ignoreGlobs, platform, sourcemap, diagnostics,
+    types, inlayHints, hover, completion, signatureHelp, require, index, fflags, bytecode, format, plugins);

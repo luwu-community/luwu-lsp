@@ -5,7 +5,17 @@ const fs = require("@std/fs")
 const str = require("@std/str")
 
 const home = fs.dir.home()
-const here_path = fs.path.join(script:parent(), "Luau.tmLanguage.json")
+const here_path = fs.path.join(script:parent(), "Luwu.tmLanguage.json")
+
+-- our grammar is scoped `source.luwu`; upstream's is `source.luau`, and the installed
+-- upstream extension declares that scope name, so it has to be swapped in both directions
+const function to_upstream(contents: string): string
+    return str.replace(contents, "source.luwu", "source.luau")
+end
+
+const function from_upstream(contents: string): string
+    return str.replace(contents, "source.luau", "source.luwu")
+end
 
 const function find_luau_lsp_extension_dir(path: string): string?
     const extensions = fs.listdir(path, false)
@@ -35,7 +45,7 @@ const function pull_from_current_vscode()
     if env.os == "Linux" then
         const luau_tmlanguage_json_path = get_tmlanguage_path()
         if fs.path.exists(luau_tmlanguage_json_path) then
-            fs.copy(luau_tmlanguage_json_path, here_path)
+            fs.writefile(here_path, from_upstream(fs.readfile(luau_tmlanguage_json_path)))
             print("succesfully overwrote local with vscode")
         end
     else
@@ -46,7 +56,7 @@ end
 const function push_to_vscode()
     if env.os == "Linux" then
         const luau_tmlanguage_json_path = get_tmlanguage_path()
-        fs.copy(here_path, luau_tmlanguage_json_path)
+        fs.writefile(luau_tmlanguage_json_path, to_upstream(fs.readfile(here_path)))
         print("successfully overwrite vscode with local")
     else
         error("uh os not supported yet")

@@ -4,6 +4,7 @@ import {
   RequestType,
   TextDocumentIdentifier,
 } from "vscode-languageclient/node";
+import * as utils from "./utils";
 
 export const INTERNAL_SOURCE_SCHEME = "luau-internal-source";
 
@@ -18,7 +19,7 @@ export const InternalSourceRequest = new RequestType<
 >("luau-lsp/debug/viewInternalSource");
 
 const isLuauDocument = (document: vscode.TextDocument) => {
-  return document.languageId === "luau" && document.uri.scheme === "file";
+  return utils.isSourceDocument(document) && document.uri.scheme === "file";
 };
 
 const isLuauEditor = (editor: vscode.TextEditor) => {
@@ -99,7 +100,7 @@ export const registerViewInternalSource = (
       tdcp,
     ),
     vscode.commands.registerTextEditorCommand(
-      "luau-lsp.debug.viewInternalSource",
+      "luwu.debug.viewInternalSource",
       async (textEditor: vscode.TextEditor) => {
         if (isLuauEditor(textEditor)) {
           const doc = await vscode.workspace.openTextDocument(tdcp.uri);

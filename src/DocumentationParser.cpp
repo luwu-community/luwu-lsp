@@ -108,7 +108,7 @@ std::optional<std::string> printDocumentation(const Luau::DocumentationDatabase&
             if (!basic->learnMoreLink.empty())
                 result += "\n\n[Learn More](" + basic->learnMoreLink + ")";
             if (!basic->codeSample.empty())
-                result += "\n\n" + codeBlock("luau", basic->codeSample);
+                result += "\n\n" + codeBlock(codeBlockLanguage(), basic->codeSample);
         }
         else if (auto* func = documentation->get_if<Luau::FunctionDocumentation>())
         {
@@ -116,7 +116,7 @@ std::optional<std::string> printDocumentation(const Luau::DocumentationDatabase&
             if (!func->learnMoreLink.empty())
                 result += "\n\n[Learn More](" + func->learnMoreLink + ")";
             if (!func->codeSample.empty())
-                result += "\n\n" + codeBlock("luau", func->codeSample);
+                result += "\n\n" + codeBlock(codeBlockLanguage(), func->codeSample);
         }
         else if (auto* overloaded = documentation->get_if<Luau::OverloadedFunctionDocumentation>())
         {
@@ -136,7 +136,7 @@ std::optional<std::string> printDocumentation(const Luau::DocumentationDatabase&
             if (!tbl->learnMoreLink.empty())
                 result += "\n\n[Learn More](" + tbl->learnMoreLink + ")";
             if (!tbl->codeSample.empty())
-                result += "\n\n" + codeBlock("luau", tbl->codeSample);
+                result += "\n\n" + codeBlock(codeBlockLanguage(), tbl->codeSample);
         }
         return result;
     }

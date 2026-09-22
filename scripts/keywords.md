@@ -20,7 +20,7 @@ In Luwu, `false`, `none`, and `nil` are considered falsy.
 
 If statements:
 
-```luau
+```luwu
 if x == y then
     do_something(x)
 end
@@ -39,7 +39,7 @@ end
 
 Luwu also supports `if` *expressions*:
 
-```luau
+```luwu
 const thing_to_add =
     if x == y then
         do_something(compute_something(x, y))
@@ -53,7 +53,7 @@ Unlike `if` statements, `if` expressions must contain only one expression in eac
 <!-- keyword: if_expr -->
 Choose between two expressions based on a condition; `if` *expressions* evaluate to a value rather than branching control flow.
 
-```luau
+```luwu
 const name = if typeof(value) == "string" then value else tostring(value)
 
 const level =
@@ -75,7 +75,7 @@ Add a final, catch-all branch to an `if` statement or expression.
 <!-- keyword: elseif -->
 Add a separate conditional branch to an `if` statement or expression.
 
-```luau
+```luwu
 if x ~= y then
     -- do something
 elseif x == (y - 2) then
@@ -99,7 +99,7 @@ A falsy boolean value that can be used in boolean logic. The other falsy values 
 <!-- keyword: for -->
 Create loop statements to iterate over containers (or a set number of times).
 
-```luau
+```luwu
 -- iterate over an array
 const cats: { string } = { "Taz", "Nyla", "Nanuk", "Crazy", "Mr. Purrsalot" }
 for index, cat in cats do
@@ -132,7 +132,7 @@ In the type system, functions are represented with `(paramname: Type) -> (Return
 
 Named functions should be defined with the `const` or `local` keyword in front of them so they can be inlined by the compiler.
 
-```luau
+```luwu
 -- Named function 'add'
 const function add(x, y)
     return x + y
@@ -164,7 +164,7 @@ const res = dothing(f)
 
 Functions can be used as expressions:
 
-```luau
+```luwu
 const cats = {
     {
         name = "Nyla",
@@ -179,7 +179,7 @@ const cats = {
 
 There is a special syntax for adding functions to tables:
 
-```luau
+```luwu
 local module = {}
 function module.functionName()
     -- do something
@@ -188,7 +188,7 @@ end
 
 Functions can be hoisted to be called above their actual definitions.
 
-```luau
+```luwu
 local extra_work: (string) -> { string }
 const function do_something(thing: string)
     const result = extra_work(thing)
@@ -215,7 +215,7 @@ Define a new locally-scoped variable (binding).
 
 Unlike `const` bindings, `local` bindings may be mutated by reassignment.
 
-```luau
+```luwu
 local firstName = getFirstName()
 if firstName then
     local lastName = getLastName(firstName)
@@ -225,7 +225,7 @@ end
 
 You can use this with the `function` keyword to define a `local function`.
 
-```luau
+```luwu
 local function foo(x: string, y: number)
     print(x, y)
 end
@@ -260,7 +260,7 @@ Used as a statement to exit a function and provide zero or more values back to t
 Most of the time, you should return one value. If you only want to return a value sometimes,
 return `nil` instead of returning nothing.
 
-```luau
+```luwu
 -- This function returns 0 values
 const function do_something(thing: string | nil | none)
     if not thing then -- handles both `nil` and `none`
@@ -291,7 +291,7 @@ A function that returns multiple values is called a "multiret function"; these i
 
 If your function returns multiple values, you should return the same number of values on all codepaths.
 
-```luau
+```luwu
 const function call()
     return "hi", "bye"
 end
@@ -318,7 +318,7 @@ The `until` expression may refer to locals from the `repeat` block.
 <!-- keyword: while -->
 Creates a loop that keeps repeating while its condition holds `true`.
 
-```luau
+```luwu
 while #elements > 0 do
     const popped = table.remove(elements, 1)
     dosomething(popped)
@@ -333,7 +333,7 @@ end
 <!-- keyword: class -->
 Define a unique data structure with fields, functions, and methods.
 
-```luau
+```luwu
 class Cat
     name: string
     age: number
@@ -351,7 +351,7 @@ To import your class in another module (another file), `export` it with `export 
 A class can have a *primary constructor* with a *field parameter list*.
 This allows passing fields positionally instead of through the table constructor.
 
-```luau
+```luwu
 export class Name(first: string, last: string, middle: string?)
     function middle_initial(self): string?
         if self.middle then
@@ -385,7 +385,7 @@ end
 
 Use `class.isinstance` to check if an `object` is an instance of a class.
 
-```luau
+```luwu
 type Animal =
     | Cat
     | Dog
@@ -409,7 +409,7 @@ end
 
 More complicated classes can have the `public`, `private`, `const` keywords, generic parameters, and default values.
 
-```luau
+```luwu
 export class Set<T> private () -- hide default constructor
     private const inner: { [T]: true? } = {}
     public function new<T>(): Set<T>
@@ -443,7 +443,7 @@ Skip to the next iteration of a loop.
 <!-- keyword: const -->
 Defines an immutable `local` binding. It is a syntax error to try to change the value of this binding.
 
-```luau
+```luwu
 const x = 2
 x += 1 -- syntax error
 
@@ -456,7 +456,7 @@ end
 <!-- keyword: public -->
 An access specifier that marks a class field (property) or function (normal function or method) as accessible from outside the lexical scope of that class. This keyword can be omitted if every member of the class is `public`.
 
-```luau
+```luwu
 class Cat
     name: string -- implicitly public
     function meow(self) -- implicitly public
@@ -480,7 +480,7 @@ An access speciier that forbids a class field, function, or method from being ac
 
 Attempting to access a `private` member from outside its class raises a runtime error.
 
-```luau
+```luwu
 class RsaKeys
     public public_key: string
     private private_key: string
@@ -502,7 +502,7 @@ Exposes a type or value to other modules (other files) to be `require`-d.
 <!-- keyword: type -->
 Creates a type alias, usually for a table or function type:
 
-```luau
+```luwu
 type Cat = {
     what: "Cat",
     name: string,
@@ -535,7 +535,7 @@ Set a table property as readonly.
 <!-- keyword: export_class -->
 Make a class available to other modules.
 
-```luau
+```luwu
 -- list.luau
 export class List<T>
     private inner: { T }
@@ -560,7 +560,7 @@ const listy = List("Taz", "Nanuk", "Nyla")
 <!-- keyword: export_type -->
 Create and export a type alias, usually for a table or function type:
 
-```luau
+```luwu
 -- cats.luau
 export type Cat = {
     what: "Cat",
@@ -590,7 +590,7 @@ A `local function` binding that cannot be mutated. Like `local function`s, these
 <!-- keyword: class_const -->
 A modifier that marks a `const` field of a class. A `const` field may only be mutated during construction (during `__init`) and cannot be reassigned afterwards.
 
-```luau
+```luwu
 local last_id = 1
 class Id
     -- implicitly public
@@ -611,7 +611,7 @@ In this position, the `private` keyword marks the class's **primary constructor*
 
 To instantiate this class from outside its scope, you need to call a `public` function (often called a factory function) that returns an object of this class.
 
-```luau
+```luwu
 class PositiveNumber private (
     const inner: number -- this field is public by default even though constructor is private
 )
@@ -635,7 +635,7 @@ In this position, `public` explicitly marks the class's primary constructor as `
 
 Since this is already the default, you'll typically see it here for emphasis/clarity when a class has private members.
 
-```luau
+```luwu
 class Seal public (name: string)
     private id = next_id()
     public blubber = 100
@@ -646,7 +646,7 @@ end
 <!-- keyword: primary_constructor_param_public -->
 An access specifier that marks this field introduced by the class's primary constructor (field parameter list) as `public`. This keyword may be omitted when the class has 0 `private` members.
 
-```luau
+```luwu
 class Particle private (
     public position: Vector2,
     public velocity: Vector2,
@@ -668,7 +668,7 @@ A `const` modifier goes after the access specifier: `public const position: Vect
 <!-- keyword: primary_constructor_param_private -->
 An access specifier that marks this field introduced by the class's primary constructor (field parameter list) as `private`. Attempting to access a private field outside the lexical scope of its class raises a runtime error.
 
-```luau
+```luwu
 class SshKey private (
     public const public_key: string,
     private const private_key: string
@@ -688,7 +688,7 @@ Marks this field introduced by the class's primary constructor (field parameter 
 
 The `const` modifier goes after the access specifier (`public` or `private`) when an access specifier is present.
 
-```luau
+```luwu
 class Circle(
     public const radius: number,
     private const id = next_id()
@@ -721,7 +721,7 @@ Skip type checking for this file. You may need this if you're dealing with Lua c
 <!-- keyword: directive_nolint -->
 Disable specific lints for this file, or use with zero arguments to disable all lints.
 
-```luau
+```luwu
 --!nolint LocalUnused
 --!nolint LocalShadow
 ```
@@ -732,7 +732,7 @@ Available lints: `UnknownGlobal`, `DeprecatedGlobal`, `GlobalUsedAsLocal`, `Loca
 <!-- keyword: directive_optimize -->
 Set the optimization level the compiler uses for this file. Levels are `0`, `1` and `2`.
 
-```luau
+```luwu
 --!optimize 2
 ```
 
@@ -742,7 +742,7 @@ The default optimization level is usually 1, but is often set to 2 by embedders 
 - `1` — the default. Optimizes without making the program harder to debug: builtin calls, constant folding.
 - `2` — adds optimizations that harm debuggability, most importantly **function and method inlining** and loop unrolling.
 
-```luau
+```luwu
 -- local and const functions can be inlined
 const function foo(x: number, y: number)
     return (x * y * 100) // 2
@@ -794,7 +794,7 @@ item:purchased(user)
 Compile this module to native code. Many embedders enable this by default. If your file is extremely large, you may
 want to put `@native` attributes on each function you want native compilation for instead of enabling it for the entire file itself.
 
-```luau
+```luwu
 --!native
 ```
 

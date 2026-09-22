@@ -1,15 +1,14 @@
 {
   "information_for_contributors": [
-    "Luau grammar for .luau files and ```luau code blocks. It is Luwu.tmLanguage.json with the Luwu-only syntax taken out,",
-    "so keyword-like names that are plain identifiers in Luau (`none`, `const` class fields, ...) and Luwu-only directives (`--!trust`) are not highlighted.",
-    "Keep it in sync with Luwu.tmLanguage.json by hand: a change to shared syntax goes in both files.",
-    "The shared rules originally come from https://github.com/JohnnyMorganz/Luau.tmLanguage/blob/main/Luau.YAML-tmLanguage"
+    "The source of this file is https://github.com/JohnnyMorganz/Luau.tmLanguage/blob/main/Luau.YAML-tmLanguage",
+    "If you want to provide a fix or improvement, please create a pull request against the original repository.",
+    "Once accepted there, we are happy to receive an update request."
   ],
-  "name": "Luau",
-  "scopeName": "source.luau",
+  "name": "Luwu",
+  "scopeName": "source.luwu",
   "fileTypes": [
-    "luau",
-    "lua"
+    "luwu",
+    "luau"
   ],
   "patterns": [
     {
@@ -44,6 +43,15 @@
     },
     {
       "include": "#class-declaration"
+    },
+    {
+      "include": "#trait-declaration"
+    },
+    {
+      "include": "#implements-list-continuation"
+    },
+    {
+      "include": "#needs-list-continuation"
     },
     {
       "include": "#public-declaration"
@@ -96,7 +104,7 @@
   ],
   "repository": {
     "function-definition": {
-      "begin": "\\b(?:(export)\\s+)?(?:(public)\\s+|(private)\\s+|(local)\\s+|(const)\\s+)?(function)\\b(?![,:])",
+      "begin": "\\b(?:(export)\\s+)?(?:(public)\\s+|(private)\\s+)?(?:(local)\\s+|(const)\\s+)?(function)\\b(?![,:])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luau"
@@ -325,12 +333,15 @@
       ]
     },
     "declare-function": {
-      "begin": "\\b(declare)\\s+(function)\\b",
+      "begin": "\\b(declare)\\s+(?:(public|private)\\s+)?(function)\\b",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.declare.luau"
         },
         "2": {
+          "name": "storage.modifier.access.luau"
+        },
+        "3": {
           "name": "keyword.control.luau"
         }
       },
@@ -394,20 +405,30 @@
           "name": "variable.language.metamethod.luau"
         },
         {
+          "match": "(?<=[a-zA-Z0-9_])\\?(?=\\s*[(<])",
+          "name": "keyword.operator.optional.luau"
+        },
+        {
           "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
           "name": "entity.name.function.luau"
         }
       ],
-      "comment": "`declare function name(params): Return` -- a function with no body, from definition files."
+      "comment": "`declare function name(params): Return` -- a function with no body, from definition files and trait bodies. A trait may mark a declared function optional with `?` after its name: `declare function on_click?(self, cb: Callback)`."
     },
     "declare-variable": {
-      "comment": "`declare name: Type` -- a global from definition files.",
-      "match": "(?<![^.]\\.|:)\\b(declare)\\s+(?!(?:function|extern|class)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b(?=\\s*:)",
+      "comment": "`declare name: Type` -- a global from definition files, or a field a trait requires of its implementers, which may carry the access specifier and `const` of the field (`declare private const id: string`). In a trait the type is optional: `declare cat` means `declare cat: any`.",
+      "match": "(?<![^.]\\.|:)\\b(declare)\\s+(?:(public|private)\\s+)?(?:(const)\\s+)?(?!(?:function|extern|class)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b(?=\\s*(?::|;|--|$))",
       "captures": {
         "1": {
           "name": "storage.modifier.declare.luau"
         },
         "2": {
+          "name": "storage.modifier.access.luau"
+        },
+        "3": {
+          "name": "storage.modifier.const.luau"
+        },
+        "4": {
           "name": "variable.other.readwrite.luau"
         }
       }
@@ -425,7 +446,7 @@
           "name": "entity.name.type.luau"
         }
       },
-      "end": "(?<=[a-zA-Z0-9_>])(?!\\s*<)(?!\\s*\\bextends\\b)",
+      "end": "(?<=[a-zA-Z0-9_>)}])(?!\\s*[<({])(?!\\s*\\b(?:private|public)\\b\\s*\\()(?!\\s*\\bimplements\\b)",
       "name": "meta.class.luau",
       "patterns": [
         {
@@ -435,15 +456,176 @@
           "include": "#generics-declaration"
         },
         {
-          "match": "\\b(extends)\\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*)",
-          "captures": {
+          "comment": "Luwu Classes: the access specifier on a class's primary constructor -- `class Account private (holder: User)` -- which qualifies the constructor rather than the class. Only a qualifier when a parameter list follows it.",
+          "match": "\\b(public|private)\\b(?=\\s*\\()",
+          "name": "storage.modifier.access.luau"
+        },
+        {
+          "begin": "(\\()",
+          "beginCaptures": {
             "1": {
-              "name": "storage.modifier.extends.luau"
+              "name": "punctuation.definition.parameters.begin.luau"
+            }
+          },
+          "end": "(\\))",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.parameters.end.luau"
+            }
+          },
+          "name": "meta.parameter.luau",
+          "patterns": [
+            {
+              "include": "#comment"
             },
-            "2": {
+            {
+              "comment": "Luwu Classes: a primary constructor parameter may carry the access specifier and `const` modifier of the field it implicitly declares, Kotlin-style -- `class SshKey private (public const public_key: string)`. These are only qualifiers when another name follows, so a parameter may still be named `public`, `private` or `const`.",
+              "match": "\\b(?:(public|private)\\s+)?(const)\\b(?=\\s+[a-zA-Z_])",
+              "captures": {
+                "1": {
+                  "name": "storage.modifier.access.luau"
+                },
+                "2": {
+                  "name": "storage.modifier.const.luau"
+                }
+              }
+            },
+            {
+              "match": "\\b(public|private)\\b(?=\\s+[a-zA-Z_])",
+              "name": "storage.modifier.access.luau"
+            },
+            {
+              "comment": "Default value of a primary constructor parameter (`class Name(a = expr)`).",
+              "begin": "(=)(?!=)",
+              "beginCaptures": {
+                "1": {
+                  "name": "keyword.operator.assignment.luau"
+                }
+              },
+              "end": "(?=[,)])",
+              "name": "meta.parameter.default.luau",
+              "patterns": [
+                {
+                  "include": "source.luwu"
+                }
+              ]
+            },
+            {
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*",
+              "name": "variable.parameter.function.luau"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.arguments.luau"
+            },
+            {
+              "begin": ":",
+              "beginCaptures": {
+                "0": {
+                  "name": "keyword.operator.type.luau"
+                }
+              },
+              "end": "(?=[\\),])|(?=\\s*=(?!=))",
+              "patterns": [
+                {
+                  "include": "#type_literal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "comment": "Not valid Luau syntax -- only used to highlight the POD-constructor field list (`class Name { field: Type, ... }`) shown in class hovers.",
+          "begin": "(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.table.begin.luau"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.table.end.luau"
+            }
+          },
+          "name": "meta.table.luau",
+          "patterns": [
+            {
+              "include": "#comment"
+            },
+            {
+              "match": "\\b(const)\\b",
+              "name": "storage.modifier.const.luau"
+            },
+            {
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*:)",
+              "name": "variable.parameter.function.luau"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.arguments.luau"
+            },
+            {
+              "begin": ":",
+              "beginCaptures": {
+                "0": {
+                  "name": "keyword.operator.type.luau"
+                }
+              },
+              "end": "(?=[,}])",
+              "patterns": [
+                {
+                  "include": "#type_literal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "comment": "Luwu Traits: the traits a class implements, after its header -- `class Heading(level: number) implements Element(`h{level}`), Renderable`. An entry may take generic arguments and trait arguments.",
+          "begin": "\\b(implements)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.modifier.implements.luau"
+            }
+          },
+          "end": "(?<=[a-zA-Z0-9_>)])(?<!\\bimplements)(?!\\s*[,<(.])",
+          "name": "meta.implements.luau",
+          "patterns": [
+            {
+              "include": "#comment"
+            },
+            {
+              "begin": "(<)",
+              "beginCaptures": {
+                "1": {
+                  "name": "punctuation.definition.typeparameters.begin.luau"
+                }
+              },
+              "end": "(>)",
+              "endCaptures": {
+                "1": {
+                  "name": "punctuation.definition.typeparameters.end.luau"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#type_literal"
+                }
+              ]
+            },
+            {
+              "include": "#parentheses"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.arguments.luau"
+            },
+            {
+              "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
               "name": "entity.name.type.luau"
             }
-          }
+          ]
         },
         {
           "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
@@ -451,12 +633,307 @@
         }
       ]
     },
+    "trait-declaration": {
+      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(trait)\\s+(?:([\\w]+))\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.visibility.luau"
+        },
+        "2": {
+          "name": "keyword.control.luau"
+        },
+        "3": {
+          "name": "entity.name.type.luau"
+        }
+      },
+      "end": "(?<=[a-zA-Z0-9_>)}])(?!\\s*[<({])(?!\\s*\\b(?:private|public)\\b\\s*\\()(?!\\s*\\bneeds\\b)",
+      "name": "meta.trait.luau",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#generics-declaration"
+        },
+        {
+          "comment": "Luwu Classes: the access specifier on a class's primary constructor -- `class Account private (holder: User)` -- which qualifies the constructor rather than the class. Only a qualifier when a parameter list follows it.",
+          "match": "\\b(public|private)\\b(?=\\s*\\()",
+          "name": "storage.modifier.access.luau"
+        },
+        {
+          "begin": "(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.parameters.begin.luau"
+            }
+          },
+          "end": "(\\))",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.parameters.end.luau"
+            }
+          },
+          "name": "meta.parameter.luau",
+          "patterns": [
+            {
+              "include": "#comment"
+            },
+            {
+              "comment": "Luwu Classes: a primary constructor parameter may carry the access specifier and `const` modifier of the field it implicitly declares, Kotlin-style -- `class SshKey private (public const public_key: string)`. These are only qualifiers when another name follows, so a parameter may still be named `public`, `private` or `const`.",
+              "match": "\\b(?:(public|private)\\s+)?(const)\\b(?=\\s+[a-zA-Z_])",
+              "captures": {
+                "1": {
+                  "name": "storage.modifier.access.luau"
+                },
+                "2": {
+                  "name": "storage.modifier.const.luau"
+                }
+              }
+            },
+            {
+              "match": "\\b(public|private)\\b(?=\\s+[a-zA-Z_])",
+              "name": "storage.modifier.access.luau"
+            },
+            {
+              "comment": "Default value of a primary constructor parameter (`class Name(a = expr)`).",
+              "begin": "(=)(?!=)",
+              "beginCaptures": {
+                "1": {
+                  "name": "keyword.operator.assignment.luau"
+                }
+              },
+              "end": "(?=[,)])",
+              "name": "meta.parameter.default.luau",
+              "patterns": [
+                {
+                  "include": "source.luwu"
+                }
+              ]
+            },
+            {
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*",
+              "name": "variable.parameter.function.luau"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.arguments.luau"
+            },
+            {
+              "begin": ":",
+              "beginCaptures": {
+                "0": {
+                  "name": "keyword.operator.type.luau"
+                }
+              },
+              "end": "(?=[\\),])|(?=\\s*=(?!=))",
+              "patterns": [
+                {
+                  "include": "#type_literal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "comment": "Not valid Luau syntax -- only used to highlight the POD-constructor field list (`class Name { field: Type, ... }`) shown in class hovers.",
+          "begin": "(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.table.begin.luau"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.table.end.luau"
+            }
+          },
+          "name": "meta.table.luau",
+          "patterns": [
+            {
+              "include": "#comment"
+            },
+            {
+              "match": "\\b(const)\\b",
+              "name": "storage.modifier.const.luau"
+            },
+            {
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*:)",
+              "name": "variable.parameter.function.luau"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.arguments.luau"
+            },
+            {
+              "begin": ":",
+              "beginCaptures": {
+                "0": {
+                  "name": "keyword.operator.type.luau"
+                }
+              },
+              "end": "(?=[,}])",
+              "patterns": [
+                {
+                  "include": "#type_literal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "comment": "Luwu Traits: the supertraits a trait needs its implementers to also implement -- `trait Enemy needs Npc<Character>`.",
+          "begin": "\\b(needs)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.modifier.needs.luau"
+            }
+          },
+          "end": "(?<=[a-zA-Z0-9_>)])(?<!\\bneeds)(?!\\s*[,<(.])",
+          "name": "meta.needs.luau",
+          "patterns": [
+            {
+              "include": "#comment"
+            },
+            {
+              "begin": "(<)",
+              "beginCaptures": {
+                "1": {
+                  "name": "punctuation.definition.typeparameters.begin.luau"
+                }
+              },
+              "end": "(>)",
+              "endCaptures": {
+                "1": {
+                  "name": "punctuation.definition.typeparameters.end.luau"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#type_literal"
+                }
+              ]
+            },
+            {
+              "include": "#parentheses"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.arguments.luau"
+            },
+            {
+              "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+              "name": "entity.name.type.luau"
+            }
+          ]
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "name": "entity.name.type.trait.luau"
+        }
+      ]
+    },
+    "implements-list-continuation": {
+      "comment": "Luwu Traits: the traits a class implements, after its header -- `class Heading(level: number) implements Element(`h{level}`), Renderable`. An entry may take generic arguments and trait arguments. This copy picks the list up when it starts a line of its own, below the header.",
+      "begin": "^\\s*\\b(implements)\\b(?=\\s+[a-zA-Z_])",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.implements.luau"
+        }
+      },
+      "end": "(?<=[a-zA-Z0-9_>)])(?<!\\bimplements)(?!\\s*[,<(.])",
+      "name": "meta.implements.luau",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "begin": "(<)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.typeparameters.begin.luau"
+            }
+          },
+          "end": "(>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.typeparameters.end.luau"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#type_literal"
+            }
+          ]
+        },
+        {
+          "include": "#parentheses"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.arguments.luau"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "name": "entity.name.type.luau"
+        }
+      ]
+    },
+    "needs-list-continuation": {
+      "comment": "Luwu Traits: the supertraits a trait needs its implementers to also implement -- `trait Enemy needs Npc<Character>`. This copy picks the list up when it starts a line of its own, below the header.",
+      "begin": "^\\s*\\b(needs)\\b(?=\\s+[a-zA-Z_])",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.needs.luau"
+        }
+      },
+      "end": "(?<=[a-zA-Z0-9_>)])(?<!\\bneeds)(?!\\s*[,<(.])",
+      "name": "meta.needs.luau",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "begin": "(<)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.typeparameters.begin.luau"
+            }
+          },
+          "end": "(>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.typeparameters.end.luau"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#type_literal"
+            }
+          ]
+        },
+        {
+          "include": "#parentheses"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.arguments.luau"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "name": "entity.name.type.luau"
+        }
+      ]
+    },
     "public-declaration": {
-      "begin": "\\b(public)\\b",
+      "begin": "\\b(public)\\b(?:\\s+(const)\\b)?",
       "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.access.luau"
+        },
+        "2": {
+          "name": "storage.modifier.const.luau"
         }
       },
       "patterns": [
@@ -491,11 +968,14 @@
       ]
     },
     "private-declaration": {
-      "begin": "\\b(private)\\b",
+      "begin": "\\b(private)\\b(?:\\s+(const)\\b)?",
       "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.access.luau"
+        },
+        "2": {
+          "name": "storage.modifier.const.luau"
         }
       },
       "patterns": [
@@ -674,7 +1154,7 @@
       },
       "patterns": [
         {
-          "include": "source.luau"
+          "include": "source.luwu"
         }
       ]
     },
@@ -715,6 +1195,10 @@
         {
           "match": "\\b(local)\\b",
           "name": "storage.modifier.local.luau"
+        },
+        {
+          "match": "\\b(const)\\b",
+          "name": "storage.modifier.const.luau"
         },
         {
           "match": "\\b(function)\\b(?![,:])",
@@ -797,7 +1281,7 @@
           "name": "punctuation.separator.arguments.luau"
         },
         {
-          "include": "source.luau"
+          "include": "source.luwu"
         }
       ]
     },
@@ -820,7 +1304,7 @@
           "name": "punctuation.separator.fields.luau"
         },
         {
-          "include": "source.luau"
+          "include": "source.luwu"
         }
       ]
     },
@@ -837,6 +1321,10 @@
         {
           "match": "(?<![^.]\\.|:)\\b(nil(?!:))\\b",
           "name": "constant.language.nil.luau"
+        },
+        {
+          "match": "(?<![^.]\\.|:)\\b(none(?!:))\\b",
+          "name": "constant.language.none.luau"
         }
       ]
     },
@@ -892,7 +1380,7 @@
           ]
         },
         {
-          "begin": "(--!)(optimize|native)\\b",
+          "begin": "(--!)(optimize|native|trust)\\b",
           "beginCaptures": {
             "1": {
               "name": "keyword.operator.directive.luau"
@@ -1080,7 +1568,7 @@
     },
     "type-alias-declaration": {
       "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(type)\\b(?=\\s+(?!function\\b)[a-zA-Z_][a-zA-Z0-9_]*)",
-      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|const|continue|do|else|elseif|end|for|function|if|in|local|public|private|repeat|return|then|until|while)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export\\s+)?type\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
+      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|for|function|if|in|local|public|private|repeat|return|then|until|while)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export\\s+)?type\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luau"
@@ -1118,7 +1606,7 @@
           "name": "keyword.operator.typecast.luau"
         }
       },
-      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|const|continue|do|else|elseif|end|for|function|if|in|local|public|repeat|return|then|until|while)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export\\s+)?type\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
+      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|for|function|if|in|local|public|repeat|return|then|until|while)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export\\s+)?type\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
       "patterns": [
         {
           "include": "#type_literal"
@@ -1171,7 +1659,7 @@
           },
           "patterns": [
             {
-              "include": "source.luau"
+              "include": "source.luwu"
             }
           ]
         },

@@ -24,7 +24,7 @@ std::optional<std::string> SourceNode::getScriptFilePath() const
     for (const auto& path : filePaths)
     {
         const auto uri = Uri::file(path);
-        if (uri.extension() == ".lua" || uri.extension() == ".luau")
+        if (isSourceFileExtension(uri.extension()))
         {
             return path;
         }

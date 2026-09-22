@@ -87,7 +87,7 @@ lsp::TextEdit createRequireTextEdit(const std::string& name, const std::string& 
 }
 
 lsp::CompletionItem createSuggestRequire(const std::string& name, const std::vector<lsp::TextEdit>& textEdits, const char* sortText,
-    const std::string& path, const std::string& requirePath)
+    const std::string& path, const std::string& requirePath, const char* language)
 {
     std::string documentation;
     for (const auto& edit : textEdits)
@@ -98,7 +98,7 @@ lsp::CompletionItem createSuggestRequire(const std::string& name, const std::vec
     item.labelDetails = {std::nullopt, requirePath};
     item.kind = lsp::CompletionItemKind::Module;
     item.detail = requirePath;
-    item.documentation = {lsp::MarkupKind::Markdown, codeBlock("luau", documentation) + "\n\n" + path};
+    item.documentation = {lsp::MarkupKind::Markdown, codeBlock(language, documentation) + "\n\n" + path};
     item.insertText = name;
     item.sortText = sortText;
 

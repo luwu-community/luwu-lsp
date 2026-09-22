@@ -49,7 +49,8 @@ static constexpr const char* COMMON_SERVICE_PROVIDER_PROPERTIES[] = {
     "GetService",
 };
 
-static lsp::CompletionItem createSuggestService(const std::string& service, size_t lineNumber, bool appendNewline = false, bool useConst = false)
+static lsp::CompletionItem createSuggestService(
+    const std::string& service, size_t lineNumber, const char* language, bool appendNewline = false, bool useConst = false)
 {
     auto textEdit = Luau::LanguageServer::AutoImports::createServiceTextEdit(service, lineNumber, appendNewline, useConst);
 
@@ -57,7 +58,7 @@ static lsp::CompletionItem createSuggestService(const std::string& service, size
     item.label = service;
     item.kind = lsp::CompletionItemKind::Class;
     item.detail = "Auto-import";
-    item.documentation = {lsp::MarkupKind::Markdown, codeBlock("luau", textEdit.newText)};
+    item.documentation = {lsp::MarkupKind::Markdown, codeBlock(language, textEdit.newText)};
     item.insertText = service;
     item.sortText = SortText::AutoImports;
 
@@ -271,7 +272,7 @@ void RobloxPlatform::handleSuggestImports(const TextDocument& textDocument, cons
                 importsVisitor.firstRequireLine.value() - lineNumber == 0)
                 appendNewline = true;
 
-            items.emplace_back(createSuggestService(service, lineNumber, appendNewline, config.completion.imports.useConst));
+            items.emplace_back(createSuggestService(service, lineNumber, codeBlockLanguage(textDocument), appendNewline, config.completion.imports.useConst));
         }
     }
 

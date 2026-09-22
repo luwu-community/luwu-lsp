@@ -12,6 +12,9 @@
     ["(", ")"]
   ],
   // symbols that are auto closed when typing
+  // NOTE: a long comment/string opener ("--[=[", "[==[") auto-closes as a plain
+  // "]]" here, because it is just the single "[" pair firing twice. The level
+  // markers are put back by the fixup in src/longBracketAutoClose.ts.
   "autoClosingPairs": [
     { "open": "{", "close": "}" },
     { "open": "[", "close": "]" },
@@ -45,6 +48,15 @@
   },
 
   "onEnterRules": [
+    {
+      // keep a `--- doc comment` going on the next line, like rust's `///`.
+      // `(?!-)` so a `-----` separator line isn't continued
+      "beforeText": "^\\s*---(?!-)",
+      "action": {
+        "indent": "none",
+        "appendText": "--- "
+      }
+    },
     {
       "beforeText": "^\\s*(?:local\\s+)?function\\s*[\\w.:]*\\s*\\([^)]*\\)\\s*$",
       "afterText": "^\\s*end\\b",

@@ -12,6 +12,28 @@ bool usingPullDiagnostics(const lsp::ClientCapabilities& capabilities)
     return capabilities.textDocument && capabilities.textDocument->diagnostic;
 }
 
+/// `--!trust` is a Luwu compiler directive; Luau has no such thing, so it's an error in a file that isn't a .luwu file.
+/// Luwu's own linter accepts it anywhere, as it can't tell what kind of file it's linting.
+static void reportLuwuOnlyDirectives(const Luau::SourceModule& module, const TextDocument* textDocument, std::vector<lsp::Diagnostic>& items)
+{
+    if (!textDocument || isLuwuFile(*textDocument))
+        return;
+
+    for (const Luau::HotComment& hotcomment : module.hotcomments)
+    {
+        if (hotcomment.content.substr(0, hotcomment.content.find_first_of(" \t")) != "trust")
+            continue;
+
+        lsp::Diagnostic diagnostic;
+        diagnostic.source = "Luwu";
+        diagnostic.code = "LuwuOnlyDirective";
+        diagnostic.message = "'--!trust' is a Luwu directive and isn't supported in Luau files; rename this file to .luwu to use it";
+        diagnostic.severity = lsp::DiagnosticSeverity::Error;
+        diagnostic.range = {toUTF16(textDocument, hotcomment.location.begin), toUTF16(textDocument, hotcomment.location.end)};
+        items.emplace_back(diagnostic);
+    }
+}
+
 static bool supportsRelatedDocuments(const lsp::ClientCapabilities& capabilities)
 {
     return capabilities.textDocument && capabilities.textDocument->diagnostic && capabilities.textDocument->diagnostic->relatedDocumentSupport;
@@ -54,7 +76,8 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
 
     // If there was an error retrieving the source module
     // Bail early with an empty report - it is likely that the file was closed
-    if (!frontend.getSourceModule(moduleName))
+    auto sourceModule = frontend.getSourceModule(moduleName);
+    if (!sourceModule)
         return report;
 
     auto config = client->getConfiguration(rootUri);
@@ -108,6 +131,8 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
     for (auto& error : cr.lintResult.warnings)
         report.items.emplace_back(createLintDiagnostic(error, *textDocument));
 
+    reportLuwuOnlyDirectives(*sourceModule, *textDocument, report.items);
+
     return report;
 }
 
@@ -121,7 +146,7 @@ std::vector<Uri> WorkspaceFolder::findFilesForWorkspaceDiagnostics(const std::st
         {
             auto uri = Uri::file(path);
             auto ext = uri.extension();
-            if ((ext == ".lua" || ext == ".luau") && !isDefinitionFile(uri, config))
+            if (isEnabledSourceFileExtension(config.fileExtensions, ext) && !isDefinitionFile(uri, config))
             {
                 files.push_back(uri);
             }
@@ -175,7 +200,8 @@ lsp::WorkspaceDiagnosticReport WorkspaceFolder::workspaceDiagnostics(const lsp::
 
         // If there was an error retrieving the source module, disregard this file
         // TODO: should we file a diagnostic?
-        if (!frontend.getSourceModule(moduleName))
+        auto sourceModule = frontend.getSourceModule(moduleName);
+        if (!sourceModule)
             continue;
 
         documentReport.items.reserve(cr.errors.size() + cr.lintResult.errors.size() + cr.lintResult.warnings.size());
@@ -200,6 +226,8 @@ lsp::WorkspaceDiagnosticReport WorkspaceFolder::workspaceDiagnostics(const lsp::
         }
         for (auto& error : cr.lintResult.warnings)
             documentReport.items.emplace_back(createLintDiagnostic(error, document));
+
+        reportLuwuOnlyDirectives(*sourceModule, document, documentReport.items);
 
         workspaceReport.items.emplace_back(documentReport);
     }

@@ -5,6 +5,38 @@
 
 #include "Luau/TimeTrace.h"
 #include "LuauFileUtils.hpp"
+#include "LSP/TextDocument.hpp"
+#include "Flags.hpp"
+
+const std::vector<std::string_view> kSourceFileExtensions{".luwu", ".luau", ".lua"};
+
+bool isSourceFileExtension(std::string_view extension)
+{
+    return contains(kSourceFileExtensions, extension);
+}
+
+bool isEnabledSourceFileExtension(const std::vector<std::string>& enabledExtensions, std::string_view extension)
+{
+    if (!isSourceFileExtension(extension))
+        return false;
+
+    // the client lists extensions without the leading dot
+    extension.remove_prefix(1);
+    for (const auto& enabled : enabledExtensions)
+        if (enabled == extension)
+            return true;
+
+    return false;
+}
+
+std::string removeSourceFileExtension(const std::string& path)
+{
+    for (const auto& extension : kSourceFileExtensions)
+        if (endsWith(path, extension))
+            return path.substr(0, path.size() - extension.size());
+
+    return path;
+}
 
 std::optional<std::string> getParentPath(const std::string& path)
 {
@@ -96,6 +128,23 @@ std::string convertToScriptPath(std::string path)
 std::string codeBlock(const std::string& language, const std::string& code)
 {
     return "```" + language + "\n" + code + "\n" + "```";
+}
+
+bool isLuwuFile(const TextDocument& textDocument)
+{
+    return textDocument.uri().extension() == ".luwu" || textDocument.languageId() == "luwu";
+}
+
+const char* codeBlockLanguage(const TextDocument& textDocument)
+{
+    if (isLuwuFile(textDocument))
+        return "luwu";
+    return codeBlockLanguage();
+}
+
+const char* codeBlockLanguage()
+{
+    return luwuFeaturesEnabled() ? "luwu" : "luau";
 }
 
 std::optional<std::string> getHomeDirectory()

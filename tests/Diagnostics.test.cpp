@@ -4,6 +4,23 @@
 
 TEST_SUITE_BEGIN("Diagnostics");
 
+TEST_CASE_FIXTURE(Fixture, "trust_directive_is_an_error_outside_luwu_files")
+{
+    auto source = R"(--!trust
+        return {}
+    )";
+
+    auto luauDocument = newDocument("main.luau", source);
+    auto diagnostics = workspace.documentDiagnostics(lsp::DocumentDiagnosticParams{{luauDocument}}, nullptr);
+    REQUIRE_EQ(diagnostics.items.size(), 1);
+    CHECK_EQ(diagnostics.items[0].severity, lsp::DiagnosticSeverity::Error);
+    CHECK_EQ(diagnostics.items[0].range, lsp::Range{{0, 0}, {0, 8}});
+
+    auto luwuDocument = newDocument("main.luwu", source);
+    diagnostics = workspace.documentDiagnostics(lsp::DocumentDiagnosticParams{{luwuDocument}}, nullptr);
+    CHECK_EQ(diagnostics.items.size(), 0);
+}
+
 TEST_CASE_FIXTURE(Fixture, "document_diagnostics_sends_information_for_required_modules")
 {
     client->capabilities.textDocument = lsp::TextDocumentClientCapabilities{};

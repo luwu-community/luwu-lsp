@@ -270,7 +270,7 @@ static std::string moduleNameForUri(const lsp::DocumentUri& uri)
 {
     std::string name = uri.filename();
 
-    for (const char* extension : {".d.luau", ".luau", ".lua"})
+    for (const char* extension : {".d.luwu", ".d.luau", ".luwu", ".luau", ".lua"})
     {
         size_t length = strlen(extension);
         if (name.size() > length && name.compare(name.size() - length, length, extension) == 0)
@@ -787,6 +787,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         throw JsonRpcException(lsp::ErrorCode::RequestFailed, "No managed text document for " + params.textDocument.uri.toString());
 
     auto position = textDocument->convertPosition(params.position);
+    const std::string codeLanguage = codeBlockLanguage(*textDocument);
 
     // Run the type checker to ensure we are up to date
     // TODO: expressiveTypes - remove "forAutocomplete" once the types have been fixed
@@ -800,7 +801,8 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
 
     // A comment directive is documented even though it sits in a comment, so it has to be checked
     // before we give up on comments generally.
-    if (auto directiveMatch = findCommentDirectiveDocKeyAtPosition(sourceModule->hotcomments, position))
+    if (auto directiveMatch = findCommentDirectiveDocKeyAtPosition(sourceModule->hotcomments, position);
+        directiveMatch && (directiveMatch->docKey != "directive_trust" || isLuwuFile(*textDocument)))
         if (auto docs = getKeywordHoverDocs(directiveMatch->docKey))
             return lsp::Hover{{lsp::MarkupKind::Markdown, *docs}, textDocument->convertLocation(directiveMatch->range)};
 
@@ -1503,7 +1505,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     auto typeCodeBlock = [&](const std::string& body) -> std::string
     {
         showReferencedTypes = true;
-        return codeBlock("luau", types::formatLongFunctionTypeLines(body));
+        return codeBlock(codeLanguage, types::formatLongFunctionTypeLines(body));
     };
 
     // If we have a function and its corresponding name
@@ -1527,7 +1529,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         // The class value itself: the summary *is* the answer here, rather than something the
         // hovered expression merely has the type of
         if (auto summary = buildClassFieldSummary(frontend, module, moduleName, *type, et, scope, config.hover.showTableKinds, true))
-            typeString = codeBlock("luau", types::formatLongFunctionTypeLines(*summary)) + typeIdentityLine(*type, "");
+            typeString = codeBlock(codeLanguage, types::formatLongFunctionTypeLines(*summary)) + typeIdentityLine(*type, "");
         else
             typeString = typeCodeBlock(typeString);
     }
@@ -1536,13 +1538,13 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         // `vector` is a language primitive, but it's modeled internally as an ExternType (see
         // BuiltinDefinitions.cpp) just to get free `.x`/`.y`/`.z` property access -- show it plainly
         // instead of as "extern type vector".
-        typeString = codeBlock("luau", "vector");
+        typeString = codeBlock(codeLanguage, "vector");
     }
     else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->parent != frontend.builtinTypes->objectType)
     {
         // A "declare extern type"-style extern type (e.g. a host-provided type like Instance), as
         // opposed to one of our user-defined `class`/`object` types handled above.
-        typeString = codeBlock("luau", types::formatLongFunctionTypeLines(buildExternTypeSummary(module, *type, et, scope, config.hover.showTableKinds))) +
+        typeString = codeBlock(codeLanguage, types::formatLongFunctionTypeLines(buildExternTypeSummary(module, *type, et, scope, config.hover.showTableKinds))) +
                      typeIdentityLine(*type, "");
     }
     else if (typeAliasInformation)
@@ -1594,12 +1596,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             auto byteLen = string->value.size;
             auto utf8Len = utflen(string->value.data, string->value.size);
             if (utf8Len && utf8Len != byteLen)
-                typeString = codeBlock("luau", "string (" + std::to_string(byteLen) + " bytes, " + std::to_string(utf8Len.value()) + " characters)");
+                typeString = codeBlock(codeLanguage, "string (" + std::to_string(byteLen) + " bytes, " + std::to_string(utf8Len.value()) + " characters)");
             else
-                typeString = codeBlock("luau", "string (" + std::to_string(byteLen) + " bytes)");
+                typeString = codeBlock(codeLanguage, "string (" + std::to_string(byteLen) + " bytes)");
         }
         else
-            typeString = codeBlock("luau", "string");
+            typeString = codeBlock(codeLanguage, "string");
     }
     else
     {
@@ -1655,7 +1657,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             if (referencedTypeLinks.empty())
                 body = "\n" + body;
 
-            typeString += "\n" + codeBlock("luau", body);
+            typeString += "\n" + codeBlock(codeLanguage, body);
         }
     }
 

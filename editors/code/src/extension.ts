@@ -23,6 +23,24 @@ import {
 
 import { onTypeFormattingMiddleware } from "./onTypeFormattingMiddleware";
 
+import {
+  effectiveFileExtensions,
+  isConflictActive,
+  registerConflictingExtensionCheck,
+} from "./conflictingExtension";
+
+import {
+  buildServerConfiguration,
+  getSetting,
+  getSettingOr,
+  LEGACY_NAMESPACE,
+  NAMESPACE,
+  settingChanged,
+  settingKeys,
+} from "./settings";
+
+import { registerLongBracketAutoClose } from "./longBracketAutoClose";
+
 import { registerRequireGraph } from "./requireGraph";
 
 import { registerViewInternalSource } from "./internalSource";
@@ -60,7 +78,7 @@ const getFFlags = async () => {
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Window,
-      title: "Luau: Fetching FFlags",
+      title: "Luwu: Fetching FFlags",
       cancellable: false,
     },
     () =>
@@ -75,8 +93,7 @@ const isAlphanumericUnderscore = (str: string) => {
 };
 
 const isCrashReportingEnabled = () => {
-  const config = vscode.workspace.getConfiguration("luau-lsp.server");
-  return config.get("crashReporting.enabled", false);
+  return getSettingOr("server.crashReporting.enabled", false);
 };
 
 const DO_NOT_SHOW_CRASH_REPORTING_SUGGESTION_KEY =
@@ -121,7 +138,7 @@ class ClientErrorHandler implements ErrorHandler {
       this.recommendedCrashReporting = true;
       vscode.window
         .showInformationMessage(
-          "The Luau Language server exited unexpected. Would you like to enable crash reporting?",
+          "The Luwu Language server exited unexpected. Would you like to enable crash reporting?",
           "Enable",
           "Not now",
           "Do not show again",
@@ -129,9 +146,9 @@ class ClientErrorHandler implements ErrorHandler {
         .then((value) => {
           if (value === "Enable") {
             vscode.workspace
-              .getConfiguration("luau-lsp.server")
+              .getConfiguration(NAMESPACE)
               .update(
-                "crashReporting.enabled",
+                "server.crashReporting.enabled",
                 true,
                 vscode.ConfigurationTarget.Global,
               );
@@ -152,7 +169,7 @@ class ClientErrorHandler implements ErrorHandler {
       if (diff <= 3 * 60 * 1000) {
         return {
           action: CloseAction.DoNotRestart,
-          message: `The Luau Language server crashed ${this.maxRestartCount + 1} times in the last 3 minutes. The server will not be restarted. See the output for more information.`,
+          message: `The Luwu Language server crashed ${this.maxRestartCount + 1} times in the last 3 minutes. The server will not be restarted. See the output for more information.`,
         };
       } else {
         this.restarts.shift();
@@ -246,6 +263,73 @@ const handleExternalFiles = async (
   };
 };
 
+/// The language ID each entry of `luwu.fileExtensions` corresponds to.
+/// `.luwu` and `.luau` are our own contributed languages; `.lua` is VSCode's
+/// built-in one, which we attach to without claiming (it keeps its own icon
+/// and grammar).
+const LANGUAGE_ID_BY_FILE_EXTENSION: Record<string, string> = {
+  luwu: "luwu",
+  luau: "luau",
+  lua: "lua",
+};
+
+/// The documents the language client attaches to. Dropping an extension from
+/// `luwu.fileExtensions` leaves those files to whichever language server
+/// does own them -- the server is told separately, so it also stops indexing
+/// and diagnosing them.
+export function buildDocumentSelector(
+  fileExtensions: readonly string[],
+): NonNullable<LanguageClientOptions["documentSelector"]> {
+  const languages = new Set(
+    fileExtensions
+      .map((extension) => LANGUAGE_ID_BY_FILE_EXTENSION[extension])
+      .filter((language): language is string => language !== undefined),
+  );
+
+  return [...languages].flatMap((language) => [
+    { language, scheme: "file" },
+    { language, scheme: "untitled" },
+  ]);
+}
+
+const configuredFileExtensions = (): string[] =>
+  getSettingOr<string[]>("fileExtensions", ["luwu", "luau", "lua"]);
+
+const CONFIGURE_SERVER_PATH = "Configure luwu.server.path";
+
+/// The language client's own failure for a missing binary is "couldn't create connection to
+/// server", which tells nobody anything. This names the path we looked at, why it wasn't
+/// there, and the two ways out.
+const reportMissingServerBinary = async (
+  serverBinPath: string,
+  serverBinConfig: string,
+): Promise<void> => {
+  const reason =
+    serverBinConfig === ""
+      ? "no luwu.server.path is set and this build ships no bundled binary"
+      : "luwu.server.path points at a file that doesn't exist, and there is " +
+        "no bundled binary to fall back to";
+
+  const choice = await vscode.window.showErrorMessage(
+    `Luwu can't start: the luwu-lsp server binary was not found (${reason}).`,
+    {
+      modal: false,
+      detail:
+        `Looked for it at ${serverBinPath}.\n\n` +
+        "Build it with `seal ./rebuild.luau` in the luwu-lsp repo, then set " +
+        "luwu.server.path to that build/luwu-lsp.",
+    },
+    CONFIGURE_SERVER_PATH,
+  );
+
+  if (choice === CONFIGURE_SERVER_PATH) {
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      "luwu.server.path",
+    );
+  }
+};
+
 const startLanguageServer = async (context: vscode.ExtensionContext) => {
   for (const disposable of clientDisposables) {
     disposable.dispose();
@@ -255,7 +339,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     await client.stop();
   }
 
-  console.log("Starting Luau Language Server");
+  console.log("Starting Luwu Language Server");
 
   const args = ["lsp"];
   const debugArgs = ["lsp"];
@@ -274,13 +358,11 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     documentation: builtinDocumentationFiles,
   } = await roblox.preLanguageServerStart(context);
 
-  const typesConfig = vscode.workspace.getConfiguration("luau-lsp.types");
-
   // Load extra type definitions
   // TODO: deprecate and remove support of array-based definitionFiles configuration
   let definitionFilesConfig =
-    typesConfig.get<{ [packageName: string]: string } | string[]>(
-      "definitionFiles",
+    getSetting<{ [packageName: string]: string } | string[]>(
+      "types.definitionFiles",
     ) ?? {};
 
   if (Array.isArray(definitionFilesConfig)) {
@@ -290,7 +372,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   }
 
   const documentationFilesConfig =
-    typesConfig.get<string[]>("documentationFiles") ?? [];
+    getSetting<string[]>("types.documentationFiles") ?? [];
 
   const result = await handleExternalFiles(
     context,
@@ -342,24 +424,18 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   }
 
   // Luau compatibility mode: turn off Luwu's own language features
-  if (
-    vscode.workspace
-      .getConfiguration("luau-lsp")
-      .get<boolean>("luauCompatibilityMode")
-  ) {
+  if (getSetting<boolean>("luauCompatibilityMode")) {
     addArg("--luau-compat");
   }
 
   // Handle FFlags
   const fflags: FFlags = {};
-  const fflagsConfig = vscode.workspace.getConfiguration("luau-lsp.fflags");
-
-  if (!fflagsConfig.get<boolean>("enableByDefault")) {
+  if (!getSetting<boolean>("fflags.enableByDefault")) {
     addArg("--no-flags-enabled");
   }
 
   // Sync FFlags with upstream
-  if (fflagsConfig.get<boolean>("sync")) {
+  if (getSetting<boolean>("fflags.sync")) {
     try {
       const currentFlags = await getFFlags();
       if (currentFlags) {
@@ -380,12 +456,12 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   }
 
   // Enable new solver
-  if (fflagsConfig.get<boolean>("enableNewSolver")) {
+  if (getSetting<boolean>("fflags.enableNewSolver")) {
     fflags["LuauSolverV2"] = "true";
   }
 
   // Handle overrides
-  const overridenFFlags = fflagsConfig.get<FFlags>("override");
+  const overridenFFlags = getSetting<FFlags>("fflags.override");
   if (overridenFFlags) {
     for (let [name, value] of Object.entries(overridenFFlags)) {
       if (!isAlphanumericUnderscore(name)) {
@@ -411,10 +487,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     }
   }
 
-  const serverConfiguration =
-    vscode.workspace.getConfiguration("luau-lsp.server");
-
-  const serverBinConfig = serverConfiguration.get("path", "").trim();
+  const serverBinConfig = getSettingOr("server.path", "").trim();
   const serverBinUri =
     vscode.workspace.workspaceFolders &&
     vscode.workspace.workspaceFolders.length > 0
@@ -428,27 +501,35 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   if (serverBinConfig !== "" && (await utils.exists(serverBinUri))) {
     serverBinPath = serverBinUri.fsPath;
   } else {
+    const bundledBinPath = vscode.Uri.joinPath(
+      context.extensionUri,
+      "bin",
+      os.platform() === "win32" ? "server.exe" : "server",
+    ).fsPath;
+
+    // A locally packaged .vsix carries no bin/server, so with no usable server.path this is
+    // a dead end. Say so here: letting the client start would fail with "couldn't create
+    // connection to server", which names neither the missing file nor the setting to fix.
+    if (!(await utils.exists(vscode.Uri.file(bundledBinPath)))) {
+      await reportMissingServerBinary(bundledBinPath, serverBinConfig);
+      return;
+    }
+
     if (serverBinConfig !== "") {
       vscode.window.showWarningMessage(
         `Server binary at path \`${serverBinUri.fsPath}\` does not exist, falling back to bundled binary`,
       );
     }
-    serverBinPath = vscode.Uri.joinPath(
-      context.extensionUri,
-      "bin",
-      os.platform() === "win32" ? "server.exe" : "server",
-    ).fsPath;
+    serverBinPath = bundledBinPath;
   }
 
   const transport =
-    serverConfiguration.get<"stdio" | "pipe">(
-      "communicationChannel",
-      "stdio",
-    ) === "pipe"
+    getSettingOr<"stdio" | "pipe">("server.communicationChannel", "stdio") ===
+    "pipe"
       ? TransportKind.pipe
       : TransportKind.stdio;
 
-  const delayStartup = serverConfiguration.get<boolean>("delayStartup", false);
+  const delayStartup = getSettingOr<boolean>("server.delayStartup", false);
   if (delayStartup) {
     addArg("--delay-startup");
   }
@@ -461,7 +542,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   }
 
   // Handle base luaurc
-  const baseLuaurcConfig = serverConfiguration.get<string>("baseLuaurc");
+  const baseLuaurcConfig = getSetting<string>("server.baseLuaurc");
   if (baseLuaurcConfig) {
     const baseLuaurcPath = utils.resolvePath(baseLuaurcConfig);
     let uri;
@@ -485,7 +566,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
           if (action === "Configure Settings") {
             vscode.commands.executeCommand(
               "workbench.action.openSettings",
-              "luau-lsp.server.baseLuaurc",
+              "luwu.server.baseLuaurc",
             );
           }
         });
@@ -510,19 +591,17 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   const serverOptions: ServerOptions = { run, debug };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [
-      { language: "lua", scheme: "file" },
-      { language: "luau", scheme: "file" },
-      { language: "lua", scheme: "untitled" },
-      { language: "luau", scheme: "untitled" },
-    ],
+    documentSelector: buildDocumentSelector(
+      // while upstream's extension is enabled we serve only .luwu, or
+      // every diagnostic in the user's Luau files would appear twice
+      effectiveFileExtensions(
+        configuredFileExtensions(),
+        isConflictActive(context),
+      ),
+    ),
     diagnosticPullOptions: {
-      onChange: vscode.workspace
-        .getConfiguration("luau-lsp.diagnostics")
-        .get("pullOnChange", true),
-      onSave: vscode.workspace
-        .getConfiguration("luau-lsp.diagnostics")
-        .get("pullOnSave", true),
+      onChange: getSettingOr("diagnostics.pullOnChange", true),
+      onSave: getSettingOr("diagnostics.pullOnSave", true),
     },
     initializationOptions: {
       fflags,
@@ -533,12 +612,43 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     errorHandler: new ClientErrorHandler(context, 4),
     middleware: {
       provideOnTypeFormattingEdits: onTypeFormattingMiddleware,
+      workspace: {
+        // The server asks for the `luau-lsp` section, which is the wire
+        // name every client uses -- including the nvim and zed ones, which
+        // we don't ship and can't rename. Our settings live under
+        // `luwu-lsp` and fall back to `luau-lsp`, and only the client can
+        // tell a value someone wrote from a declared default, so the two
+        // namespaces are reconciled here rather than in the server.
+        configuration: (params, token, next) => {
+          const keys = settingKeys(context.extension.packageJSON);
+
+          return params.items.map((item) => {
+            if (
+              item.section !== LEGACY_NAMESPACE &&
+              item.section !== NAMESPACE
+            ) {
+              // not ours: let the default handler answer it
+              const answered = next({ items: [item] }, token);
+              return Array.isArray(answered) ? answered[0] : answered;
+            }
+
+            const scope = item.scopeUri
+              ? vscode.Uri.parse(item.scopeUri)
+              : undefined;
+
+            return buildServerConfiguration(keys, (key) =>
+              getSetting(key, scope),
+            );
+          });
+        },
+      },
     },
   };
 
+  // the id names the output channel and the `luwu.trace.server` setting
   client = new LanguageClient(
-    "luau",
-    "Luau Language Server",
+    "luwu",
+    "Luwu Language Server",
     serverOptions,
     clientOptions,
   );
@@ -552,7 +662,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
 
   clientDisposables.push(
     vscode.commands.registerCommand(
-      "luau-lsp.rename",
+      "luwu.rename",
       async (
         uriString: string,
         position: { line: number; character: number },
@@ -574,16 +684,16 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   clientDisposables.push(...registerRequireGraph(context, client));
   clientDisposables.push(...registerViewInternalSource(context, client));
   clientDisposables.push(
-    vscode.commands.registerCommand("luau-lsp.openWalkthrough", () => {
+    vscode.commands.registerCommand("luwu.openWalkthrough", () => {
       return vscode.commands.executeCommand(
         "workbench.action.openWalkthrough",
-        "JohnnyMorganz.luau-lsp#getting-started",
+        "luwu-community.luwu#getting-started",
         false,
       );
     }),
   );
   clientDisposables.push(
-    vscode.commands.registerCommand("luau-lsp.updateApi", async () => {
+    vscode.commands.registerCommand("luwu.updateApi", async () => {
       await downloadExternalFiles(result.externalFiles);
       vscode.window
         .showInformationMessage(
@@ -592,7 +702,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
         )
         .then((command) => {
           if (command === "Reload Language Server") {
-            vscode.commands.executeCommand("luau-lsp.reloadServer");
+            vscode.commands.executeCommand("luwu.reloadServer");
           }
         });
     }),
@@ -603,16 +713,19 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
 };
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log("Luau LSP activated");
+  console.log("Luwu LSP activated");
 
   await roblox.onActivate(platformContext, context);
 
+  registerConflictingExtensionCheck(context);
+  registerLongBracketAutoClose(context);
+
   context.subscriptions.push(
-    vscode.commands.registerCommand("luau-lsp.reloadServer", async () => {
+    vscode.commands.registerCommand("luwu.reloadServer", async () => {
       vscode.window.showInformationMessage("Reloading Language Server");
       await startLanguageServer(context);
     }),
-    vscode.commands.registerCommand("luau-lsp.flushTimeTrace", async () => {
+    vscode.commands.registerCommand("luwu.flushTimeTrace", async () => {
       if (client) {
         client.sendNotification("$/flushTimeTrace");
       }
@@ -621,43 +734,47 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("luau-lsp.server")) {
-        vscode.window
-          .showInformationMessage(
-            "Luau LSP server configuration has changed, reload server for this to take effect.",
-            "Reload Language Server",
-          )
-          .then((command) => {
-            if (command === "Reload Language Server") {
-              vscode.commands.executeCommand("luau-lsp.reloadServer");
-            }
-          });
-      } else if (
-        e.affectsConfiguration("luau-lsp.fflags") ||
-        e.affectsConfiguration("luau-lsp.completion.enableFragmentAutocomplete")
+      if (
+        settingChanged(e, "server") ||
+        // the document selector is fixed when the client is constructed
+        settingChanged(e, "fileExtensions")
       ) {
         vscode.window
           .showInformationMessage(
-            "Luau FFlags have been changed, reload server for this to take effect.",
+            "Luwu LSP server configuration has changed, reload server for this to take effect.",
             "Reload Language Server",
           )
           .then((command) => {
             if (command === "Reload Language Server") {
-              vscode.commands.executeCommand("luau-lsp.reloadServer");
+              vscode.commands.executeCommand("luwu.reloadServer");
             }
           });
       } else if (
-        e.affectsConfiguration("luau-lsp.types") ||
-        e.affectsConfiguration("luau-lsp.platform.type")
+        settingChanged(e, "fflags") ||
+        settingChanged(e, "completion.enableFragmentAutocomplete")
       ) {
         vscode.window
           .showInformationMessage(
-            "Luau type definitions have been changed, reload server for this to take effect.",
+            "Luwu FFlags have been changed, reload server for this to take effect.",
             "Reload Language Server",
           )
           .then((command) => {
             if (command === "Reload Language Server") {
-              vscode.commands.executeCommand("luau-lsp.reloadServer");
+              vscode.commands.executeCommand("luwu.reloadServer");
+            }
+          });
+      } else if (
+        settingChanged(e, "types") ||
+        settingChanged(e, "platform.type")
+      ) {
+        vscode.window
+          .showInformationMessage(
+            "Luwu type definitions have been changed, reload server for this to take effect.",
+            "Reload Language Server",
+          )
+          .then((command) => {
+            if (command === "Reload Language Server") {
+              vscode.commands.executeCommand("luwu.reloadServer");
             }
           });
       }

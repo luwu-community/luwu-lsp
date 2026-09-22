@@ -6,6 +6,7 @@ import {
   RequestType,
   TextDocumentIdentifier,
 } from "vscode-languageclient/node";
+import * as utils from "./utils";
 
 export type RequireGraphParams = {
   textDocument: TextDocumentIdentifier;
@@ -21,7 +22,7 @@ export const RequireGraphRequest = new RequestType<
 // Based off https://github.com/rust-lang/rust-analyzer/blob/f5e049d09dc17d0b61de2ec179b3607cf1e431b2/editors/code/src/commands.ts
 // Licensed under MIT
 const isLuauDocument = (document: vscode.TextDocument) => {
-  return document.languageId === "luau" && document.uri.scheme === "file";
+  return utils.isSourceDocument(document) && document.uri.scheme === "file";
 };
 
 const isLuauEditor = (editor: vscode.TextEditor) => {
@@ -44,7 +45,7 @@ const viewRequireGraph = async (
     path.join(context.extensionPath, "node_modules"),
   );
   const panel = vscode.window.createWebviewPanel(
-    "luau-lsp.require-graph",
+    "luwu.require-graph",
     "Luau Require Graph",
     vscode.ViewColumn.Two,
     {
@@ -107,7 +108,7 @@ export const registerRequireGraph = (
 ) => {
   return [
     vscode.commands.registerTextEditorCommand(
-      "luau-lsp.requireGraph",
+      "luwu.requireGraph",
       async (textEditor: vscode.TextEditor) => {
         if (isLuauEditor(textEditor)) {
           return viewRequireGraph(context, client, textEditor.document, {
@@ -117,7 +118,7 @@ export const registerRequireGraph = (
       },
     ),
     vscode.commands.registerTextEditorCommand(
-      "luau-lsp.requireGraphForFile",
+      "luwu.requireGraphForFile",
       async (textEditor: vscode.TextEditor) => {
         if (isLuauEditor(textEditor)) {
           return viewRequireGraph(context, client, textEditor.document, {

@@ -5,6 +5,7 @@ import {
   RequestType,
   TextDocumentIdentifier,
 } from "vscode-languageclient/node";
+import * as utils from "./utils";
 
 export const BYTECODE_SCHEME = "luau-bytecode";
 export const COMPILER_REMARKS_SCHEME = "luau-remarks";
@@ -135,7 +136,7 @@ const sleep = (ms: number) => {
 };
 
 const isLuauDocument = (document: vscode.TextDocument) => {
-  return document.languageId === "luau" && document.uri.scheme === "file";
+  return utils.isSourceDocument(document) && document.uri.scheme === "file";
 };
 
 const isLuauEditor = (editor: vscode.TextEditor) => {
@@ -219,7 +220,7 @@ const getBytecodeInfo = (
         if (isLuauEditor(textEditor)) {
           optimizationLevel = await getOptimizationLevel();
 
-          if (command === "luau-lsp.computeCodeGen") {
+          if (command === "luwu.computeCodeGen") {
             codeGenTarget = await getCodeGenTarget();
           }
 
@@ -242,7 +243,7 @@ export const registerComputeBytecode = (
   return getBytecodeInfo(
     context,
     client,
-    "luau-lsp.computeBytecode",
+    "luwu.computeBytecode",
     BYTECODE_SCHEME,
     "bytecode",
     BytecodeRequest,
@@ -256,7 +257,7 @@ export const registerComputeCompilerRemarks = (
   return getBytecodeInfo(
     context,
     client,
-    "luau-lsp.computeCompilerRemarks",
+    "luwu.computeCompilerRemarks",
     COMPILER_REMARKS_SCHEME,
     "compiler-remarks",
     ComputeCompilerRemarksRequest,
@@ -270,7 +271,7 @@ export const registerComputeCodeGen = (
   return getBytecodeInfo(
     context,
     client,
-    "luau-lsp.computeCodeGen",
+    "luwu.computeCodeGen",
     CODEGEN_SCHEME,
     "codeGen",
     ComputeCodeGenRequest,

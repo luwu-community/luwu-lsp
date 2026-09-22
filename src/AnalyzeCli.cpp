@@ -141,7 +141,7 @@ std::vector<std::string> getFilesToAnalyze(const std::vector<std::string>& paths
                 {
                     auto uri = Uri::file(path);
                     auto ext = uri.extension();
-                    if (ext == ".lua" || ext == ".luau")
+                    if (isSourceFileExtension(ext))
                     {
                         if (!workspace || !workspace->isIgnoredFile(uri))
                             files.push_back(uri.fsPath());

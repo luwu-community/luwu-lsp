@@ -63,7 +63,8 @@ const parsed = args.parse(
         args.named("--targets", "Which of the CMake build targets should we build? Defaults to CLI (Luwu.LanguageServer.CLI). Specify multiple targets by separating them with commas.")
             :default("CLI")
     ),
-    args.command("submodule-update", "update ./luwu submodule with whatever path")
+    args.command("submodule-update", "update ./luwu submodule with whatever path"),
+    args.command("vsix", "package editors/code into an installable .vsix (does not build the server binary)")
 )
 
 const luwu_lsp_dir =
@@ -220,6 +221,75 @@ const function update_submodules()
     print("Submodule updated or already up-to-date.")
 end
 
+const extension_dir_path = luwu_lsp_dir:join("editors", "code")
+
+--- Packages the VSCode extension. Deliberately does not touch the server binary: the .vsix
+--- carries no bin/server, so an installed extension uses whatever luau-lsp.server.path points at.
+const function package_vsix()
+    if #env.where("npm") == 0 then
+        error("Missing npm in $PATH; it's needed to typecheck, bundle and package the extension.")
+    end
+
+    if not fs.path.exists(fs.path.join(extension_dir_path, "node_modules")) then
+        print("Installing extension dependencies...")
+        const install_result = process.run {
+            program = "npm",
+            args = { "install" },
+            cwd = extension_dir_path,
+        }
+        if not install_result.ok then
+            error(`npm install failed:\n{install_result.err}`)
+        end
+        -- npm 12 blocks install scripts, and esbuild's postinstall is what fetches its binary
+        process.run {
+            program = "npm",
+            args = { "install-scripts", "approve", "esbuild" },
+            cwd = extension_dir_path,
+        }
+    end
+
+    --[[
+        vsce runs the vscode:prepublish script itself, so typechecking here is redundant --
+        except that vsce swallows the compiler's output and reports only "npm failed with
+        exit code 2", which tells you nothing about which file is broken.
+    ]]
+    print("Typechecking the extension...")
+    const typecheck_result = process.run {
+        program = "npm",
+        args = { "run", "check-types" },
+        cwd = extension_dir_path,
+    }
+    if not typecheck_result.ok then
+        -- tsc writes its diagnostics to stdout, not stderr
+        error(`The extension doesn't typecheck:\n{typecheck_result.stdout}{typecheck_result.stderr}`)
+    end
+
+    print("Packaging the VSCode extension...")
+    const package_result = process.run {
+        program = "npm",
+        args = { "run", "vsix" },
+        cwd = extension_dir_path,
+    }
+    if not package_result.ok then
+        error(`Packaging the extension failed:\n{package_result.stdout}{package_result.stderr}`)
+    end
+
+    local packaged: string? = nil
+    for _, entry in fs.listdir(extension_dir_path, false) do
+        if str.endswith(entry, ".vsix") then
+            packaged = entry
+        end
+    end
+
+    if not packaged then
+        error("vsce reported success but no .vsix landed in editors/code")
+    end
+
+    print(`Packaged {colors.green(packaged)}`)
+    print(`Install it with {colors.blue(`code --install-extension {packaged} --force`)}`)
+    print("The .vsix contains no server binary; the extension uses your server.path setting.")
+end
+
 const function pick_luwu_path(): string
     const resp = parsed:get("--luwu") or (
         if is_release then
@@ -335,6 +405,11 @@ ensure_dependencies()
 
 if parsed.command == "submodule-update" then
     update_submodules()
+    process.exit(0)
+end
+
+if parsed.command == "vsix" then
+    package_vsix()
     process.exit(0)
 end
 

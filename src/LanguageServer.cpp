@@ -814,7 +814,7 @@ void LanguageServer::onInitialized([[maybe_unused]] const lsp::InitializedParams
         watchers.push_back(lsp::FileSystemWatcher{"**/.luaurc"});
         watchers.push_back(lsp::FileSystemWatcher{"**/.robloxrc"});
         watchers.push_back(lsp::FileSystemWatcher{"**/.config.luau"});
-        watchers.push_back(lsp::FileSystemWatcher{"**/*.{lua,luau}"});
+        watchers.push_back(lsp::FileSystemWatcher{"**/*.{lua,luau,luwu}"});
         client->registerCapability(
             "didChangedWatchedFilesCapability", "workspace/didChangeWatchedFiles", lsp::DidChangeWatchedFilesRegistrationOptions{watchers});
     }

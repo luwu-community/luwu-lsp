@@ -1,4 +1,12 @@
 import * as vscode from "vscode";
+import {
+  getExplicitSetting,
+  getSetting,
+  getSettingOr,
+  LEGACY_NAMESPACE,
+  NAMESPACE,
+  settingChanged,
+} from "./settings";
 import { Server } from "http";
 import express, { ErrorRequestHandler } from "express";
 import { format as bytesFormat } from "bytes";
@@ -12,23 +20,14 @@ import * as utils from "./utils";
 let pluginServer: Server | undefined = undefined;
 
 const getStudioPluginValue = <T>(key: string, defaultValue: T): T => {
-  const newInspect = vscode.workspace
-    .getConfiguration("luau-lsp.studioPlugin")
-    .inspect<T>(key);
-  if (
-    newInspect?.globalValue !== undefined ||
-    newInspect?.workspaceValue !== undefined ||
-    newInspect?.workspaceFolderValue !== undefined
-  ) {
-    return (
-      newInspect.workspaceFolderValue ??
-      newInspect.workspaceValue ??
-      newInspect.globalValue ??
-      defaultValue
-    );
-  }
+  // `plugin` is the deprecated spelling of `studioPlugin`, and applies only
+  // when the current spelling is untouched -- hence getExplicitSetting, which
+  // ignores the declared default. Both spellings declare one, so a plain
+  // getSetting here would always answer with studioPlugin's, and the
+  // deprecated name would never be read at all.
   return (
-    vscode.workspace.getConfiguration("luau-lsp.plugin").get<T>(key) ??
+    getExplicitSetting<T>(`studioPlugin.${key}`) ??
+    getSetting<T>(`plugin.${key}`) ??
     defaultValue
   );
 };
@@ -41,8 +40,8 @@ const STUDIO_PLUGIN_URL =
 const setupStudioPlugin = async (client: LanguageClient | undefined) => {
   // Enable the plugin server
   await vscode.workspace
-    .getConfiguration("luau-lsp.studioPlugin")
-    .update("enabled", true);
+    .getConfiguration(NAMESPACE)
+    .update("studioPlugin.enabled", true);
   startPluginServer(client);
   // Open the studio plugin in the browser for the user to install
   vscode.env.openExternal(vscode.Uri.parse(STUDIO_PLUGIN_URL));
@@ -80,13 +79,34 @@ const luauApiDocsUri = (context: vscode.ExtensionContext) => {
   return vscode.Uri.joinPath(context.globalStorageUri, "luau-api-docs.json");
 };
 
+/// Writes back the setting `getRojoProjectFile` reads, in whichever namespace
+/// the workspace is already using: rewriting a `luau-lsp.*` config into
+/// `luwu.*` behind the user's back would break the tooling that generated
+/// it.
+const updateRojoProjectFile = (
+  workspaceFolder: vscode.WorkspaceFolder,
+  projectFile: string,
+) => {
+  const namespace = vscode.workspace
+    .getConfiguration(LEGACY_NAMESPACE, workspaceFolder)
+    .inspect<string>("sourcemap.rojoProjectFile")?.workspaceValue
+    ? LEGACY_NAMESPACE
+    : NAMESPACE;
+
+  return vscode.workspace
+    .getConfiguration(namespace, workspaceFolder)
+    .update("sourcemap.rojoProjectFile", projectFile);
+};
+
 const getRojoProjectFile = async (
   workspaceFolder: vscode.WorkspaceFolder,
-  config: vscode.WorkspaceConfiguration,
   client: LanguageClient | undefined,
 ) => {
-  let projectFile =
-    config.get<string>("rojoProjectFile") ?? "default.project.json";
+  let projectFile = getSettingOr<string>(
+    "sourcemap.rojoProjectFile",
+    "default.project.json",
+    workspaceFolder,
+  );
   const projectFileUri = utils.resolveUri(workspaceFolder.uri, projectFile);
 
   if (await utils.exists(projectFileUri)) {
@@ -116,7 +136,7 @@ const getRojoProjectFile = async (
         } else if (value === "Configure Settings") {
           vscode.commands.executeCommand(
             "workbench.action.openWorkspaceSettings",
-            "luau-lsp.sourcemap",
+            "luwu.sourcemap",
           );
         }
       });
@@ -130,7 +150,7 @@ const getRojoProjectFile = async (
     );
 
     if (option === `Set project file to ${fileName}`) {
-      config.update("rojoProjectFile", fileName);
+      updateRojoProjectFile(workspaceFolder, fileName);
       return fileName;
     } else {
       return undefined;
@@ -145,7 +165,7 @@ const getRojoProjectFile = async (
       const files = foundProjectFiles.map((file) => utils.basenameUri(file));
       const selectedFile = await vscode.window.showQuickPick(files);
       if (selectedFile) {
-        config.update("rojoProjectFile", selectedFile);
+        updateRojoProjectFile(workspaceFolder, selectedFile);
         selectedFile;
       } else {
         return undefined;
@@ -191,17 +211,22 @@ const startSourcemapGeneration = async (
 ) => {
   cleanupSourcemapDisposables(workspaceFolder);
 
-  const config = vscode.workspace.getConfiguration(
-    "luau-lsp.sourcemap",
-    workspaceFolder,
-  );
-
-  if (!config.get<boolean>("enabled") || !config.get<boolean>("autogenerate")) {
+  if (
+    !getSetting<boolean>("sourcemap.enabled", workspaceFolder) ||
+    !getSetting<boolean>("sourcemap.autogenerate", workspaceFolder)
+  ) {
     return;
   }
 
-  const customGeneratorCommand = config.get<string>("generatorCommand");
-  const useVSCodeWatcher = config.get<boolean>("useVSCodeWatcher") ?? false;
+  const customGeneratorCommand = getSetting<string>(
+    "sourcemap.generatorCommand",
+    workspaceFolder,
+  );
+  const useVSCodeWatcher = getSettingOr<boolean>(
+    "sourcemap.useVSCodeWatcher",
+    false,
+    workspaceFolder,
+  );
 
   const loggingFunc = client ? client.info.bind(client) : console.log;
   loggingFunc(
@@ -231,20 +256,23 @@ const startSourcemapGeneration = async (
       });
     } else {
       // Check if the project file exists
-      const projectFile = await getRojoProjectFile(
-        workspaceFolder,
-        config,
-        client,
-      );
+      const projectFile = await getRojoProjectFile(workspaceFolder, client);
       if (!projectFile) {
         return;
       }
-      const rojoPath = config.get<string>("rojoPath") ?? "rojo";
-      const sourcemapFileName =
-        config.get<string>("sourcemapFile") ?? "sourcemap.json";
+      const rojoPath = getSettingOr<string>(
+        "sourcemap.rojoPath",
+        "rojo",
+        workspaceFolder,
+      );
+      const sourcemapFileName = getSettingOr<string>(
+        "sourcemap.sourcemapFile",
+        "sourcemap.json",
+        workspaceFolder,
+      );
       const args = ["sourcemap", projectFile, "--output", sourcemapFileName];
 
-      if (config.get<boolean>("includeNonScripts")) {
+      if (getSetting<boolean>("sourcemap.includeNonScripts", workspaceFolder)) {
         args.push("--include-non-scripts");
       }
 
@@ -312,7 +340,7 @@ const startSourcemapGeneration = async (
           } else if (value === "Configure Settings") {
             vscode.commands.executeCommand(
               "workbench.action.openWorkspaceSettings",
-              "luau-lsp.sourcemap",
+              "luwu.sourcemap",
             );
           }
         });
@@ -326,7 +354,7 @@ const startSourcemapGeneration = async (
     spawnChildProcess();
 
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(workspaceFolder, "**/*.{lua,luau}"),
+      new vscode.RelativePattern(workspaceFolder, "**/*.{lua,luau,luwu}"),
       /* ignoreCreateEvents = */ false,
       /* ignoreChangeEvents = */ true,
       /* ignoreDeleteEvents = */ false,
@@ -352,7 +380,7 @@ const startSourcemapGeneration = async (
         if (code === 0) {
           vscode.window
             .showWarningMessage(
-              "Sourcemap generator ended. No further updates will be tracked. If the generator does not support file watching, enable luau-lsp.sourcemap.useVSCodeWatcher",
+              "Sourcemap generator ended. No further updates will be tracked. If the generator does not support file watching, enable luwu.sourcemap.useVSCodeWatcher",
               "Restart",
               "Configure Settings",
             )
@@ -362,7 +390,7 @@ const startSourcemapGeneration = async (
               } else if (value === "Configure Settings") {
                 vscode.commands.executeCommand(
                   "workbench.action.openWorkspaceSettings",
-                  "luau-lsp.sourcemap",
+                  "luwu.sourcemap",
                 );
               }
             });
@@ -417,7 +445,7 @@ const startPluginServer = async (client: LanguageClient | undefined) => {
 
   app.get("/get-file-paths", async (_req, res) => {
     try {
-      const uris = await vscode.workspace.findFiles("**/*.{lua,luau}");
+      const uris = await vscode.workspace.findFiles("**/*.{lua,luau,luwu}");
       res.json({
         files: uris.map((uri: vscode.Uri) => uri.fsPath),
       });
@@ -437,7 +465,7 @@ const startPluginServer = async (client: LanguageClient | undefined) => {
         .status(413)
         .send(
           `Result is too large. Limit: ${bytesFormat(err.limit)}, Received: ${bytesFormat(err.received)}.\n` +
-            `Increase your available limits by updating the 'luau-lsp.studioPlugin.maximumRequestBodySize' property in VSCode, or by reducing the include list in the Studio Plugin settings`,
+            `Increase your available limits by updating the 'luwu.studioPlugin.maximumRequestBodySize' property in VSCode, or by reducing the include list in the Studio Plugin settings`,
         );
     }
   };
@@ -466,7 +494,7 @@ const startPluginServer = async (client: LanguageClient | undefined) => {
             } else if (value === "Change Port Configuration") {
               vscode.commands.executeCommand(
                 "workbench.action.openWorkspaceSettings",
-                "luau-lsp.studioPlugin.port",
+                "luwu.studioPlugin.port",
               );
             }
           });
@@ -505,30 +533,25 @@ export const onActivate = async (
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "luau-lsp.regenerateSourcemap",
+      "luwu.regenerateSourcemap",
       startSourcemapGenerationForAllFolders,
     ),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("luau-lsp.setupStudioPlugin", () =>
+    vscode.commands.registerCommand("luwu.setupStudioPlugin", () =>
       setupStudioPlugin(platformContext.client),
     ),
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("luau-lsp.sourcemap")) {
+      if (settingChanged(e, "sourcemap")) {
         if (vscode.workspace.workspaceFolders) {
           for (const folder of vscode.workspace.workspaceFolders) {
-            const config = vscode.workspace.getConfiguration(
-              "luau-lsp.sourcemap",
-              folder,
-            );
-
             if (
-              !config.get<boolean>("enabled") ||
-              !config.get<boolean>("autogenerate")
+              !getSetting<boolean>("sourcemap.enabled", folder) ||
+              !getSetting<boolean>("sourcemap.autogenerate", folder)
             ) {
               cleanupSourcemapDisposables(folder);
             } else {
@@ -537,8 +560,8 @@ export const onActivate = async (
           }
         }
       } else if (
-        e.affectsConfiguration("luau-lsp.studioPlugin") ||
-        e.affectsConfiguration("luau-lsp.plugin")
+        settingChanged(e, "studioPlugin") ||
+        settingChanged(e, "plugin")
       ) {
         if (getStudioPluginValue("enabled", false)) {
           stopPluginServer(true);
@@ -557,17 +580,16 @@ export const preLanguageServerStart = async (
   context: vscode.ExtensionContext,
 ) => {
   // Load roblox type definitions
-  const typesConfig = vscode.workspace.getConfiguration("luau-lsp.types");
-  const platformConfig = vscode.workspace.getConfiguration("luau-lsp.platform");
+  const platformType = getSetting<string>("platform.type");
+  const robloxTypes = getSetting<boolean>("types.roblox");
 
-  // TODO: Cleanup when deprecated luau-lsp.types.roblox is deleted
+  // TODO: Cleanup when deprecated luwu.types.roblox is deleted
   // We need to respect the new setting as well as the old setting. We check for "&&" since they are on by default
-  if (
-    platformConfig.get<string>("type") === "roblox" &&
-    typesConfig.get<boolean>("roblox")
-  ) {
-    const securityLevel =
-      typesConfig.get<string>("robloxSecurityLevel") ?? "PluginSecurity";
+  if (platformType === "roblox" && robloxTypes) {
+    const securityLevel = getSettingOr<string>(
+      "types.robloxSecurityLevel",
+      "PluginSecurity",
+    );
 
     return {
       definitions: {

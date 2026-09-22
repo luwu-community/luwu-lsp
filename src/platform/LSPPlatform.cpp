@@ -43,7 +43,7 @@ std::optional<std::string> LSPPlatform::readSourceCode(const Luau::ModuleName& n
 {
     LUAU_TIMETRACE_SCOPE("LSPPlatform::readSourceCode", "LSP");
 
-    if (path.extension() == ".lua" || path.extension() == ".luau")
+    if (isSourceFileExtension(path.extension()))
         return Luau::FileUtils::readFile(path.fsPath());
 
     return std::nullopt;
@@ -165,16 +165,23 @@ std::optional<Luau::ModuleInfo> LSPPlatform::resolveStringRequire(
     if (fileUri.isDirectory())
         fileUri = fileUri.resolvePath("init");
 
-    // Add file endings
-    if (fileUri.extension() != ".luau" && fileUri.extension() != ".lua")
+    // Add file endings, in the order of `kSourceFileExtensions`: a module that exists under more
+    // than one extension resolves to the most Luwu-ish of them
+    if (!isSourceFileExtension(fileUri.extension()))
     {
-        auto fileUriWithExtension = fileUri;
-        fileUriWithExtension.path = fileUri.path + ".luau";
-        if (!fileUriWithExtension.exists())
-            // fall back to .lua if a module with .luau doesn't exist
-            fileUri.path += ".lua";
-        else
-            fileUri.path = fileUriWithExtension.path;
+        std::string basePath = fileUri.path;
+        fileUri.path = basePath + std::string(kSourceFileExtensions.back());
+
+        for (const auto& extension : kSourceFileExtensions)
+        {
+            auto candidate = fileUri;
+            candidate.path = basePath + std::string(extension);
+            if (candidate.exists())
+            {
+                fileUri.path = candidate.path;
+                break;
+            }
+        }
     }
 
     return Luau::ModuleInfo{fileResolver->getModuleName(fileUri)};

@@ -218,7 +218,9 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
             // Recompute diagnostics
             recomputeDiagnostics(config);
         }
-        else if (change.uri.extension() == ".lua" || change.uri.extension() == ".luau")
+        // note: deliberately every extension we understand, not just the enabled ones -- a change
+        // to a file we don't own can still dirty a module we do
+        else if (isSourceFileExtension(change.uri.extension()))
         {
             // Notify if it was a definitions file
             if (isDefinitionFile(change.uri, config))
@@ -419,7 +421,7 @@ void WorkspaceFolder::indexFiles(const ClientConfiguration& config)
 
                 auto uri = Uri::file(path);
                 auto ext = uri.extension();
-                if ((ext == ".lua" || ext == ".luau") && !isDefinitionFile(uri, config) && !isIgnoredFile(uri, config))
+                if (isEnabledSourceFileExtension(config.fileExtensions, ext) && !isDefinitionFile(uri, config) && !isIgnoredFile(uri, config))
                 {
                     auto moduleName = fileResolver.getModuleName(uri);
                     moduleNames.emplace_back(moduleName);

@@ -10,9 +10,17 @@ upstream [`JohnnyMorganz/luau-lsp`](https://github.com/JohnnyMorganz/luau-lsp) (
 
 - "Upstream" means `JohnnyMorganz/luau-lsp` (for this repo) or `luau-lang/luau` (for the language). Neither is the
   source of truth for Luwu semantics.
-- Most of the code, docs (`editors/`, `tests/README.md`) and settings names (`luau-lsp.*`) are still inherited from
-  upstream. Don't assume upstream docs, issue numbers, release process, VSCode Marketplace listing or crash-reporting
-  setup apply here.
+- Most of the code and docs (`editors/`, `tests/README.md`) are still inherited from upstream. Don't assume upstream
+  docs, issue numbers, release process, VSCode Marketplace listing or crash-reporting setup apply here.
+- The VSCode extension is `luwu-community.luwu`, displayed as **Luwu** -- named for the language, like `ms-python.python`
+  is "Python". "Luwu Language Server" means the *binary* (`luwu-lsp`), which is what the output channel and crash
+  messages refer to; don't use it for the extension, since the whole point of the short name is not colliding with
+  upstream's "Luau Language Server".
+- Settings are `luwu.*`, with the old `luau-lsp.*` names read as a permanent fallback -- external tooling (seal)
+  generates them, and using this extension purely for Luau/Roblox work is supported. Resolution lives in
+  `editors/code/src/settings.ts`; **new config reads must go through `getSetting`/`getSettingOr` and change listeners
+  through `settingChanged`**, or they will ignore `luau-lsp.*`. The server still requests the `luau-lsp` config section
+  over the wire (every client sends that, the nvim and zed ones included), so don't rename it in `Client.cpp`.
 - `../luwu` refers to `../luwu` or `$LUWU_TEST_PATH`.
 - Luwu-specific work is mostly editor support for Luwu language features
   (classes, none, destructuring, integers, ? operators), and improving DX.
@@ -50,8 +58,21 @@ seal ./rebuild.luau --clean
 
 Build errors are also written to `build_errors.log`.
 
-Plain CMake works too (keep `-DCMAKE_BUILD_TYPE=RelWithDebInfo`; Debug-style asserts in Luwu Analysis can crash the
-whole server on known TODOs):
+**The `Luwu.LanguageServer.CLI` target (`build/luwu-lsp`) must only ever be built through
+`seal ./rebuild.luau`.** That binary is usually *running* -- it is the language server behind the
+user's open editor -- and relinking it underneath a running process can crash the whole editor and
+lose the user's work. `rebuild.luau` is the only thing that guards against this: it `pgrep`s for the
+binary first, refuses outright when it is running and the shell is not a tty (i.e. when an agent is
+driving), and otherwise makes the user confirm. It also unlinks the old binaries before building,
+which a plain `cmake --build` does not.
+
+So never run `cmake --build ... --target Luwu.LanguageServer.CLI` yourself, and never work around a
+refusal from `rebuild.luau` by falling back to cmake. If it refuses, tell the user to save their
+work and close their editors, or to run `seal ./rebuild.luau` themselves and answer the prompt.
+
+Plain CMake is fine for the *library* and *test* targets, which nothing is running (keep
+`-DCMAKE_BUILD_TYPE=RelWithDebInfo`; Debug-style asserts in Luwu Analysis can crash the whole server
+on known TODOs):
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_LUAU_PATH=$LUWU_TEST_PATH
@@ -121,13 +142,18 @@ Check the current name in `../luwu` rather than trusting existing tests.
 - **Transport** (`src/transport/`): stdio and named-pipe JSON-RPC.
 - **Protocol** (`src/include/Protocol/`): LSP structs with nlohmann/json serialization.
 - **Dependencies**: `luwu/` (don't touch, see above), `extern/` (json, glob, argparse, toml, doctest).
-- **Editor clients** (`editors/`): still upstream's VSCode/nvim/zed/IntelliJ clients.
+- **Editor clients** (`editors/`): `code/` is ours (see Code style, and `src/settings.ts` for the namespace
+  fallback); `nvim/`, `zed/` and `intellij/` are one-line READMEs pointing at third-party projects. Those clients
+  send the `luau-lsp` config section, which is why `Client.cpp` must keep requesting it under that name.
 
 ## Code style
 
 - C++17, Allman braces (`.clang-format`), 4-space indent, 150 column limit
 - Luwu/Luau code: prefer new features like `const` over `local`, snake_case.
   Luwu/Luau scripts not inherited from upstream are written in the seal runtime.
+- TypeScript (`editors/code`): prettier defaults, so 2-space indent and **80 columns**. Prettier reflows neither
+  comments nor string literals, so wrap those by hand -- a long message is split across `+` operands, and the space
+  at the seam goes at the *end* of a line, not the start of the next.
 
 ## Changelog and commits
 
