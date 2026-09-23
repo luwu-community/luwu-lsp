@@ -843,51 +843,69 @@
     "comment": {
       "patterns": [
         {
-          "name": "comment.block.luau",
+          "comment": "A `--[[ ... ]]` / `--[=[ ... ]=]` block comment. Only its delimiters and prose are scoped as a comment, not the whole block, so code in a ```luwu / ```luau fence inside it is scoped purely as code and highlights like it would outside the comment.",
           "begin": "--\\[(=*)\\[",
+          "beginCaptures": {
+            "0": {
+              "name": "comment.block.luau"
+            }
+          },
           "end": "\\]\\1\\]",
+          "endCaptures": {
+            "0": {
+              "name": "comment.block.luau"
+            }
+          },
           "patterns": [
             {
-              "name": "keyword.operator.other.luau",
               "begin": "(```luwu)\\s*$",
               "while": "^(?!\\s*```)",
               "beginCaptures": {
                 "1": {
-                  "name": "comment.luau"
+                  "name": "comment.block.luau"
                 }
               },
               "patterns": [
                 {
                   "include": "source.luwu"
                 }
-              ]
+              ],
+              "contentName": "meta.embedded.block.luwu"
             },
             {
-              "name": "keyword.operator.other.luau",
               "begin": "(```luau?)\\s*$",
               "while": "^(?!\\s*```)",
               "beginCaptures": {
                 "1": {
-                  "name": "comment.luau"
+                  "name": "comment.block.luau"
                 }
               },
               "patterns": [
                 {
                   "include": "source.luau"
                 }
-              ]
+              ],
+              "contentName": "meta.embedded.block.luau"
             },
             {
               "match": "(```)",
-              "name": "keyword.operator.other.luau",
               "captures": {
                 "1": {
-                  "name": "comment.luau"
+                  "name": "comment.block.luau"
                 }
               }
             },
             {
               "include": "#doc_comment_tags"
+            },
+            {
+              "comment": "Comment prose. Stops at `]`, a backtick and `@` so the end delimiter, fences and doc tags can still match.",
+              "match": "[^\\]`@]+",
+              "name": "comment.block.luau"
+            },
+            {
+              "match": "[\\]`@]",
+              "name": "comment.block.luau"
             }
           ]
         },
@@ -1206,6 +1224,11 @@
           "begin": "\\{",
           "end": "\\}",
           "patterns": [
+            {
+              "comment": "The `read`/`write` variance modifier on an indexer -- `{ read [string]: number }`. Named properties pick theirs up in the rule below, but an indexer has no name, so it needs its own match ahead of the `[` rule.",
+              "match": "\\b(read|write)\\b(?=\\s*\\[)",
+              "name": "storage.modifier.access.luau"
+            },
             {
               "begin": "\\[",
               "end": "\\]",

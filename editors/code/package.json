@@ -113,12 +113,15 @@
         "language": "luwu",
         "scopes": {
           "variable.defaultLibrary.readonly": [
+            "constant.language.global.luwu",
             "constant.language.global.luau"
           ],
           "property.defaultLibrary": [
+            "variable.language.luwu",
             "variable.language.luau"
           ],
           "enum.defaultLibrary": [
+            "constant.language.enum.luwu",
             "constant.language.enum.luau"
           ]
         }
