@@ -32,7 +32,7 @@ const luwu_libraries: { [string]: Table | Function } = {
         documentation = un(3, [[
             Imports the module at `path`, returning what the module returned. Require paths use require-by-string syntax, which is described below.
 
-            ```luau
+            ```luwu
             -- sibling of the requiring module/file.
             const utils = require("./utils")
             -- sibling of the parent of the requiring file/module.
@@ -111,7 +111,7 @@ const luwu_libraries: { [string]: Table | Function } = {
 
             In the type system, you can use `typeof` to narrow on extern types:
 
-            ```luau
+            ```luwu
             const t: number | Duration = get_dur()
             if typeof(t) == "Duration" then
                 -- typechecker refines t to Duration here, no type error
@@ -175,7 +175,7 @@ const luwu_libraries: { [string]: Table | Function } = {
 
                     In the type system, you can use this to refine upon an object that could be of one or more classes:
 
-                    ```luau
+                    ```luwu
                     type Animal = Cat | Dog
                     class Cat(name: string, age: number, meows = 2) end
                     class Dog(name: string, age: number, barks = 3) end

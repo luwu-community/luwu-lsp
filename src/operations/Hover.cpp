@@ -774,6 +774,56 @@ static std::string buildExternTypeSummary(
     return summary;
 }
 
+struct Primitive
+{
+    std::string name;
+    std::string docs;
+};
+
+static std::optional<Primitive> builtinPrimitive(const Luau::Frontend& frontend, Luau::TypeId ty)
+{
+    const auto& builtins = frontend.builtinTypes;
+    Luau::TypeId followed = Luau::follow(ty);
+
+    if (followed == builtins->objectType)
+        return Primitive{"object",
+            "What gets built when you call a `class`; objects are often referred to as 'instances' of a class.\n\n"
+            "Write `object` if you want to allow any object from any class or use a class's name directly to refer to objects of that class."
+            " To get the actual `class` type from the name of a class, use `class<ClassName>`. See `class` for further information about nominalness.\n\n"
+            "To narrow unspecified or unioned objects in the type system, use the standard library function `class.isinstance(obj, SomeClass)` in an"
+            " if statement or expression to narrow `obj` into an object of `SomeClass`."
+        };
+    if (followed == builtins->classType)
+        return Primitive{"class",
+            "A value that creates new objects with a specific field and function structure."
+            " Write `class<ClassName>` for the class that builds `ClassName` objects or plain `class`"
+            " to allow any class at all.\n\nUnlike table types, classes and object types are nominally-typed, meaning you can"
+            " have multiple classes/objects with the exact same fields but different names and the type solver knows they're"
+            " all unique and can't accidentally be mixed up or casted into one another."
+        };
+    if (followed == builtins->externType)
+        return Primitive{"userdata",
+            "A value given to your code by the embedder. Userdata are called extern types in the type system because they're implemented"
+            " externally (outside Luwu), often in a language like C, Rust, or C++. Trying to access a nonexistent field on a userdata will result"
+            " in a runtime error.\n\n"
+            "To narrow an extern type in the type system, use the builtin `typeof(value)` function to compare the userdata with a string that"
+            " represents the extern type's name. The extern type's name should be given by the `__type` field set on the extern type's"
+            " metatable by the embedder. If that extern type has been registered (via `declare extern type Name` syntax in a definitions file)"
+            " the LSP is able to narrow `value` to a specific extern type. If an extern type is extended via inheritance, the `__type` field checked"
+            " by the LSP will be the `__type` declared on the root base class of the extern type (not the most specific `__type`)."
+        };
+    if (followed == builtins->vectorType)
+        return Primitive{"vector",
+            "An immutable primitive with fields `x`, `y` and `z` that store 32-bit floats. Vectors are highly optimized for"
+            " 3D math using the `vector` library, and can be used to represent 2D and 3D coordinates, forces,"
+            " RGB colors, edges of directed graphs, or whatever you decide fits into 2 or 3 numbers. Since they live on the"
+            " stack, they're copied by value and incredibly cheap to use (about as cheap as numbers). Use the standard library"
+            " function `vector.create(x, y, z?)` to create new vectors."
+        };
+
+    return std::nullopt;
+}
+
 std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params, const LSPCancellationToken& cancellationToken)
 {
     auto config = client->getConfiguration(rootUri);
@@ -1533,12 +1583,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         else
             typeString = typeCodeBlock(typeString);
     }
-    else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->name == "vector")
+    else if (auto primitive = builtinPrimitive(frontend, *type);
+             primitive && (!typeAliasInformation || typeAliasInformation->first == primitive->name))
     {
-        // `vector` is a language primitive, but it's modeled internally as an ExternType (see
-        // BuiltinDefinitions.cpp) just to get free `.x`/`.y`/`.z` property access -- show it plainly
-        // instead of as "extern type vector".
-        typeString = codeBlock(codeLanguage, "vector");
+        // A primitive hovered directly, rather than through an alias that happens to resolve to one
+        // -- that still reads better as `type Foo = object`
+        typeString = codeBlock(codeLanguage, primitive->name) + "\n" + kDocumentationBreaker + primitive->docs;
     }
     else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->parent != frontend.builtinTypes->objectType)
     {

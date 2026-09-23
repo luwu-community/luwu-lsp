@@ -157,8 +157,10 @@ Check the current name in `../luwu` rather than trusting existing tests.
 
 ## Changelog and commits
 
-- At the end of a session, add a `CHANGELOG.md` entry under `[Unreleased]` for user-facing changes. Ask user before updating
-  `CHANGELOG.md`
+- **Don't touch `CHANGELOG.md`, and don't offer or ask to.** Luwu, `luwu-lsp` and the Luwu extension are all pre-release
+  and nothing is on the VSCode Marketplace yet, so there is no audience for release notes. This holds until the user says
+  we're getting ready to release Luwu 0.1.0 / `luwu-lsp` and the Luwu extension 0.1.0 / publish to the Marketplace; from
+  that point on, add an entry under `[Unreleased]` for user-facing changes at the end of a session, asking first.
 - Never commit unless the user asks for it in that turn.
 - Upstream GitHub issue numbers don't apply to this fork; only reference issues from `luwu-community/luwu-lsp`.
 

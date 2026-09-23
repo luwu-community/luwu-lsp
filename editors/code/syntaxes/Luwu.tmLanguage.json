@@ -480,15 +480,19 @@
       }
     },
     "class-declaration": {
-      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(class)\\s+(?:([\\w]+))\\b",
+      "comment": "A class declaration. `declare` in front marks a class that exists but has no body here -- an embedder's or a definition file's class -- and may be combined with `export`.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(declare)\\s+)?(?:(export)\\s+)?(class)\\s+(?:([\\w]+))\\b",
       "beginCaptures": {
         "1": {
-          "name": "storage.modifier.visibility.luwu"
+          "name": "storage.modifier.signature.luwu"
         },
         "2": {
-          "name": "keyword.control.luwu"
+          "name": "storage.modifier.visibility.luwu"
         },
         "3": {
+          "name": "keyword.control.luwu"
+        },
+        "4": {
           "name": "entity.name.type.luwu"
         }
       },
@@ -680,15 +684,19 @@
       ]
     },
     "trait-declaration": {
-      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(trait)\\s+(?:([\\w]+))\\b",
+      "comment": "A trait declaration. `declare` in front marks a trait that exists but has no body here -- an embedder's or a definition file's trait -- and may be combined with `export`.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(declare)\\s+)?(?:(export)\\s+)?(trait)\\s+(?:([\\w]+))\\b",
       "beginCaptures": {
         "1": {
-          "name": "storage.modifier.visibility.luwu"
+          "name": "storage.modifier.signature.luwu"
         },
         "2": {
-          "name": "keyword.control.luwu"
+          "name": "storage.modifier.visibility.luwu"
         },
         "3": {
+          "name": "keyword.control.luwu"
+        },
+        "4": {
           "name": "entity.name.type.luwu"
         }
       },
@@ -1430,15 +1438,18 @@
               }
             },
             {
+              "include": "#markdown_prose"
+            },
+            {
               "include": "#doc_comment_tags"
             },
             {
-              "comment": "Comment prose. Stops at `]`, a backtick and `@` so the end delimiter, fences and doc tags can still match.",
-              "match": "[^\\]`@]+",
+              "comment": "Comment prose. Stops at `]`, a backtick, `@` and the markdown punctuation above so the end delimiter, fences, doc tags and markdown can still match.",
+              "match": "[^\\]`@*_~\\[#>]+",
               "name": "comment.block.luwu"
             },
             {
-              "match": "[\\]`@]",
+              "match": "[\\]`@*_~\\[#>]",
               "name": "comment.block.luwu"
             }
           ]
@@ -1487,6 +1498,9 @@
           "end": "\\n",
           "patterns": [
             {
+              "include": "#markdown_prose"
+            },
+            {
               "include": "#doc_comment_tags"
             }
           ]
@@ -1495,6 +1509,82 @@
           "name": "comment.line.double-dash.luwu",
           "begin": "--",
           "end": "\\n"
+        }
+      ]
+    },
+    "markdown_prose": {
+      "comment": "Markdown in doc comments -- `--[=[ ... ]=]` blocks and `---` lines are read as markdown, so headings, emphasis, lists, links and inline code render as such. Code fences are matched before this and highlight as Luwu/Luau instead.",
+      "patterns": [
+        {
+          "comment": "An ATX heading -- `# Title`.",
+          "match": "(?:^|(?<=---))[ \\t]*(#{1,6})[ \\t]+(.*?)[ \\t]*$",
+          "name": "markup.heading.luwu",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.heading.luwu"
+            },
+            "2": {
+              "name": "entity.name.section.luwu"
+            }
+          }
+        },
+        {
+          "comment": "A blockquote marker.",
+          "match": "(?:^|(?<=---))[ \\t]*(>)[ \\t]?",
+          "captures": {
+            "1": {
+              "name": "markup.quote.luwu"
+            }
+          }
+        },
+        {
+          "comment": "A bullet or ordered list marker. The marker alone is scoped; the item's text is prose.",
+          "match": "(?:^|(?<=---))[ \\t]*([-*+]|\\d+[.)])(?=[ \\t])",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.list.begin.luwu"
+            }
+          }
+        },
+        {
+          "comment": "`**bold**` / `__bold__`.",
+          "match": "(\\*\\*|__)(?=\\S)(.+?)(\\1)",
+          "name": "markup.bold.luwu"
+        },
+        {
+          "comment": "`*italic*` / `_italic_`. Guarded so a `snake_case` word or a `*` in prose is left alone.",
+          "match": "(?<![\\w*_])([*_])(?=[^\\s*_])([^*_\\n]+?)(\\1)(?![\\w*_])",
+          "name": "markup.italic.luwu"
+        },
+        {
+          "comment": "`~~struck through~~`.",
+          "match": "(~~)(?=\\S)(.+?)(~~)",
+          "name": "markup.strikethrough.luwu"
+        },
+        {
+          "comment": "`` `inline code` ``. Never a fence, which the rules above take first.",
+          "match": "(?<!`)(`)(?!`)([^`\\n]+)(`)(?!`)",
+          "name": "markup.inline.raw.luwu",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.raw.luwu"
+            },
+            "3": {
+              "name": "punctuation.definition.raw.luwu"
+            }
+          }
+        },
+        {
+          "comment": "`[text](target)`.",
+          "match": "(\\[)([^\\]\\n]*)(\\])(\\()([^)\\n]*)(\\))",
+          "captures": {
+            "2": {
+              "name": "string.other.link.title.luwu"
+            },
+            "5": {
+              "name": "markup.underline.link.luwu"
+            }
+          }
         }
       ]
     },

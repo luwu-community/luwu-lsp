@@ -1,6 +1,10 @@
 #include "doctest.h"
 #include "Fixture.h"
 #include "LSP/SemanticTokens.hpp"
+#include "Flags.hpp"
+
+LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -157,6 +161,36 @@ local x: { string } = {}
     auto real = getSemanticToken(tokens, Luau::Position{1, 11});
     REQUIRE(real);
     CHECK_EQ(real->tokenType, lsp::SemanticTokenTypes::Type);
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_field_restating_a_primary_constructor_parameter_has_parameter_semantic_token")
+{
+    // A field that restates a primary constructor parameter is that parameter, so it reads as one;
+    // a field the constructor knows nothing about stays an ordinary property.
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ENABLE_NEW_SOLVER();
+
+    check(R"(
+class Cat(name, actuallyaflerken)
+    public name
+    public age = 0
+    private actuallyaflerken: number
+end
+)");
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+
+    auto restated = getSemanticToken(tokens, Luau::Position{2, 11});
+    REQUIRE(restated);
+    CHECK_EQ(restated->tokenType, lsp::SemanticTokenTypes::Parameter);
+
+    auto annotated = getSemanticToken(tokens, Luau::Position{4, 12});
+    REQUIRE(annotated);
+    CHECK_EQ(annotated->tokenType, lsp::SemanticTokenTypes::Parameter);
+
+    // `age` is not a parameter of the constructor, so it must not be coloured as one
+    auto ownField = getSemanticToken(tokens, Luau::Position{3, 11});
+    CHECK((!ownField || ownField->tokenType != lsp::SemanticTokenTypes::Parameter));
 }
 
 TEST_SUITE_END();

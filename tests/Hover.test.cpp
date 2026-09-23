@@ -1567,4 +1567,65 @@ TEST_CASE_FIXTURE(Fixture, "hover_truncates_large_where_clause_tables_without_un
     CHECK(hover.find("TRUNCATED") == std::string::npos);
 }
 
+/// The global `object` and `class` type bindings only exist when the class flags are on at the
+/// moment globals are registered -- which Fixture does in its own constructor, before a
+/// ScopedFastFlag declared in the test body would have run. Setting them in a base class gets them
+/// on first.
+struct ClassFlags
+{
+    ScopedFastFlag sffs[3] = {
+        {FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}, {FFlag::LuauSolverV2, true}};
+};
+
+struct ClassFixture : ClassFlags, Fixture
+{
+};
+
+TEST_CASE_FIXTURE(ClassFixture, "hovering_over_the_object_type_doesnt_call_it_an_extern_type")
+{
+    // `object` and `class` are the roots of the class hierarchy. They reuse the ExternType
+    // representation internally, but they aren't userdata and nobody declared them as extern types,
+    // so "extern type object end" would be a lie about the language.
+    auto [source, marker] = sourceWithMarker(R"(
+        class Item
+        end
+
+        type ItemObject = obj|ect
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+    CHECK(hover.find("extern type") == std::string::npos);
+    CHECK(hover.find("object") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(ClassFixture, "hovering_over_the_class_type_doesnt_call_it_an_extern_type")
+{
+    auto [source, marker] = sourceWithMarker(R"(
+        class Item
+        end
+
+        type ItemClass = cla|ss<Item>
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+    CHECK(hover.find("extern type") == std::string::npos);
+    CHECK(hover.find("class") != std::string::npos);
+}
+
 TEST_SUITE_END();

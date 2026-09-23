@@ -243,6 +243,36 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // Luwu Classes: a class body may restate a primary constructor parameter to give it a type or a
+    // visibility -- `class Cat(name, kind) public name; private kind: number end`. That field *is* the
+    // parameter, so colour it like one; a field the constructor knows nothing about (`public age = 0`)
+    // stays a property. The AST records no link between the two, so they are matched by name, the same
+    // way Hover and CodeAction do it.
+    bool visit(Luau::AstStatClass* klass) override
+    {
+        if (!klass->primaryConstructor)
+            return true;
+
+        for (const auto& member : klass->members)
+        {
+            const auto* prop = member.get_if<Luau::AstClassProperty>();
+            if (!prop)
+                continue;
+
+            for (const auto* arg : klass->primaryConstructor->args)
+            {
+                if (arg->name == prop->name)
+                {
+                    tokens.emplace_back(SemanticToken{prop->nameLocation.begin, prop->nameLocation.end,
+                        lsp::SemanticTokenTypes::Parameter, lsp::SemanticTokenModifiers::None});
+                    break;
+                }
+            }
+        }
+
+        return true;
+    }
+
     bool visit(Luau::AstExprLocal* local) override
     {
         auto defaultType = lsp::SemanticTokenTypes::Variable;
