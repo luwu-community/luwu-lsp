@@ -97,4 +97,16 @@ struct ApplyWorkspaceEditResult
     std::optional<size_t> failedChange = std::nullopt;
 };
 NLOHMANN_DEFINE_OPTIONAL(ApplyWorkspaceEditResult, applied, failureReason, failedChange)
+struct FileRename
+{
+    std::string oldUri;
+    std::string newUri;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileRename, oldUri, newUri)
+
+struct RenameFilesParams
+{
+    std::vector<FileRename> files;
+};
+NLOHMANN_DEFINE_OPTIONAL(RenameFilesParams, files)
 } // namespace lsp

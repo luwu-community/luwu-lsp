@@ -86,12 +86,39 @@ struct WorkspaceFoldersServerCapabilities
 };
 NLOHMANN_DEFINE_OPTIONAL(WorkspaceFoldersServerCapabilities, supported, changeNotifications);
 
+struct FileOperationPattern
+{
+    std::string glob;
+    /// "file" or "folder". When unset, the pattern matches both
+    std::optional<std::string> matches = std::nullopt;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationPattern, glob, matches);
+
+struct FileOperationFilter
+{
+    std::optional<std::string> scheme = std::nullopt;
+    FileOperationPattern pattern;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationFilter, scheme, pattern);
+
+struct FileOperationRegistrationOptions
+{
+    std::vector<FileOperationFilter> filters{};
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationRegistrationOptions, filters);
+
+struct FileOperationOptions
+{
+    std::optional<FileOperationRegistrationOptions> willRename = std::nullopt;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationOptions, willRename);
+
 struct WorkspaceCapabilities
 {
     std::optional<WorkspaceFoldersServerCapabilities> workspaceFolders = std::nullopt;
-    // fileOperations
+    std::optional<FileOperationOptions> fileOperations = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(WorkspaceCapabilities, workspaceFolders);
+NLOHMANN_DEFINE_OPTIONAL(WorkspaceCapabilities, workspaceFolders, fileOperations);
 
 struct CompletionOptions
 {

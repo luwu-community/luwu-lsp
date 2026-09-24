@@ -98,6 +98,7 @@ target_sources(Luwu.LanguageServer PRIVATE
         src/operations/RequireGraph.cpp
         src/operations/OnTypeFormatting.cpp
         src/operations/MatchingKeyword.cpp
+        src/operations/FileOperations.cpp
         src/transport/PipeTransport.cpp
         src/transport/StdioTransport.cpp
         src/Plugin/SourceMapping.cpp
@@ -149,6 +150,7 @@ target_sources(Luwu.LanguageServer.Test PRIVATE
         tests/RequireGraph.test.cpp
         tests/OnTypeFormatting.test.cpp
         tests/MatchingKeyword.test.cpp
+        tests/FileOperations.test.cpp
         tests/AnalyzeCli.test.cpp
         tests/CodeAction.test.cpp
         tests/Plugin.test.cpp

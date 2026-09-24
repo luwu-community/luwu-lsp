@@ -84,6 +84,7 @@ private:
     void onDidChangeWatchedFiles(const lsp::DidChangeWatchedFilesParams& params);
 
     std::vector<lsp::DocumentLink> documentLink(const lsp::DocumentLinkParams& params);
+    std::optional<lsp::WorkspaceEdit> willRenameFiles(const lsp::RenameFilesParams& params);
     lsp::DocumentColorResult documentColor(const lsp::DocumentColorParams& params);
     lsp::ColorPresentationResult colorPresentation(const lsp::ColorPresentationParams& params);
 

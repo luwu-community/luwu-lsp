@@ -161,7 +161,9 @@ lsp::ServerCapabilities LanguageServer::getServerCapabilities()
     capabilities.documentOnTypeFormattingProvider = lsp::DocumentOnTypeFormattingOptions{"{", std::nullopt};
     // Workspaces
     lsp::WorkspaceFoldersServerCapabilities workspaceFolderCapabilities{true, false};
-    capabilities.workspace = lsp::WorkspaceCapabilities{workspaceFolderCapabilities};
+    // File Operations: we fix up relative requires when a source file is renamed or moved
+    lsp::FileOperationRegistrationOptions willRenameFiles{{lsp::FileOperationFilter{"file", {"**/*.{luau,luwu,lua}", "file"}}}};
+    capabilities.workspace = lsp::WorkspaceCapabilities{workspaceFolderCapabilities, lsp::FileOperationOptions{willRenameFiles}};
     return capabilities;
 }
 
@@ -369,6 +371,12 @@ void LanguageServer::onRequest(const id_type& id, const std::string& method, std
                 result.insert(result.end(), std::make_move_iterator(report->begin()), std::make_move_iterator(report->end()));
         }
         response = result;
+    }
+    else if (method == "workspace/willRenameFiles")
+    {
+        ASSERT_PARAMS(baseParams, "workspace/willRenameFiles")
+        auto params = baseParams->get<lsp::RenameFilesParams>();
+        response = willRenameFiles(params);
     }
     else if (method == "luwu-lsp/matchingKeyword")
     {
