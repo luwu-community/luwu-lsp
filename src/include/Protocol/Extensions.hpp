@@ -77,4 +77,14 @@ struct InternalSourceParams
 NLOHMANN_DEFINE_OPTIONAL(InternalSourceParams, textDocument)
 
 using InternalSourceResult = std::string;
+
+struct MatchingKeywordParams
+{
+    TextDocumentIdentifier textDocument;
+    Position position;
+};
+NLOHMANN_DEFINE_OPTIONAL(MatchingKeywordParams, textDocument, position)
+
+/// The keyword matching the one at the requested position, or null if there isn't one
+using MatchingKeywordResult = std::optional<Range>;
 } // namespace lsp

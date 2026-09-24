@@ -205,6 +205,19 @@
       {
         "command": "luwu.resolveExtensionConflict",
         "title": "Luwu: Resolve Conflict With Luau Language Server"
+      },
+      {
+        "command": "luwu.jumpToMatchingKeyword",
+        "title": "Luwu: Jump to Matching Keyword",
+        "enablement": "resourceLangId == luwu || resourceLangId == luau || resourceLangId == lua"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "luwu.jumpToMatchingKeyword",
+        "key": "ctrl+shift+\\",
+        "mac": "cmd+shift+\\",
+        "when": "editorTextFocus && (editorLangId == luwu || editorLangId == luau || editorLangId == lua)"
       }
     ],
     "menus": {

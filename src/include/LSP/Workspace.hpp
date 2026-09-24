@@ -182,6 +182,7 @@ public:
     std::optional<lsp::SemanticTokens> semanticTokens(const lsp::SemanticTokensParams& params, const LSPCancellationToken& cancellationToken);
 
     lsp::DocumentOnTypeFormattingResult onTypeFormatting(const lsp::DocumentOnTypeFormattingParams& params);
+    lsp::MatchingKeywordResult matchingKeyword(const lsp::MatchingKeywordParams& params);
 
     lsp::BytecodeResult bytecode(const lsp::BytecodeParams& params);
     lsp::CompilerRemarksResult compilerRemarks(const lsp::CompilerRemarksParams& params);

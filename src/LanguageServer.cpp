@@ -370,6 +370,13 @@ void LanguageServer::onRequest(const id_type& id, const std::string& method, std
         }
         response = result;
     }
+    else if (method == "luwu-lsp/matchingKeyword")
+    {
+        ASSERT_PARAMS(baseParams, "luwu-lsp/matchingKeyword")
+        auto params = baseParams->get<lsp::MatchingKeywordParams>();
+        auto workspace = findWorkspace(params.textDocument.uri);
+        response = workspace->matchingKeyword(params);
+    }
     else if (method == "luau-lsp/bytecode")
     {
         ASSERT_PARAMS(baseParams, "luau-lsp/bytecode")

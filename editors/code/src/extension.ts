@@ -42,6 +42,7 @@ import {
 import { registerLongBracketAutoClose } from "./longBracketAutoClose";
 
 import { registerRequireGraph } from "./requireGraph";
+import { registerMatchingKeyword } from "./matchingKeyword";
 
 import { registerViewInternalSource } from "./internalSource";
 
@@ -682,6 +683,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   clientDisposables.push(...registerComputeCompilerRemarks(context, client));
   clientDisposables.push(...registerComputeCodeGen(context, client));
   clientDisposables.push(...registerRequireGraph(context, client));
+  clientDisposables.push(...registerMatchingKeyword(context, client));
   clientDisposables.push(...registerViewInternalSource(context, client));
   clientDisposables.push(
     vscode.commands.registerCommand("luwu.openWalkthrough", () => {
