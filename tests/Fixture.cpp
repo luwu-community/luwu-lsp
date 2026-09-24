@@ -50,12 +50,13 @@ static std::string generateFixtureName()
     return "luau_lsp_test_" + std::to_string(fixtureCounter.fetch_add(1));
 }
 
-Fixture::Fixture()
+Fixture::Fixture(LSPPlatformConfig platform)
     : client(std::make_unique<TestClient>(TestClient{}))
     , tempDir(generateFixtureName())
     , workspace(client.get(), "$TEST_WORKSPACE", Uri::file(tempDir.path()), std::nullopt)
 {
     client->globalConfig = Luau::LanguageServer::defaultTestClientConfiguration();
+    client->globalConfig.platform.type = platform;
     workspace.fileResolver.defaultConfig.mode = Luau::Mode::Strict;
     client->definitionsFiles.emplace("@roblox", "./tests/testdata/standard_definitions.d.luau");
     workspace.setupWithConfiguration(client->globalConfig);
@@ -85,7 +86,7 @@ Uri Fixture::newDocument(const std::string& name, const std::string& source)
 void Fixture::registerDocumentForVirtualPath(const Uri& uri, const Luau::ModuleName& virtualPath)
 {
     auto platform = dynamic_cast<RobloxPlatform*>(workspace.platform.get());
-    LUAU_ASSERT(platform);
+    REQUIRE_MESSAGE(platform, "a virtual path needs the Roblox platform: use RobloxFixture");
     auto sourceNode = platform->sourceNodeAllocator.allocate(SourceNode(uri.filename(), "ModuleScript", {uri.fsPath()}, {}));
     platform->writePathsToMap(sourceNode, virtualPath);
 }
@@ -213,7 +214,9 @@ void Fixture::switchToStandardPlatform()
 
 void Fixture::loadSourcemap(const std::string& contents)
 {
-    dynamic_cast<RobloxPlatform*>(workspace.platform.get())->updateSourceMapFromContents(contents);
+    auto platform = dynamic_cast<RobloxPlatform*>(workspace.platform.get());
+    REQUIRE_MESSAGE(platform, "a sourcemap needs the Roblox platform: use RobloxFixture");
+    platform->updateSourceMapFromContents(contents);
 }
 
 void Fixture::loadLuaurc(const std::string& source)

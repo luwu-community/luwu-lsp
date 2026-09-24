@@ -26,7 +26,8 @@ lsp::CompletionItem requireItem(const std::vector<lsp::CompletionItem>& items, c
 
 struct FragmentAutocompleteFixture : Fixture
 {
-    FragmentAutocompleteFixture()
+    explicit FragmentAutocompleteFixture(LSPPlatformConfig platform = LSPPlatformConfig::Standard)
+        : Fixture(platform)
     {
         client->globalConfig.completion.enableFragmentAutocomplete = true;
     }
@@ -60,6 +61,15 @@ struct FragmentAutocompleteFixture : Fixture
         REQUIRE(workspace.frontend.isDirty(moduleName, forAutocomplete));
 
         return results;
+    }
+};
+
+/// The fragment autocomplete fixture on the Roblox platform, for the tests that need a sourcemap
+struct RobloxFragmentAutocompleteFixture : FragmentAutocompleteFixture
+{
+    RobloxFragmentAutocompleteFixture()
+        : FragmentAutocompleteFixture(LSPPlatformConfig::Roblox)
+    {
     }
 };
 
@@ -572,7 +582,7 @@ static void checkStringCompletionExists(const std::vector<lsp::CompletionItem>& 
     CHECK_EQ(item.kind, lsp::CompletionItemKind::Constant);
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_new_contains_creatable_instances")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_new_contains_creatable_instances")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -592,7 +602,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_new_contains_creatable_instances")
     checkStringCompletionExists(result, "TextLabel");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_service_contains_services")
+TEST_CASE_FIXTURE(RobloxFixture, "get_service_contains_services")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -613,7 +623,7 @@ TEST_CASE_FIXTURE(Fixture, "get_service_contains_services")
     checkStringCompletionExists(result, "Workspace");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_is_a_contains_classnames")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_is_a_contains_classnames")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -640,7 +650,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_is_a_contains_classnames")
     checkStringCompletionExists(result, "DataModel");
 }
 
-TEST_CASE_FIXTURE(Fixture, "enum_is_a_contains_enum_items")
+TEST_CASE_FIXTURE(RobloxFixture, "enum_is_a_contains_enum_items")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -659,7 +669,7 @@ TEST_CASE_FIXTURE(Fixture, "enum_is_a_contains_enum_items")
     checkStringCompletionExists(result, "HumanoidRigType");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_includes_properties")
+TEST_CASE_FIXTURE(RobloxFixture, "get_property_changed_signal_includes_properties")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -682,7 +692,7 @@ TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_includes_properties")
     checkStringCompletionExists(result, "Parent");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_does_not_include_children_from_sourcemap")
+TEST_CASE_FIXTURE(RobloxFixture, "get_property_changed_signal_does_not_include_children_from_sourcemap")
 {
     loadSourcemap(R"(
     {
@@ -716,7 +726,7 @@ TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_does_not_include_childre
     checkStringCompletionExists(result, "ClassName");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_does_not_include_children_from_sourcemap_second_level_getsourcemaptype_ty")
+TEST_CASE_FIXTURE(RobloxFixture, "get_property_changed_signal_does_not_include_children_from_sourcemap_second_level_getsourcemaptype_ty")
 {
     loadSourcemap(R"(
     {
@@ -751,7 +761,7 @@ TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_does_not_include_childre
     checkStringCompletionExists(result, "ClassName");
 }
 
-TEST_CASE_FIXTURE(Fixture, "is_property_modified_includes_properties")
+TEST_CASE_FIXTURE(RobloxFixture, "is_property_modified_includes_properties")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -774,7 +784,7 @@ TEST_CASE_FIXTURE(Fixture, "is_property_modified_includes_properties")
     checkStringCompletionExists(result, "Parent");
 }
 
-TEST_CASE_FIXTURE(Fixture, "reset_property_to_default_includes_properties")
+TEST_CASE_FIXTURE(RobloxFixture, "reset_property_to_default_includes_properties")
 {
     auto [source, marker] = sourceWithMarker(R"(
         --!strict
@@ -797,7 +807,7 @@ TEST_CASE_FIXTURE(Fixture, "reset_property_to_default_includes_properties")
     checkStringCompletionExists(result, "Parent");
 }
 
-TEST_CASE_FIXTURE(Fixture, "find_first_child_on_datamodel_contains_children")
+TEST_CASE_FIXTURE(RobloxFixture, "find_first_child_on_datamodel_contains_children")
 {
     loadSourcemap(R"(
     {
@@ -833,7 +843,7 @@ TEST_CASE_FIXTURE(Fixture, "find_first_child_on_datamodel_contains_children")
     checkStringCompletionExists(result, "StandardPart");
 }
 
-TEST_CASE_FIXTURE(Fixture, "find_first_child_on_sourcemap_type_contains_children")
+TEST_CASE_FIXTURE(RobloxFixture, "find_first_child_on_sourcemap_type_contains_children")
 {
     loadSourcemap(R"(
     {
@@ -875,7 +885,7 @@ TEST_CASE_FIXTURE(Fixture, "find_first_child_on_sourcemap_type_contains_children
     checkStringCompletionExists(result, "ChildB");
 }
 
-TEST_CASE_FIXTURE(Fixture, "find_first_child_on_sourcemap_type_contains_children_second_level")
+TEST_CASE_FIXTURE(RobloxFixture, "find_first_child_on_sourcemap_type_contains_children_second_level")
 {
     loadSourcemap(R"(
     {
@@ -914,7 +924,7 @@ TEST_CASE_FIXTURE(Fixture, "find_first_child_on_sourcemap_type_contains_children
     checkStringCompletionExists(result, "GrandChildB");
 }
 
-TEST_CASE_FIXTURE(Fixture, "wait_for_child_on_datamodel_contains_children")
+TEST_CASE_FIXTURE(RobloxFixture, "wait_for_child_on_datamodel_contains_children")
 {
     loadSourcemap(R"(
     {
@@ -950,7 +960,7 @@ TEST_CASE_FIXTURE(Fixture, "wait_for_child_on_datamodel_contains_children")
     checkStringCompletionExists(result, "StandardPart");
 }
 
-TEST_CASE_FIXTURE(Fixture, "wait_for_child_on_sourcemap_type_contains_children")
+TEST_CASE_FIXTURE(RobloxFixture, "wait_for_child_on_sourcemap_type_contains_children")
 {
     loadSourcemap(R"(
     {
@@ -2000,7 +2010,7 @@ TEST_CASE_FIXTURE(Fixture, "autocomplete_puts_cursor_after_call_for_function_wit
     CHECK_EQ(*callEntry->insertText, "foo()$0");
 }
 
-TEST_CASE_FIXTURE(Fixture, "autocomplete_still_puts_cursor_inside_of_call_if_there_are_arguments_but_they_are_all_optional")
+TEST_CASE_FIXTURE(RobloxFixture, "autocomplete_still_puts_cursor_inside_of_call_if_there_are_arguments_but_they_are_all_optional")
 {
     enableSnippetSupport(client->capabilities);
 
@@ -2271,7 +2281,7 @@ TEST_CASE_FIXTURE(Fixture, "autocomplete_documentation_for_index_property_on_set
     CHECK_EQ(item->documentation->value, "Documentation for prop_b.");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_autocomplete_shows_datamodel_siblings")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_autocomplete_shows_datamodel_siblings")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -2293,7 +2303,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_autocomplete_shows_datamodel_siblings")
     checkFolderCompletionExists(result, "Nested", "./Nested");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_autocomplete_shows_game_alias_children")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_autocomplete_shows_game_alias_children")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -2315,7 +2325,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_autocomplete_shows_game_alias_children")
     checkFolderCompletionExists(result, "ServerScriptService", "@game/ServerScriptService");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_autocomplete_shows_self_alias_children")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_autocomplete_shows_self_alias_children")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(R"(
@@ -2562,7 +2572,7 @@ TEST_CASE_FIXTURE(Fixture, "anonymous_autofilled_function_snippet_no_param_tabst
 // that the retained type graph of an already-checked module references. Fragment autocomplete
 // reads the stale type graph of a dirty module, so it must be skipped until the module is
 // rechecked (without this, the completion below crashes under ASAN)
-TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "fragment_autocomplete_is_not_used_after_sourcemap_update_destroys_types")
+TEST_CASE_FIXTURE(RobloxFragmentAutocompleteFixture, "fragment_autocomplete_is_not_used_after_sourcemap_update_destroys_types")
 {
     // Enable pull-based diagnostics so the sourcemap update does not synchronously recheck
     client->capabilities.textDocument = lsp::TextDocumentClientCapabilities{};

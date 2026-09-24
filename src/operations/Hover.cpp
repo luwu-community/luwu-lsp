@@ -1094,12 +1094,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         if (ancestry.size() >= 2 && ancestry.at(ancestry.size() - 2)->is<Luau::AstExprTable>())
         {
             auto parent = ancestry.at(ancestry.size() - 2)->as<Luau::AstExprTable>();
-            for (const auto& [kind, key, value] : parent->items)
+            for (const auto& item : parent->items)
             {
-                if (key && key->location.contains(position))
+                if (item.key && item.key->location.contains(position))
                 {
                     // Return type type of the value
-                    if (auto it = module->astTypes.find(value))
+                    if (auto it = module->astTypes.find(item.value))
                     {
                         type = *it;
                     }

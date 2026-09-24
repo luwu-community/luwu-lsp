@@ -21,7 +21,7 @@ TEST_CASE_FIXTURE(Fixture, "trust_directive_is_an_error_outside_luwu_files")
     CHECK_EQ(diagnostics.items.size(), 0);
 }
 
-TEST_CASE_FIXTURE(Fixture, "document_diagnostics_sends_information_for_required_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "document_diagnostics_sends_information_for_required_modules")
 {
     client->capabilities.textDocument = lsp::TextDocumentClientCapabilities{};
     client->capabilities.textDocument->diagnostic = lsp::DiagnosticClientCapabilities{};
@@ -46,7 +46,7 @@ TEST_CASE_FIXTURE(Fixture, "document_diagnostics_sends_information_for_required_
     CHECK_EQ(diagnostics.relatedDocuments.size(), 1);
 }
 
-TEST_CASE_FIXTURE(Fixture, "document_diagnostics_does_not_send_information_for_required_modules_if_related_document_support_is_disabled")
+TEST_CASE_FIXTURE(RobloxFixture, "document_diagnostics_does_not_send_information_for_required_modules_if_related_document_support_is_disabled")
 {
     client->capabilities.textDocument = lsp::TextDocumentClientCapabilities{};
     client->capabilities.textDocument->diagnostic = lsp::DiagnosticClientCapabilities{};

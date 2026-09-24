@@ -44,7 +44,7 @@ TEST_CASE("make_valid_variable_names")
     CHECK_EQ(makeValidVariableName("react@spring"), "react_spring");
 }
 
-TEST_CASE_FIXTURE(Fixture, "services_show_up_in_auto_import")
+TEST_CASE_FIXTURE(RobloxFixture, "services_show_up_in_auto_import")
 {
     client->globalConfig.completion.imports.enabled = true;
     auto [source, marker] = sourceWithMarker(R"(
@@ -131,7 +131,7 @@ TEST_CASE_FIXTURE(Fixture, "service_does_not_show_up_in_autocomplete_if_already_
     CHECK_EQ(item->additionalTextEdits.size(), 0);
 }
 
-TEST_CASE_FIXTURE(Fixture, "service_does_not_show_up_in_autocomplete_if_not_in_includes_list")
+TEST_CASE_FIXTURE(RobloxFixture, "service_does_not_show_up_in_autocomplete_if_not_in_includes_list")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.includedServices = {"ServerScriptService"};
@@ -150,7 +150,7 @@ TEST_CASE_FIXTURE(Fixture, "service_does_not_show_up_in_autocomplete_if_not_in_i
     CHECK_FALSE(getItem(result, "ReplicatedStorage"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "service_does_not_show_up_in_autocomplete_if_in_excludes_list")
+TEST_CASE_FIXTURE(RobloxFixture, "service_does_not_show_up_in_autocomplete_if_in_excludes_list")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.excludedServices = {"ServerScriptService"};
@@ -169,7 +169,7 @@ TEST_CASE_FIXTURE(Fixture, "service_does_not_show_up_in_autocomplete_if_in_exclu
     CHECK(getItem(result, "ReplicatedStorage"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "service_auto_imports_are_inserted_alphabetically")
+TEST_CASE_FIXTURE(RobloxFixture, "service_auto_imports_are_inserted_alphabetically")
 {
     client->globalConfig.completion.imports.enabled = true;
     auto [source, marker] = sourceWithMarker(R"(
@@ -194,7 +194,7 @@ TEST_CASE_FIXTURE(Fixture, "service_auto_imports_are_inserted_alphabetically")
     CHECK_EQ(afterImport->additionalTextEdits[0].range, lsp::Range{{2, 0}, {2, 0}});
 }
 
-TEST_CASE_FIXTURE(Fixture, "service_auto_imports_are_inserted_after_hot_comments")
+TEST_CASE_FIXTURE(RobloxFixture, "service_auto_imports_are_inserted_after_hot_comments")
 {
     client->globalConfig.completion.imports.enabled = true;
     auto [source, marker] = sourceWithMarker(R"(
@@ -216,7 +216,7 @@ TEST_CASE_FIXTURE(Fixture, "service_auto_imports_are_inserted_after_hot_comments
     CHECK_EQ(import->additionalTextEdits[0].range, lsp::Range{{2, 0}, {2, 0}});
 }
 
-TEST_CASE_FIXTURE(Fixture, "module_script_shows_up_in_auto_imports")
+TEST_CASE_FIXTURE(RobloxFixture, "module_script_shows_up_in_auto_imports")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -264,7 +264,7 @@ TEST_CASE_FIXTURE(Fixture, "module_script_shows_up_in_auto_imports")
     CHECK_EQ(imports[0].additionalTextEdits[1].range, lsp::Range{{0, 0}, {0, 0}});
 }
 
-TEST_CASE_FIXTURE(Fixture, "module_script_does_not_show_up_in_autocomplete_if_imports_is_disabled")
+TEST_CASE_FIXTURE(RobloxFixture, "module_script_does_not_show_up_in_autocomplete_if_imports_is_disabled")
 {
     client->globalConfig.completion.imports.enabled = false;
     loadSourcemap(R"(
@@ -302,7 +302,7 @@ TEST_CASE_FIXTURE(Fixture, "module_script_does_not_show_up_in_autocomplete_if_im
     CHECK_EQ(filterAutoImports(result, "Module").size(), 0);
 }
 
-TEST_CASE_FIXTURE(Fixture, "module_script_does_not_show_up_in_autocomplete_if_require_imports_is_disabled")
+TEST_CASE_FIXTURE(RobloxFixture, "module_script_does_not_show_up_in_autocomplete_if_require_imports_is_disabled")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.suggestRequires = false;
@@ -341,7 +341,7 @@ TEST_CASE_FIXTURE(Fixture, "module_script_does_not_show_up_in_autocomplete_if_re
     CHECK_EQ(filterAutoImports(result, "Module").size(), 0);
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_import_reuses_service_if_already_defined")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_import_reuses_service_if_already_defined")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -384,7 +384,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_import_reuses_service_if_already_defined")
     CHECK_EQ(imports[0].additionalTextEdits[0].range, lsp::Range{{2, 0}, {2, 0}});
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_import_separates_new_service_and_require_with_line")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_import_separates_new_service_and_require_with_line")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.separateGroupsWithLine = true;
@@ -429,7 +429,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_import_separates_new_service_and_require_with_l
     CHECK_EQ(imports[0].additionalTextEdits[1].range, lsp::Range{{0, 0}, {0, 0}});
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_import_separates_existing_service_and_new_require_with_line")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_import_separates_existing_service_and_new_require_with_line")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.separateGroupsWithLine = true;
@@ -473,7 +473,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_import_separates_existing_service_and_new_requi
     CHECK_EQ(imports[0].additionalTextEdits[0].range, lsp::Range{{2, 0}, {2, 0}});
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_will_prefer_relative_over_absolute_import_for_sibling_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_will_prefer_relative_over_absolute_import_for_sibling_modules")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -519,7 +519,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_will_prefer_relative_over_absolute_impo
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local SiblingModule = require(script.Parent.SiblingModule)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_will_force_absolute_import_depending_on_setting")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_will_force_absolute_import_depending_on_setting")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.requireStyle = ImportRequireStyle::AlwaysAbsolute;
@@ -567,7 +567,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_will_force_absolute_import_depending_on
     CHECK_EQ(imports[0].additionalTextEdits[1].newText, "local SiblingModule = require(ReplicatedStorage.SiblingModule)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_will_prefer_absolute_import_over_relative_import_for_further_away_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_will_prefer_absolute_import_over_relative_import_for_further_away_modules")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -617,7 +617,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_will_prefer_absolute_import_over_relati
     CHECK_EQ(imports[0].additionalTextEdits[1].newText, "local OtherModule = require(ReplicatedStorage.Folder.OtherModule)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_will_force_relative_import_depending_on_setting")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_will_force_relative_import_depending_on_setting")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.requireStyle = ImportRequireStyle::AlwaysRelative;
@@ -667,7 +667,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_will_force_relative_import_depending_on
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local OtherModule = require(script.Parent.Folder.OtherModule)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_of_modules_show_path_name")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_of_modules_show_path_name")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -715,7 +715,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_of_modules_show_path_name")
     CHECK_EQ(imports[1].labelDetails->description, "ReplicatedStorage.Folder2.Module");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_auto_imports_creates_valid_identifier")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_auto_imports_creates_valid_identifier")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -757,7 +757,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_auto_imports_creates_valid_identifier")
     CHECK_EQ(imports[0].additionalTextEdits[1].newText, "local react_spring = require(ReplicatedStorage[\"react-spring\"])\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_children_of_module")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_handles_children_of_module")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -805,7 +805,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_children_of_module")
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ChildModule = require(script.ChildModule)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_descendant_of_module")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_handles_descendant_of_module")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -859,7 +859,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_descendant_of_module")
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local DescendantModule = require(script.Folder.DescendantModule)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_parent_of_module")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_handles_parent_of_module")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -908,7 +908,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_parent_of_module")
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local Module = require(script.Parent)\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_handles_ancestor_of_module")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_handles_ancestor_of_module")
 {
     client->globalConfig.completion.imports.enabled = true;
     loadSourcemap(R"(
@@ -1421,7 +1421,7 @@ TEST_CASE_FIXTURE(Fixture, "string_require_imports_work_on_roblox_platform")
     CHECK_EQ(item->additionalTextEdits[0].newText, "local library = require(\"./library\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_are_inserted_after_services")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_are_inserted_after_services")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1479,7 +1479,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_import_empty_require_statement")
     CHECK_EQ(item->additionalTextEdits[0].range.start.line, 1);
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_shows_up_in_tables_before_equals_sign")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_shows_up_in_tables_before_equals_sign")
 {
     client->globalConfig.completion.imports.enabled = true;
     auto [source, marker] = sourceWithMarker(R"(
@@ -1498,7 +1498,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_shows_up_in_tables_before_equals_sign")
     CHECK(getItem(result, "ReplicatedStorage"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "auto_imports_shows_up_in_tables_after_equals_sign")
+TEST_CASE_FIXTURE(RobloxFixture, "auto_imports_shows_up_in_tables_after_equals_sign")
 {
     client->globalConfig.completion.imports.enabled = true;
     auto [source, marker] = sourceWithMarker(R"(
@@ -1554,7 +1554,7 @@ TEST_CASE_FIXTURE(Fixture, "auto_imports_do_not_show_when_indexing_variable_insi
     CHECK_FALSE(getItem(result, "ReplicatedStorage"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_sibling_uses_relative_path")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_sibling_uses_relative_path")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1575,7 +1575,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_sibling_uses_relative_path")
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ModuleB = require(\"./ModuleB\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_nested_uses_relative_path")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_nested_uses_relative_path")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1596,7 +1596,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_nested_uses_relative_path")
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local DeepModule = require(\"./Nested/DeepModule\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_absolute_style_uses_game_alias")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_absolute_style_uses_game_alias")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1618,7 +1618,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_absolute_style_uses_game_alias
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ModuleB = require(\"@game/ReplicatedStorage/Shared/ModuleB\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_cross_service_defaults_to_game_alias")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_cross_service_defaults_to_game_alias")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1639,7 +1639,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_cross_service_defaults_to_game
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ServerModule = require(\"@game/ServerScriptService/ServerModule\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_respects_always_relative_across_services")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_respects_always_relative_across_services")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1661,7 +1661,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_respects_always_relative_acros
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ServerModule = require(\"../../ServerScriptService/ServerModule\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_prefers_alias_over_game_path_for_cross_service")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_prefers_alias_over_game_path_for_cross_service")
 {
     loadLuaurc(R"(
     {
@@ -1689,7 +1689,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_prefers_alias_over_game_path_f
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ServerModule = require(\"@server/ServerModule\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_prefers_alias_over_game_path_when_always_absolute")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_prefers_alias_over_game_path_when_always_absolute")
 {
     loadLuaurc(R"(
     {
@@ -1718,7 +1718,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_prefers_alias_over_game_path_w
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ModuleB = require(\"@combat/ModuleB\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_init_luau_uses_self_for_child")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_init_luau_uses_self_for_child")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1760,7 +1760,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_init_luau_uses_self_for_child"
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local ChildModule = require(\"@self/ChildModule\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_init_luau_uses_self_for_deep_child")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_init_luau_uses_self_for_deep_child")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1808,7 +1808,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_init_luau_uses_self_for_deep_c
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local DeepModule = require(\"@self/Sub/DeepModule\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_init_luau_uses_relative_for_sibling")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_auto_import_init_luau_uses_relative_for_sibling")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -1848,7 +1848,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_auto_import_init_luau_uses_relative_for_si
     CHECK_EQ(imports[0].additionalTextEdits[0].newText, "local Sibling = require(\"./Sibling\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "service_auto_imports_use_const_when_configured")
+TEST_CASE_FIXTURE(RobloxFixture, "service_auto_imports_use_const_when_configured")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.useConst = true;
@@ -1870,7 +1870,7 @@ TEST_CASE_FIXTURE(Fixture, "service_auto_imports_use_const_when_configured")
     CHECK_EQ(serviceImport->additionalTextEdits[0].newText, "const ReplicatedStorage = game:GetService(\"ReplicatedStorage\")\n");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_require_uses_const_when_configured")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_require_uses_const_when_configured")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.useConst = true;
@@ -1948,7 +1948,7 @@ TEST_CASE_FIXTURE(Fixture, "const_require_is_not_duplicated_when_already_importe
     CHECK_EQ(items.size(), 0);
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_client_cannot_see_server")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_client_cannot_see_server")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -1967,7 +1967,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_client_cannot_see_server")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_server_cannot_see_client")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_server_cannot_see_client")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -1986,7 +1986,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_server_cannot_see_client")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_shared_can_see_all")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_shared_can_see_all")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -2005,7 +2005,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_shared_can_see_all")
     CHECK(getItem(result, "ServerModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_localscript_acts_as_client")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_localscript_acts_as_client")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -2028,7 +2028,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_localscript_acts_as_client")
     CHECK_FALSE(getItem(result, "ServerStorageModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_script_acts_as_server")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_script_acts_as_server")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -2051,7 +2051,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_script_acts_as_server")
     CHECK_FALSE(getItem(result, "GuiModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_client_can_see_client")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_client_can_see_client")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -2070,7 +2070,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_client_can_see_client")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_requires_server_can_see_server")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_requires_server_can_see_server")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = false;
@@ -2089,7 +2089,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_requires_server_can_see_server")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_client_cannot_see_server")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_client_cannot_see_server")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -2108,7 +2108,7 @@ TEST_CASE_FIXTURE(Fixture, "string_requires_client_cannot_see_server")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_server_cannot_see_client")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_server_cannot_see_client")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -2127,7 +2127,7 @@ TEST_CASE_FIXTURE(Fixture, "string_requires_server_cannot_see_client")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_shared_can_see_all")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_shared_can_see_all")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -2146,7 +2146,7 @@ TEST_CASE_FIXTURE(Fixture, "string_requires_shared_can_see_all")
     CHECK(getItem(result, "ServerModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_localscript_acts_as_client")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_localscript_acts_as_client")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -2169,7 +2169,7 @@ TEST_CASE_FIXTURE(Fixture, "string_requires_localscript_acts_as_client")
     CHECK_FALSE(getItem(result, "ServerStorageModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_script_acts_as_server")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_script_acts_as_server")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -2192,7 +2192,7 @@ TEST_CASE_FIXTURE(Fixture, "string_requires_script_acts_as_server")
     CHECK_FALSE(getItem(result, "GuiModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_client_can_see_client")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_client_can_see_client")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;
@@ -2211,7 +2211,7 @@ TEST_CASE_FIXTURE(Fixture, "string_requires_client_can_see_client")
     CHECK(getItem(result, "SharedModule"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "string_requires_server_can_see_server")
+TEST_CASE_FIXTURE(RobloxFixture, "string_requires_server_can_see_server")
 {
     client->globalConfig.completion.imports.enabled = true;
     client->globalConfig.completion.imports.stringRequires.enabled = true;

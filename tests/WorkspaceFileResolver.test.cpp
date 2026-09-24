@@ -531,7 +531,7 @@ TEST_CASE_FIXTURE(Fixture, "init_luau_files_are_aware_of_luaurc_files_that_are_s
     CHECK(initConfig.aliases.find("test"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "resolve_json_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "resolve_json_modules")
 {
     auto path = tempDir.write_child("settings.json", R"({"value": 1})");
 
@@ -551,7 +551,7 @@ TEST_CASE_FIXTURE(Fixture, "resolve_json_modules")
     CHECK_EQ(source->source, "--!strict\nreturn {[\"value\"] = 1;}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "resolve_toml_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "resolve_toml_modules")
 {
     auto path = tempDir.write_child("settings.toml", R"(value = 1)");
 
@@ -571,7 +571,7 @@ TEST_CASE_FIXTURE(Fixture, "resolve_toml_modules")
     CHECK_EQ(source->source, "--!strict\nreturn {[\"value\"] = 1;}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "resolve_yaml_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "resolve_yaml_modules")
 {
     auto path = tempDir.write_child("settings.yaml", "value: 1");
 
@@ -591,7 +591,7 @@ TEST_CASE_FIXTURE(Fixture, "resolve_yaml_modules")
     CHECK_EQ(source->source, "--!strict\nreturn {[\"value\"] = 1;}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "resolve_yml_modules")
+TEST_CASE_FIXTURE(RobloxFixture, "resolve_yml_modules")
 {
     auto path = tempDir.write_child("settings.yml", "value: 1");
 
@@ -662,7 +662,7 @@ TEST_CASE_FIXTURE(Fixture, "string_require_resolves_symlinked_directory")
 }
 #endif
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_sibling")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_sibling")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -674,7 +674,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_sibling")
     CHECK_EQ(result->name, "game/ReplicatedStorage/Shared/ModuleB");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_bare_name")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_bare_name")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -686,7 +686,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_bare_name")
     CHECK_EQ(result->name, "game/ReplicatedStorage/Shared/ModuleB");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_parent_traversal")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_parent_traversal")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -698,7 +698,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_parent_traversal")
     CHECK_EQ(result->name, "game/ReplicatedStorage/Utils");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_nested_path")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_nested_path")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -710,7 +710,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_nested_path")
     CHECK_EQ(result->name, "game/ReplicatedStorage/Shared/Nested/DeepModule");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_cross_service")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_cross_service")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -724,7 +724,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_cross_service")
     CHECK_EQ(result->name, "game/ServerScriptService/ServerModule");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_nonexistent_path")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_nonexistent_path")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -736,7 +736,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_nonexistent_path")
     CHECK_EQ(result->name, "game/ReplicatedStorage/Shared/NonExistent");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_returns_nullopt_past_root")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_returns_nullopt_past_root")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -747,7 +747,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_returns_nullopt_past_root")
     CHECK_FALSE(result.has_value());
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_falls_back_for_non_sourcemap_file")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_falls_back_for_non_sourcemap_file")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -762,7 +762,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_falls_back_for_non_sourcema
     CHECK_EQ(Uri::file(result->name), Uri::file(otherPath));
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_game_alias_resolves_from_root")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_game_alias_resolves_from_root")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -775,7 +775,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_game_alias_resolves_from_root")
     CHECK_EQ(result->name, "game/ReplicatedStorage/Shared/ModuleA");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_game_alias_resolves_nonexistent_path")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_game_alias_resolves_nonexistent_path")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -787,7 +787,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_game_alias_resolves_nonexistent_path")
     CHECK_EQ(result->name, "game/NonExistent/Module");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_from_module")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_self_alias_resolves_from_module")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(R"(
@@ -814,7 +814,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_from_module")
     CHECK_EQ(result->name, "game/Library/Helper");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_sibling_directory_of_src")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_self_alias_resolves_sibling_directory_of_src")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(R"(
@@ -843,7 +843,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_sibling_directory_of_s
     CHECK_EQ(result->name, "ProjectRoot/packages/test");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_to_node_itself_with_no_remainder")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_self_alias_resolves_to_node_itself_with_no_remainder")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(R"(
@@ -870,7 +870,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_to_node_itself_with_no
     CHECK_EQ(result->name, "ProjectRoot");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_relative_to_calling_node_not_root")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_self_alias_resolves_relative_to_calling_node_not_root")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(R"(
@@ -904,7 +904,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_self_alias_resolves_relative_to_calling_no
     CHECK_EQ(result->name, "ProjectRoot/someChild/packages/test");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_user_defined_game_alias_takes_precedence")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_user_defined_game_alias_takes_precedence")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -925,7 +925,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_user_defined_game_alias_takes_precedence")
     CHECK_EQ(Uri::file(result->name), Uri::file(gameDirModule));
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_user_defined_alias_resolves_via_filesystem")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_user_defined_alias_resolves_via_filesystem")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);
@@ -946,7 +946,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_user_defined_alias_resolves_via_filesystem
     CHECK_EQ(Uri::file(result->name), Uri::file(sharedModule));
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_json_data_file")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_json_data_file")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
 
@@ -984,7 +984,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_json_data_file")
     CHECK_EQ(source->source, "--!strict\nreturn {[\"enabled\"] = true;}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_toml_data_file")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_toml_data_file")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
 
@@ -1022,7 +1022,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_toml_data_file")
     CHECK_EQ(source->source, "--!strict\nreturn {[\"enabled\"] = true;}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_yaml_data_file")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_resolves_yaml_data_file")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
 
@@ -1060,7 +1060,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_resolves_yaml_data_file")
     CHECK_EQ(source->source, "--!strict\nreturn {[\"enabled\"] = true;}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_game_alias_resolves_data_file")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_game_alias_resolves_data_file")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
 
@@ -1105,7 +1105,7 @@ TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_game_alias_resolves_data_fi
     CHECK_EQ(source->source, "--!strict\nreturn {[\"key\"] = \"value\";}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_string_require_relative_parent_resolves_data_file")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_string_require_relative_parent_resolves_data_file")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
 

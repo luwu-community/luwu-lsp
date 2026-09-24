@@ -42,7 +42,11 @@ struct Fixture
     TempDir tempDir; // Must be declared before workspace since workspace uses tempDir.path()
     WorkspaceFolder workspace;
 
-    explicit Fixture();
+    /// The Roblox platform is no longer the default (Luwu is not a Roblox language), so a test that
+    /// needs sourcemaps, the DataModel or Roblox magic functions has to ask for it. The platform has
+    /// to be chosen before the workspace is first configured, because that is when types are
+    /// registered and when the platform gets its chance to attach magic functions to them.
+    explicit Fixture(LSPPlatformConfig platform = LSPPlatformConfig::Standard);
     ~Fixture();
 
     Uri newDocument(const std::string& name, const std::string& source);
@@ -79,8 +83,19 @@ struct Fixture
     void dumpErrors(std::ostream& os, const std::vector<Luau::TypeError>& errors);
     std::string getErrors(const Luau::CheckResult& cr);
 
-    /// Switch the workspace to Standard platform (fixture defaults to Roblox)
+    /// Switch the workspace to the Standard platform after the fact. This does not undo anything the
+    /// previous platform did to the registered types, so prefer choosing the platform up front.
     void switchToStandardPlatform();
+};
+
+/// A fixture on the Roblox platform, for tests covering sourcemaps, the DataModel, or the Roblox
+/// magic functions
+struct RobloxFixture : Fixture
+{
+    RobloxFixture()
+        : Fixture(LSPPlatformConfig::Roblox)
+    {
+    }
 };
 
 #define LUAU_LSP_REQUIRE_ERRORS(result) \

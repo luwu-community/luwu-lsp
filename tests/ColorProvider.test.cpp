@@ -42,7 +42,7 @@ TEST_CASE("RGB to Hex conversions")
     CHECK_EQ(rgbToHex({255, 255, 255}), "#ffffff");
 }
 
-TEST_CASE_FIXTURE(Fixture, "color_presentation_uses_simplified_numbers")
+TEST_CASE_FIXTURE(RobloxFixture, "color_presentation_uses_simplified_numbers")
 {
     auto presentation = workspace.colorPresentation(lsp::ColorPresentationParams{{}, lsp::Color{0.0, 0.0, 0.0}});
     REQUIRE_EQ(presentation.size(), 4);

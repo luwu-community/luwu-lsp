@@ -6,8 +6,56 @@
 
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuGenericNominals)
 
 TEST_SUITE_BEGIN("Hover");
+
+/// A hover puts a blank line before the rule separating the type from its documentation, so that the
+/// code block above it and the prose below it don't read as one run-on block.
+static const std::string kHoverDocumentationBreaker = "\n" + kDocumentationBreaker;
+
+/// A hover reads: the type, then optionally a line saying where that type came from, then a rule and
+/// the documentation. A test about the documentation pins the two ends and the provenance it cares
+/// about, and leaves the exact markdown in between alone.
+static void checkDocumentedHover(const std::string& hover, const std::string& code, const std::string& provenance, const std::string& documentation)
+{
+    bool startsWithType = hover.rfind(codeBlock("luwu", code), 0) == 0;
+    CHECK_MESSAGE(startsWithType, "hover does not start with the type:\n" << hover);
+
+    if (!provenance.empty())
+    {
+        bool saysWhereItCameFrom = hover.find(provenance) != std::string::npos;
+        CHECK_MESSAGE(saysWhereItCameFrom, "hover does not say where the type came from:\n" << hover);
+    }
+
+    auto ending = kHoverDocumentationBreaker + documentation;
+    bool endsWithDocumentation = hover.size() >= ending.size() && hover.compare(hover.size() - ending.size(), ending.size(), ending) == 0;
+    CHECK_MESSAGE(endsWithDocumentation, "hover does not end with the documentation:\n" << hover);
+}
+
+/// A hover over a type written in terms of other types: the summary and its documentation come
+/// first, and the types it referred to are expanded in a references section below.
+static void checkReferencingHover(
+    const std::string& hover, const std::string& code, const std::string& documentation, const std::vector<std::string>& referencedTypes)
+{
+    bool startsWithTypeAndDocumentation = hover.rfind(codeBlock("luwu", code) + kHoverDocumentationBreaker + documentation, 0) == 0;
+    CHECK_MESSAGE(startsWithTypeAndDocumentation, "hover does not start with the type and its documentation:\n" << hover);
+
+    bool hasReferences = hover.find("*References*") != std::string::npos;
+    CHECK_MESSAGE(hasReferences, "hover has no references section:\n" << hover);
+
+    for (const auto& referencedType : referencedTypes)
+    {
+        bool expandsReferencedType = hover.find(referencedType) != std::string::npos;
+        CHECK_MESSAGE(expandsReferencedType, "hover does not expand " << referencedType << ":\n" << hover);
+    }
+}
+
+/// The `DocumentedClass` in the test definitions file, as a hover links to it
+static const std::string kDocumentedClassLink = "[`DocumentedClass`](file:///./tests/testdata/standard_definitions.d.luau#L120) *from* "
+                                                "[@roblox global definitions](file:///./tests/testdata/standard_definitions.d.luau)";
+
+
 
 TEST_CASE_FIXTURE(Fixture, "show_string_length_on_hover")
 {
@@ -221,7 +269,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_type_table")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Foo = {  }") + kDocumentationBreaker + "This is documentation for Foo\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Foo = {  }") + kHoverDocumentationBreaker + "This is documentation for Foo\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_type_table_when_hovering_over_variable_with_type")
@@ -241,7 +289,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_type_table_when_hoverin
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "local x: {  }") + kDocumentationBreaker + "This is documentation for Foo\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "local x: {  }") + kHoverDocumentationBreaker + "This is documentation for Foo\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_a_type_table")
@@ -262,7 +310,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_a_type_table"
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kDocumentationBreaker + "This is a member bar\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kHoverDocumentationBreaker + "This is a member bar\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_a_type_table_when_hovering_over_property")
@@ -285,7 +333,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_a_type_table_
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kDocumentationBreaker + "This is a member bar\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kHoverDocumentationBreaker + "This is a member bar\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_an_intersected_type_table_when_hovering_over_property")
@@ -313,7 +361,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_an_intersecte
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kDocumentationBreaker + "Example sick string\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kHoverDocumentationBreaker + "Example sick string\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_function")
@@ -332,7 +380,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_function")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "function foo(): ()") + kDocumentationBreaker + "This is documentation for Foo\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "function foo(): ()") + kHoverDocumentationBreaker + "This is documentation for Foo\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_function_call")
@@ -352,7 +400,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_function_call")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "function foo(): ()") + kDocumentationBreaker + "This is documentation for Foo\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "function foo(): ()") + kHoverDocumentationBreaker + "This is documentation for Foo\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_type_alias_declarations")
@@ -371,7 +419,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_type_alias_declarations")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Meters = number") + kDocumentationBreaker +
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Meters = number") + kHoverDocumentationBreaker +
                                          "The metre (or meter in [US spelling]; symbol: m) is the [base unit] of [length]\n" +
                                          "in the [International System of Units] (SI)\n");
 }
@@ -400,9 +448,12 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_type_alias_declarations_o
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Foobar = {\n    bar: \"Bar\"\n} & {\n    foo: \"Foo\"\n}") + kDocumentationBreaker +
-                                         "The terms foobar (/ˈfuːbɑːr/), foo, bar, baz, qux, quux, and others are used as\n" +
-                                         "metasyntactic variables and placeholder names in computer programming or computer-related documentation\n");
+    // The alias is summarised by the names it is written in terms of; the types behind those names
+    // follow in the references section underneath the documentation
+    checkReferencingHover(result->contents.value, "type Foobar = Bar & Foo",
+        "The terms foobar (/ˈfuːbɑːr/), foo, bar, baz, qux, quux, and others are used as\n"
+        "metasyntactic variables and placeholder names in computer programming or computer-related documentation\n",
+        {"type Foo = {", "type Bar = {"});
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_type_references")
@@ -431,8 +482,8 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_type_references")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Foobar = {\n    bar: \"Bar\"\n} & {\n    foo: \"Foo\"\n}") + kDocumentationBreaker +
-                                         "This is the intersection of two types\n");
+    checkReferencingHover(
+        result->contents.value, "type Foobar = Bar & Foo", "This is the intersection of two types\n", {"type Foo = {", "type Bar = {"});
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_external_type_references")
@@ -454,7 +505,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_external_type_references"
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Types.Value = string") + kDocumentationBreaker + "This is a type\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Types.Value = string") + kHoverDocumentationBreaker + "This is a type\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "show_type_of_global_variable")
@@ -491,7 +542,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_type_table_from_
     CHECK_EQ(result->contents.value, codeBlock("luwu", "type DocumentedTable = {\n"
                                                        "    member1: string\n"
                                                        "}") +
-                                         kDocumentationBreaker + "This is a documented table\n");
+                                         kHoverDocumentationBreaker + "This is a documented table\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_type_table_from_definitions_file_when_hovering_over_variable_with_type")
@@ -511,7 +562,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_type_table_from_
     CHECK_EQ(result->contents.value, codeBlock("luwu", "local x: {\n"
                                                        "    member1: string\n"
                                                        "}") +
-                                         kDocumentationBreaker + "This is a documented table\n");
+                                         kHoverDocumentationBreaker + "This is a documented table\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_type_table_from_definitions_file_when_hovering_over_property")
@@ -529,7 +580,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_type_table_from_
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kDocumentationBreaker + "This is documented member1 of the table\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kHoverDocumentationBreaker + "This is documented member1 of the table\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_function_call_from_definitions_file")
@@ -547,7 +598,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_function_call_fr
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
     CHECK_EQ(result->contents.value,
-        codeBlock("luwu", "function DocumentedGlobalFunction(): number") + kDocumentationBreaker + "This is a documented global function\n");
+        codeBlock("luwu", "function DocumentedGlobalFunction(): number") + kHoverDocumentationBreaker + "This is a documented global function\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type_from_definitions_file")
@@ -564,11 +615,8 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(
-        result->contents.value,
-        codeBlock("luwu", "extern type DocumentedClass\n    member1: string\n    function function1(self): number\nend") + kDocumentationBreaker +
-            "This is a documented class\n"
-    );
+    checkDocumentedHover(result->contents.value, "extern type DocumentedClass\n    member1: string\n    function function1(self): number\nend",
+        kDocumentedClassLink, "This is a documented class\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_variable_with_class_type")
@@ -585,11 +633,8 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_variable_w
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(
-        result->contents.value,
-        codeBlock("luwu", "extern type DocumentedClass\n    member1: string\n    function function1(self): number\nend") + kDocumentationBreaker +
-            "This is a documented class\n"
-    );
+    checkDocumentedHover(result->contents.value, "extern type DocumentedClass\n    member1: string\n    function function1(self): number\nend",
+        kDocumentedClassLink, "This is a documented class\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type_property")
@@ -607,7 +652,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kDocumentationBreaker + "This is a documented member1 of the class\n");
+    checkDocumentedHover(result->contents.value, "string", "*Field of* " + kDocumentedClassLink, "This is a documented member1 of the class\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type_method_call")
@@ -625,8 +670,8 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value,
-        codeBlock("luwu", "function DocumentedClass:function1(): number") + kDocumentationBreaker + "This is a documented function1 of the class\n");
+    checkDocumentedHover(result->contents.value, "function DocumentedClass:function1(): number", "*Method of* " + kDocumentedClassLink,
+        "This is a documented function1 of the class\n");
 }
 
 // TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_global_variable_from_definitions_file")
@@ -644,7 +689,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_hovering_over_class_type
 //     auto result = workspace.hover(params, nullptr);
 //     REQUIRE(result);
 //     CHECK_EQ(result->contents.value,
-//         codeBlock("luwu", "type DocumentedGlobalVariable = number") + kDocumentationBreaker + "This is a documented global variable\n");
+//         codeBlock("luwu", "type DocumentedGlobalVariable = number") + kHoverDocumentationBreaker + "This is a documented global variable\n");
 // }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_all_parts_of_union_point_to_same_location")
@@ -672,7 +717,7 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_when_all_parts_of_union_point
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", FFlag::LuauSolverV2 ? "boolean" : "false | true") + kDocumentationBreaker +
+    CHECK_EQ(result->contents.value, codeBlock("luwu", FFlag::LuauSolverV2 ? "boolean" : "false | true") + kHoverDocumentationBreaker +
                                          "Indicates if the node has only a single supporter, this is purely internal\n"
                                          "and only used by `object_tree.closest_empty_node`,\n"
                                          "as an optimization for trees that have a taper type of \"Flat\" or \"Slope\".\n");
@@ -701,7 +746,7 @@ TEST_CASE_FIXTURE(Fixture, "handles_type_references_without_types_graph")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Types.Value = string") + kDocumentationBreaker + "This is a type\n");
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "type Types.Value = string") + kHoverDocumentationBreaker + "This is a type\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "hover_respects_cancellation")
@@ -872,12 +917,13 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_const_class_property_shows_const")
     CHECK_EQ(result->contents.value, codeBlock("luwu", "public const name: string"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_class_keyword_docs")
+TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_export_class_docs")
 {
     // Regression test: `export class Foo ... end` used to record the location of `export` (not
     // `class`) as AstStatClass::keywordLocation, so hovering the literal `class` keyword found no
     // match here and hovering `export` matched against text that isn't in keyword_hovers.json --
-    // in both cases, nothing showed up.
+    // in both cases, nothing showed up. `export class` is documented as the one thing it is, so
+    // either half of it hovers to the same docs.
     ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
@@ -899,7 +945,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, getKeywordHoverDocs("class"));
+    CHECK_EQ(result->contents.value, getKeywordHoverDocs("export_class"));
 }
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_class_name_shows_class_value_summary_with_constructor")
@@ -1347,7 +1393,8 @@ TEST_CASE_FIXTURE(Fixture, "generic_class_value_summary_shows_its_generic_parame
     // The class value is the factory, not an instance, so it has nothing instantiated to print and
     // used to render as a bare `class List` -- leaving the `{T}` in its own constructor signature
     // and field lines referring to a parameter the header never introduced.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}, {FFlag::LuwuGenericNominals, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1375,7 +1422,8 @@ TEST_CASE_FIXTURE(Fixture, "primary_constructor_parameter_hover_uses_visibility_
 {
     // The parameter list is bare here, so the parameter's own qualifiers say "public" by default --
     // but the class body restates the field as private, and that restatement is the declaration.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}, {FFlag::LuwuGenericNominals, true}};
     ENABLE_NEW_SOLVER();
 
     auto [source, marker] = sourceWithMarker(R"(
@@ -1392,7 +1440,7 @@ TEST_CASE_FIXTURE(Fixture, "primary_constructor_parameter_hover_uses_visibility_
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "private inner: {T}"));
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "private inner: { T }"));
 }
 
 TEST_CASE_FIXTURE(Fixture, "primary_constructor_parameter_hover_prefers_its_own_qualifier_over_the_body")
@@ -1430,7 +1478,8 @@ TEST_CASE_FIXTURE(Fixture, "class_summary_works_for_a_class_required_from_anothe
     ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
     ENABLE_NEW_SOLVER();
 
-    newDocument("list.luau", R"(
+    // Written to disk as well as opened, because resolving `require("./list")` looks for the file
+    auto list = R"(
         export class List private (inner: { number })
             private inner
 
@@ -1444,7 +1493,9 @@ TEST_CASE_FIXTURE(Fixture, "class_summary_works_for_a_class_required_from_anothe
         end
 
         return { List = List }
-    )");
+    )";
+    tempDir.write_child("list.luau", list);
+    newDocument("list.luau", list);
 
     auto [source, marker] = sourceWithMarker(R"(
         local |List = require("./list").List
@@ -1573,11 +1624,12 @@ TEST_CASE_FIXTURE(Fixture, "hover_truncates_large_where_clause_tables_without_un
 /// on first.
 struct ClassFlags
 {
-    ScopedFastFlag sffs[3] = {
-        {FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}, {FFlag::LuauSolverV2, true}};
+    ScopedFastFlag sffs[3] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}, {FFlag::LuauSolverV2, true}};
 };
 
-struct ClassFixture : ClassFlags, Fixture
+struct ClassFixture
+    : ClassFlags
+    , Fixture
 {
 };
 

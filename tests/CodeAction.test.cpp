@@ -407,7 +407,7 @@ local x = OtherModule
     CHECK(changes[0].newText.find("local OtherModule = require") != std::string::npos);
 }
 
-TEST_CASE_FIXTURE(Fixture, "unknown_global_offers_service_import_fix")
+TEST_CASE_FIXTURE(RobloxFixture, "unknown_global_offers_service_import_fix")
 {
     std::string source = dedent(R"(
         local storage = ReplicatedStorage
@@ -436,7 +436,7 @@ TEST_CASE_FIXTURE(Fixture, "unknown_global_offers_service_import_fix")
     )"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "unknown_global_offers_instance_based_require_fix")
+TEST_CASE_FIXTURE(RobloxFixture, "unknown_global_offers_instance_based_require_fix")
 {
     loadSourcemap(R"(
     {
@@ -492,7 +492,7 @@ TEST_CASE_FIXTURE(Fixture, "unknown_global_offers_instance_based_require_fix")
     )"));
 }
 
-TEST_CASE_FIXTURE(Fixture, "unknown_global_instance_require_reuses_existing_service")
+TEST_CASE_FIXTURE(RobloxFixture, "unknown_global_instance_require_reuses_existing_service")
 {
     loadSourcemap(R"(
     {
@@ -608,7 +608,7 @@ local y = 2
     CHECK_FALSE(action);
 }
 
-TEST_CASE_FIXTURE(Fixture, "add_all_missing_requires_with_services")
+TEST_CASE_FIXTURE(RobloxFixture, "add_all_missing_requires_with_services")
 {
     loadSourcemap(R"(
     {
@@ -740,7 +740,7 @@ t.fOo()
     CHECK_FALSE(action);
 }
 
-TEST_CASE_FIXTURE(Fixture, "sourcemap_unknown_symbol_fix_suggests_string_require")
+TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_unknown_symbol_fix_suggests_string_require")
 {
     client->globalConfig.completion.imports.stringRequires.enabled = true;
     loadSourcemap(SOURCEMAP_FOR_STRING_REQUIRES);

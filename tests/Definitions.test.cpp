@@ -34,7 +34,11 @@ TEST_CASE("handles_definitions_files_relying_on_mutations")
     client.definitionsFiles.emplace("@roblox", "./tests/testdata/standard_definitions.d.luau");
     client.definitionsFiles.emplace("@roblox1", "./tests/testdata/extra_definitions_relying_on_mutations.d.luau");
 
-    workspace.setupWithConfiguration(defaultTestClientConfiguration());
+    // The mutations this covers are the Roblox platform's, so the workspace has to be on it
+    auto configuration = defaultTestClientConfiguration();
+    configuration.platform.type = LSPPlatformConfig::Roblox;
+
+    workspace.setupWithConfiguration(configuration);
     workspace.isReady = true;
 
     auto document = newDocument(workspace, "foo.luau", R"(

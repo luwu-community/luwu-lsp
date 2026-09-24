@@ -54,7 +54,7 @@ TEST_CASE_FIXTURE(Fixture, "managed_files_correctly_resolves_for_file_uris")
     CHECK_EQ(textDocumentFromUri, textDocumentFromModuleName);
 }
 
-TEST_CASE_FIXTURE(Fixture, "managed_files_correctly_resolves_for_virtual_paths")
+TEST_CASE_FIXTURE(RobloxFixture, "managed_files_correctly_resolves_for_virtual_paths")
 {
     loadSourcemap(R"(
     {

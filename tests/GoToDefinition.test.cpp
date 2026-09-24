@@ -226,7 +226,7 @@ TEST_CASE_FIXTURE(Fixture, "methods_on_explicitly_defined_self")
     CHECK_EQ(result[0].range.end, lsp::Position{12, 33});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_inlined_function_table_property_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_inlined_function_table_property_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -256,7 +256,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_inlined_function_table_property_definit
     CHECK_EQ(result[0].range.end, lsp::Position{3, 23});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_indirect_variable_inlined_function_table_property_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_indirect_variable_inlined_function_table_property_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -287,7 +287,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_indirect_variable_inlined_function_tabl
     CHECK_EQ(result[0].range.end, lsp::Position{3, 23});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_table_property_referencing_local_variable_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_table_property_referencing_local_variable_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -319,7 +319,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_table_property_referencing_local_variab
     CHECK_EQ(result[0].range.end, lsp::Position{6, 23});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_separate_function_table_property_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_separate_function_table_property_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -350,7 +350,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_separate_function_table_property_defini
     CHECK_EQ(result[0].range.end, lsp::Position{3, 21});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_named_function_table_property_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_named_function_table_property_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -381,7 +381,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_named_function_table_property_definitio
     CHECK_EQ(result[0].range.end, lsp::Position{3, 30});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_imported_type_alias_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_imported_type_alias_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -410,7 +410,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_imported_type_alias_definition")
     CHECK_EQ(result[0].range.end, lsp::Position{2, 32});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_imported_type_alias_definition_after_check_without_retaining_type_graphs")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_imported_type_alias_definition_after_check_without_retaining_type_graphs")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -443,7 +443,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_imported_type_alias_definition_after_ch
     CHECK_EQ(result[0].range.end, lsp::Position{2, 32});
 }
 
-TEST_CASE_FIXTURE(Fixture, "cross_module_imported_type_alias_definition_after_check_without_retaining_type_graphs_goto_type_definition")
+TEST_CASE_FIXTURE(RobloxFixture, "cross_module_imported_type_alias_definition_after_check_without_retaining_type_graphs_goto_type_definition")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -476,7 +476,7 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_imported_type_alias_definition_after_ch
     CHECK_EQ(result->range.end, lsp::Position{2, 32});
 }
 
-TEST_CASE_FIXTURE(Fixture, "go_to_definition_of_a_named_function_returns_the_underlying_definition_and_not_the_require_stmt")
+TEST_CASE_FIXTURE(RobloxFixture, "go_to_definition_of_a_named_function_returns_the_underlying_definition_and_not_the_require_stmt")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -506,7 +506,7 @@ TEST_CASE_FIXTURE(Fixture, "go_to_definition_of_a_named_function_returns_the_und
     CHECK_EQ(result[0].range.end, lsp::Position{2, 34});
 }
 
-TEST_CASE_FIXTURE(Fixture, "go_to_definition_of_an_anonymous_function_returns_the_underlying_definition_and_not_the_require_stmt")
+TEST_CASE_FIXTURE(RobloxFixture, "go_to_definition_of_an_anonymous_function_returns_the_underlying_definition_and_not_the_require_stmt")
 {
     auto required = newDocument("required.luau", R"(
         --!strict
@@ -552,7 +552,7 @@ TEST_CASE_FIXTURE(Fixture, "go_to_definition_works_for_a_string_require_path")
     CHECK_EQ(result[0].range.end, lsp::Position{0, 0});
 }
 
-TEST_CASE_FIXTURE(Fixture, "go_to_definition_works_for_a_roblox_require_path")
+TEST_CASE_FIXTURE(RobloxFixture, "go_to_definition_works_for_a_roblox_require_path")
 {
     loadSourcemap(R"({
         "name": "Game",

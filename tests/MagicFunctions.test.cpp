@@ -215,7 +215,7 @@ TEST_SUITE_END();
 
 TEST_SUITE_BEGIN("MagicFunctions");
 
-TEST_CASE_FIXTURE(Fixture, "instance_new")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_new")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -225,7 +225,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_new")
     CHECK(Luau::toString(requireType("x")) == "Part");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_service")
+TEST_CASE_FIXTURE(RobloxFixture, "get_service")
 {
     auto result = check(R"(
         local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -235,7 +235,7 @@ TEST_CASE_FIXTURE(Fixture, "get_service")
     CHECK(Luau::toString(requireType("ReplicatedStorage")) == "ReplicatedStorage");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_service_unknown_service")
+TEST_CASE_FIXTURE(RobloxFixture, "get_service_unknown_service")
 {
     auto result = check(R"(
         local ReplicatedStorage = game:GetService("Unknown")
@@ -245,7 +245,7 @@ TEST_CASE_FIXTURE(Fixture, "get_service_unknown_service")
     CHECK(toString(result.errors[0]) == "Invalid service name 'Unknown'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_is_a")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_is_a")
 {
     auto result = check(R"(
         local x: Instance = Instance.new("Part")
@@ -257,7 +257,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_is_a")
     CHECK(Luau::toString(requireType("y")) == "TextLabel");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_is_a_unknown_class")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_is_a_unknown_class")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -268,7 +268,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_is_a_unknown_class")
     CHECK(toString(result.errors[0]) == "Unknown type 'unknown_class'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_clone")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_clone")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -279,7 +279,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_clone")
     CHECK(Luau::toString(requireType("y")) == "Part");
 }
 
-TEST_CASE_FIXTURE(Fixture, "instance_from_existing")
+TEST_CASE_FIXTURE(RobloxFixture, "instance_from_existing")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -290,7 +290,7 @@ TEST_CASE_FIXTURE(Fixture, "instance_from_existing")
     CHECK(Luau::toString(requireType("y")) == "Part");
 }
 
-TEST_CASE_FIXTURE(Fixture, "find_first_x_which_is_a")
+TEST_CASE_FIXTURE(RobloxFixture, "find_first_x_which_is_a")
 {
     auto result = check(R"(
         local x: Instance = Instance.new("Part")
@@ -308,7 +308,7 @@ TEST_CASE_FIXTURE(Fixture, "find_first_x_which_is_a")
     CHECK(Luau::toString(requireType("d")) == "TextLabel?");
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal")
+TEST_CASE_FIXTURE(RobloxFixture, "get_property_changed_signal")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -318,7 +318,7 @@ TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal")
     LUAU_LSP_REQUIRE_NO_ERRORS(result);
 }
 
-TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_unknown_property")
+TEST_CASE_FIXTURE(RobloxFixture, "get_property_changed_signal_unknown_property")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -329,7 +329,7 @@ TEST_CASE_FIXTURE(Fixture, "get_property_changed_signal_unknown_property")
     CHECK(toString(result.errors[0]) == "Key 'unknown' not found in external type 'Part'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "enum_is_a")
+TEST_CASE_FIXTURE(RobloxFixture, "enum_is_a")
 {
     auto result = check(R"(
         local x: EnumItem = Enum.HumanoidRigType.R15
@@ -341,7 +341,7 @@ TEST_CASE_FIXTURE(Fixture, "enum_is_a")
     CHECK(Luau::toString(requireType("y")) == "Enum.HumanoidRigType");
 }
 
-TEST_CASE_FIXTURE(Fixture, "enum_is_a_unknown_enum")
+TEST_CASE_FIXTURE(RobloxFixture, "enum_is_a_unknown_enum")
 {
     auto result = check(R"(
         local x = Enum.HumanoidRigType.R15
@@ -352,7 +352,7 @@ TEST_CASE_FIXTURE(Fixture, "enum_is_a_unknown_enum")
     CHECK(toString(result.errors[0]) == "Unknown type 'unknown'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "typeof_refines_for_instance")
+TEST_CASE_FIXTURE(RobloxFixture, "typeof_refines_for_instance")
 {
     auto result = check(R"(
         local obj: unknown = game
@@ -364,7 +364,7 @@ TEST_CASE_FIXTURE(Fixture, "typeof_refines_for_instance")
     CHECK(Luau::toString(requireType("realObj")) == "Instance");
 }
 
-TEST_CASE_FIXTURE(Fixture, "is_property_modified")
+TEST_CASE_FIXTURE(RobloxFixture, "is_property_modified")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -374,7 +374,7 @@ TEST_CASE_FIXTURE(Fixture, "is_property_modified")
     LUAU_LSP_REQUIRE_NO_ERRORS(result);
 }
 
-TEST_CASE_FIXTURE(Fixture, "is_property_modified_unknown_property")
+TEST_CASE_FIXTURE(RobloxFixture, "is_property_modified_unknown_property")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -385,7 +385,7 @@ TEST_CASE_FIXTURE(Fixture, "is_property_modified_unknown_property")
     CHECK(toString(result.errors[0]) == "Key 'unknown' not found in external type 'Part'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "reset_property_to_default")
+TEST_CASE_FIXTURE(RobloxFixture, "reset_property_to_default")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -395,7 +395,7 @@ TEST_CASE_FIXTURE(Fixture, "reset_property_to_default")
     LUAU_LSP_REQUIRE_NO_ERRORS(result);
 }
 
-TEST_CASE_FIXTURE(Fixture, "reset_property_to_default_unknown_property")
+TEST_CASE_FIXTURE(RobloxFixture, "reset_property_to_default_unknown_property")
 {
     auto result = check(R"(
         local x = Instance.new("Part")
@@ -406,7 +406,7 @@ TEST_CASE_FIXTURE(Fixture, "reset_property_to_default_unknown_property")
     CHECK(toString(result.errors[0]) == "Key 'unknown' not found in external type 'Part'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "query_descendants_no_class")
+TEST_CASE_FIXTURE(RobloxFixture, "query_descendants_no_class")
 {
     auto result = check(R"(
         local x: Instance = Instance.new("Part")
@@ -417,7 +417,7 @@ TEST_CASE_FIXTURE(Fixture, "query_descendants_no_class")
     CHECK(Luau::toString(requireType("y")) == "{Instance}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "query_descendants_single_class")
+TEST_CASE_FIXTURE(RobloxFixture, "query_descendants_single_class")
 {
     auto result = check(R"(
         local x: Instance = Instance.new("Part")
@@ -428,7 +428,7 @@ TEST_CASE_FIXTURE(Fixture, "query_descendants_single_class")
     CHECK(Luau::toString(requireType("y")) == "{BasePart}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "query_descendants_multiple_classes")
+TEST_CASE_FIXTURE(RobloxFixture, "query_descendants_multiple_classes")
 {
     auto result = check(R"(
         local x: Instance = Instance.new("Part")
@@ -439,7 +439,7 @@ TEST_CASE_FIXTURE(Fixture, "query_descendants_multiple_classes")
     CHECK(Luau::toString(requireType("y")) == "{Part | TextLabel}");
 }
 
-TEST_CASE_FIXTURE(Fixture, "query_descendants_unknown_class")
+TEST_CASE_FIXTURE(RobloxFixture, "query_descendants_unknown_class")
 {
     auto result = check(R"(
         local x: Instance = Instance.new("Part")
