@@ -3,6 +3,8 @@
 
 #include "Luau/AstQuery.h"
 #include "LSP/DocumentationParser.hpp"
+#include "LSP/EmbeddedResources.hpp"
+#include "LSP/KeywordHovers.hpp"
 #include "LSP/LuauExt.hpp"
 
 TEST_SUITE_BEGIN("Documentation");
@@ -645,6 +647,17 @@ end
     // Should only get "Does physics simulation", not the section header
     REQUIRE_EQ(1, comments.size());
     CHECK(comments[0] == "Does physics simulation");
+}
+
+
+TEST_CASE_FIXTURE(Fixture, "luwu_documentation_is_embedded")
+{
+    Luau::DocumentationDatabase database{""};
+    parseDocumentationContents(embedded::luwuDocs(), "luwu_docs.json", database, client.get());
+    CHECK(database.find("@luau/global/class"));
+
+    CHECK_FALSE(embedded::keywordHovers().empty());
+    CHECK(getKeywordHoverDocs("export_class"));
 }
 
 TEST_SUITE_END();

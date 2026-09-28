@@ -12,4 +12,7 @@ struct SemanticToken
     lsp::SemanticTokenModifiers tokenModifiers;
 };
 
-std::vector<SemanticToken> getSemanticTokens(const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule);
+/// `grammarHighlightsNone`: the document is a Luwu file, whose grammar already scopes `none` as a
+/// language constant, so it gets no semantic token.
+std::vector<SemanticToken> getSemanticTokens(const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule,
+    bool grammarHighlightsNone = false);

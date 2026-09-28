@@ -3,8 +3,7 @@
 #include "LSP/SemanticTokens.hpp"
 #include "Flags.hpp"
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -167,7 +166,7 @@ TEST_CASE_FIXTURE(Fixture, "class_field_restating_a_primary_constructor_paramete
 {
     // A field that restates a primary constructor parameter is that parameter, so it reads as one;
     // a field the constructor knows nothing about stays an ordinary property.
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ENABLE_NEW_SOLVER();
 
     check(R"(
@@ -191,6 +190,21 @@ end
     // `age` is not a parameter of the constructor, so it must not be coloured as one
     auto ownField = getSemanticToken(tokens, Luau::Position{3, 11});
     CHECK((!ownField || ownField->tokenType != lsp::SemanticTokenTypes::Parameter));
+}
+
+
+TEST_CASE_FIXTURE(Fixture, "none_is_left_to_the_luwu_grammar")
+{
+    check("local x = none");
+
+    // The Luau grammar doesn't know `none`, so in a Luau file the token is what marks it as a builtin
+    auto luauTokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    auto luauToken = getSemanticToken(luauTokens, Luau::Position{0, 10});
+    REQUIRE(luauToken);
+    CHECK_EQ(luauToken->tokenModifiers, lsp::SemanticTokenModifiers::DefaultLibrary | lsp::SemanticTokenModifiers::Readonly);
+
+    auto luwuTokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule(), /* grammarHighlightsNone= */ true);
+    CHECK_FALSE(getSemanticToken(luwuTokens, Luau::Position{0, 10}));
 }
 
 TEST_SUITE_END();

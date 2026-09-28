@@ -113,14 +113,9 @@ editor.
 
 ## Luwu feature flags
 
-Class features are behind fast flags defined in Luwu (see `../luwu/CLAUDE.md` "Feature flags"):
+Classes are behind one fast flag defined in Luwu, `FFlag::LuwuClasses` (see `../luwu/CLAUDE.md` "Feature flags").
 
-- `FFlag::DebugLuauUserDefinedClasses` -- parser/compiler support (from upstream)
-- `FFlag::DebugLuauUserDefinedClassesRuntime` -- VM runtime (from upstream)
-- `FFlag::LuwuBetterUserDefinedClasses` -- Luwu-specific class features
-
-`applyLuwuFlags()` (`src/Flags.cpp`) turns on every `Luwu`-prefixed flag plus the two class `DebugLuau` flags at
-startup, and `--luau-compat` / `luau-lsp.luauCompatibilityMode` turns them off. It also forces `LuauSolverV2` on in
+`applyLuwuFlags()` (`src/Flags.cpp`) turns on every `Luwu`-prefixed flag at startup, and `--luau-compat` / `luau-lsp.luauCompatibilityMode` turns them off. It also forces `LuauSolverV2` on in
 every configuration (classes only typecheck under the new solver). It runs before user-supplied flags, so
 `--flag:Name=false` and `luau-lsp.fflags.override` still win.
 
@@ -187,7 +182,7 @@ Class tests need the class flags and the new solver:
 ```cpp
 TEST_CASE_FIXTURE(Fixture, "class_feature")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ENABLE_NEW_SOLVER();
     // ...
 }

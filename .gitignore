@@ -1,4 +1,5 @@
 /build
+/build-static
 .vscode/settings.json
 /.vs
 out/
@@ -51,3 +52,7 @@ trace.json
 
 # Python venvs
 .venv
+
+# Archives made by package.luau
+/luwu-linux-*.tar.gz
+/luwu-language-server-*.tar.gz

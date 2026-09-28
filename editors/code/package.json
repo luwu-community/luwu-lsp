@@ -236,1536 +236,1357 @@
         }
       ]
     },
-    "configuration": {
-      "title": "Luwu",
-      "properties": {
-        "luwu.trace.server": {
-          "markdownDescription": "Traces the communication between VS Code and the Luwu language server.",
-          "type": "string",
-          "enum": [
-            "off",
-            "messages",
-            "verbose"
-          ],
-          "scope": "window",
-          "default": "off"
-        },
-        "luwu.server.path": {
-          "markdownDescription": "Path to the Luau LSP server binary. If not provided, uses the binary included in the extension.",
-          "type": "string",
-          "default": ""
-        },
-        "luau-lsp.server.path": {
-          "markdownDescription": "Renamed to `luwu.server.path`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.server.path`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.server.path. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.server.communicationChannel": {
-          "markdownDescription": "Type of communication channel to use for communicating with the server. Only useful for debug purposes",
-          "type": "string",
-          "enum": [
-            "stdio",
-            "pipe"
-          ],
-          "enumDescriptions": [
-            "Communicate via stdin/stdout (default)",
-            "Communicate via UNIX socket files. Useful for debugging"
-          ],
-          "default": "stdio"
-        },
-        "luau-lsp.server.communicationChannel": {
-          "markdownDescription": "Renamed to `luwu.server.communicationChannel`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "enum": [
-            "stdio",
-            "pipe"
-          ],
-          "enumDescriptions": [
-            "Communicate via stdin/stdout (default)",
-            "Communicate via UNIX socket files. Useful for debugging"
-          ],
-          "default": "stdio",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.server.communicationChannel`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.server.communicationChannel. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.server.delayStartup": {
-          "markdownDescription": "Make the server spin indefinitely when starting up to allow time to attach a debugger. Only useful for debug purposes",
-          "type": "boolean",
-          "default": false
-        },
-        "luau-lsp.server.delayStartup": {
-          "markdownDescription": "Renamed to `luwu.server.delayStartup`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "markdownDeprecationMessage": "**Renamed** to `luwu.server.delayStartup`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.server.delayStartup. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.server.crashReporting.enabled": {
-          "markdownDescription": "Upload crash reports to Sentry",
-          "type": "boolean",
-          "default": false,
-          "tags": [
-            "usesOnlineServices"
-          ]
-        },
-        "luau-lsp.server.crashReporting.enabled": {
-          "markdownDescription": "Renamed to `luwu.server.crashReporting.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "tags": [
-            "usesOnlineServices"
-          ],
-          "markdownDeprecationMessage": "**Renamed** to `luwu.server.crashReporting.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.server.crashReporting.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.server.baseLuaurc": {
-          "markdownDescription": "Path to a `.luaurc` file which acts as the default baseline Luau configuration",
-          "type": "string",
-          "scope": "window"
-        },
-        "luau-lsp.server.baseLuaurc": {
-          "markdownDescription": "Renamed to `luwu.server.baseLuaurc`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.server.baseLuaurc`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.server.baseLuaurc. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.fileExtensions": {
-          "markdownDescription": "The file extensions this language server is responsible for. Remove `lua` and `luau` to leave those files to a different language server; `.luwu` files are always Luwu's own. Requires still resolve across extensions either way, so a `.luwu` module can require a `.luau` one.\n\nRequires a reload of the language server to take effect.",
-          "type": "array",
-          "items": {
+    "configuration": [
+      {
+        "title": "Luwu",
+        "properties": {
+          "luwu.trace.server": {
+            "markdownDescription": "Traces the communication between VS Code and the Luwu language server.",
             "type": "string",
             "enum": [
+              "off",
+              "messages",
+              "verbose"
+            ],
+            "scope": "window",
+            "default": "off"
+          },
+          "luwu.server.path": {
+            "markdownDescription": "Path to the Luau LSP server binary. If not provided, uses the binary included in the extension.",
+            "type": "string",
+            "default": ""
+          },
+          "luwu.server.communicationChannel": {
+            "markdownDescription": "Type of communication channel to use for communicating with the server. Only useful for debug purposes",
+            "type": "string",
+            "enum": [
+              "stdio",
+              "pipe"
+            ],
+            "enumDescriptions": [
+              "Communicate via stdin/stdout (default)",
+              "Communicate via UNIX socket files. Useful for debugging"
+            ],
+            "default": "stdio"
+          },
+          "luwu.server.delayStartup": {
+            "markdownDescription": "Make the server spin indefinitely when starting up to allow time to attach a debugger. Only useful for debug purposes",
+            "type": "boolean",
+            "default": false
+          },
+          "luwu.server.crashReporting.enabled": {
+            "markdownDescription": "Upload crash reports to Sentry",
+            "type": "boolean",
+            "default": false,
+            "tags": [
+              "usesOnlineServices"
+            ]
+          },
+          "luwu.server.baseLuaurc": {
+            "markdownDescription": "Path to a `.luaurc` file which acts as the default baseline Luau configuration",
+            "type": "string",
+            "scope": "window"
+          },
+          "luwu.fileExtensions": {
+            "markdownDescription": "The file extensions this language server is responsible for. Remove `lua` and `luau` to leave those files to a different language server; `.luwu` files are always Luwu's own. Requires still resolve across extensions either way, so a `.luwu` module can require a `.luau` one.\n\nRequires a reload of the language server to take effect.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "luwu",
+                "luau",
+                "lua"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
               "luwu",
               "luau",
               "lua"
-            ]
+            ],
+            "scope": "window"
           },
-          "uniqueItems": true,
-          "default": [
-            "luwu",
-            "luau",
-            "lua"
-          ],
-          "scope": "window"
-        },
-        "luau-lsp.fileExtensions": {
-          "markdownDescription": "Renamed to `luwu.fileExtensions`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "items": {
+          "luwu.ignoreGlobs": {
+            "markdownDescription": "Diagnostics will not be reported for any file matching these globs unless the file is currently open",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/_Index/**"
+            ],
+            "scope": "resource"
+          },
+          "luwu.platform.type": {
+            "markdownDescription": "Platform-specific support features",
             "type": "string",
             "enum": [
+              "standard",
+              "roblox"
+            ],
+            "scope": "window",
+            "default": "standard"
+          },
+          "luwu.sourcemap.enabled": {
+            "markdownDescription": "Whether Rojo sourcemap parsing is enabled",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.sourcemap.autogenerate": {
+            "markdownDescription": "Automatically run the `rojo sourcemap` command to regenerate sourcemaps on changes",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.sourcemap.rojoPath": {
+            "markdownDescription": "Path to the Rojo executable. If not provided, attempts to run `rojo` in the workspace directory, so it must be available on the PATH",
+            "type": "string",
+            "default": null,
+            "scope": "resource"
+          },
+          "luwu.sourcemap.rojoProjectFile": {
+            "markdownDescription": "The name of the Rojo project file to generate a sourcemap for.\nOnly applies if `#luwu.sourcemap.autogenerate#` is enabled",
+            "type": "string",
+            "default": "default.project.json",
+            "scope": "resource"
+          },
+          "luwu.sourcemap.includeNonScripts": {
+            "markdownDescription": "Include non-script instances in the generated sourcemap",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.sourcemap.sourcemapFile": {
+            "markdownDescription": "The name of the sourcemap file",
+            "type": "string",
+            "default": "sourcemap.json",
+            "scope": "resource"
+          },
+          "luwu.sourcemap.generatorCommand": {
+            "markdownDescription": "A command to run to generate the sourcemap. If not specified, defaults to `rojo`",
+            "type": "string",
+            "scope": "resource"
+          },
+          "luwu.sourcemap.useVSCodeWatcher": {
+            "markdownDescription": "Whether the VSCode filesystem watchers are used to regenerate the sourcemap. If disabled, delegates to the generator process. If using `rojo`, this command stops using `--watch`",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.format.convertQuotes": {
+            "markdownDescription": "Whether to automatically convert single/double quotes to backticks when typing `{` inside strings",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.fflags.enableByDefault": {
+            "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luwu.fflags.enableNewSolver": {
+            "markdownDescription": "Enables the flags required for Luau's new type solver. These flags can be overriden by `#luwu.fflags.override#`",
+            "type": "boolean",
+            "default": true,
+            "scope": "window"
+          },
+          "luwu.luauCompatibilityMode": {
+            "markdownDescription": "Luau compatibility mode: disable Luwu's own language features (classes, default arguments, ...)",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luwu.fflags.sync": {
+            "markdownDescription": "Sync currently enabled FFlags with Roblox's published FFlags.\nThis currently only syncs FFlags which begin with 'Luau'",
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "tags": [
+              "usesOnlineServices"
+            ]
+          },
+          "luwu.fflags.override": {
+            "markdownDescription": "Override FFlags passed to Luau",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "window"
+          },
+          "luwu.diagnostics.includeDependents": {
+            "markdownDescription": "Recompute diagnostics for dependents when a file changes. If `#luwu.diagnostics.workspace#` is enabled, this is ignored",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.workspace": {
+            "markdownDescription": "Compute diagnostics for the whole workspace",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.strictDatamodelTypes": {
+            "markdownDescription": "Use strict DataModel types in diagnostics. When on, this is equivalent to the more expressive autocompletion types. When this is off, `game`/`script`/`workspace` (and their members) are all typed as `any`, and helps to prevent false positives. [Read More](https://github.com/JohnnyMorganz/luau-lsp/issues/83#issuecomment-1192865024)",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.pullOnChange": {
+            "markdownDescription": "Whether to update document diagnostics whenever the text file changes",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.pullOnSave": {
+            "markdownDescription": "Whether to update document diagnostics whenever the text file is saved",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.types.definitionFiles": {
+            "markdownDescription": "A mapping of package names to paths of definition files to load in to the type checker. Note that definition file syntax is currently unstable and may change at any time",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "window"
+          },
+          "luwu.types.documentationFiles": {
+            "markdownDescription": "A list of paths to documentation files which provide documentation support to the definition files provided",
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "scope": "window"
+          },
+          "luwu.types.disabledGlobals": {
+            "markdownDescription": "A list of globals to remove from the global scope. Accepts full libraries or particular functions (e.g., `table` or `table.clone`)",
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "scope": "window"
+          },
+          "luwu.types.roblox": {
+            "markdownDescription": "Load in and automatically update Roblox type definitions for the type checker",
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "tags": [
+              "usesOnlineServices"
+            ],
+            "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.platform.type#` instead.",
+            "deprecationMessage": "Deprecated: Please use luwu.platform.type instead."
+          },
+          "luwu.types.robloxSecurityLevel": {
+            "markdownDescription": "Security Level to use in the Roblox API definitions",
+            "type": "string",
+            "default": "PluginSecurity",
+            "scope": "window",
+            "enum": [
+              "None",
+              "LocalUserSecurity",
+              "PluginSecurity",
+              "RobloxScriptSecurity"
+            ]
+          },
+          "luwu.inlayHints.parameterNames": {
+            "markdownDescription": "Show inlay hints for function parameter names",
+            "type": "string",
+            "default": "none",
+            "enum": [
+              "none",
+              "literals",
+              "all"
+            ],
+            "scope": "resource"
+          },
+          "luwu.inlayHints.variableTypes": {
+            "markdownDescription": "Show inlay hints for variable types",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.parameterTypes": {
+            "markdownDescription": "Show inlay hints for parameter types",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.functionReturnTypes": {
+            "markdownDescription": "Show inlay hints for function return types",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.hideHintsForErrorTypes": {
+            "markdownDescription": "Whether type hints should be hidden if they resolve to an error type",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.hideHintsForMatchingParameterNames": {
+            "markdownDescription": "Whether type hints should be hidden if the resolved variable name matches the parameter name",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.typeHintMaxLength": {
+            "markdownDescription": "The maximum length a type hint should be before being truncated",
+            "type": "number",
+            "default": 50,
+            "minimum": 10,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.makeInsertable": {
+            "markdownDescription": "Whether type annotation inlay hints can be made insertable by clicking",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.blockEndHints": {
+            "markdownDescription": "Show a hint on the `end` of a long function, loop, `if` chain or class naming what it closes, similar to rust-analyzer's closing brace hints",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.inlayHints.blockEndHintsMinLines": {
+            "markdownDescription": "The number of lines a block must span, from its opening keyword to its `end`, before `#luwu.inlayHints.blockEndHints#` labels it",
+            "type": "integer",
+            "minimum": 1,
+            "default": 35,
+            "scope": "resource"
+          },
+          "luwu.hover.enabled": {
+            "markdownDescription": "Enable hover",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.hover.showTableKinds": {
+            "markdownDescription": "Show table kinds",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.hover.multilineFunctionDefinitions": {
+            "markdownDescription": "Show function definitions on multiple lines",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.hover.strictDatamodelTypes": {
+            "markdownDescription": "Use strict DataModel types in hover display. When on, this is equivalent to autocompletion types. When off, this is equivalent to diagnostic types",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.hover.includeStringLength": {
+            "markdownDescription": "Show string length when hovering over a string literal",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.enabled": {
+            "markdownDescription": "Enable autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.autocompleteEnd": {
+            "markdownDescription": "Automatically insert an `end` when opening a block",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.completion.autocompleteEnd#` instead.",
+            "deprecationMessage": "Deprecated: Please use luwu.completion.autocompleteEnd instead."
+          },
+          "luwu.completion.autocompleteEnd": {
+            "markdownDescription": "Automatically insert an `end` when opening a block",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.completion.addParentheses": {
+            "markdownDescription": "Add parentheses after completing a function call",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.addTabstopAfterParentheses": {
+            "markdownDescription": "If `#luwu.completion.addParentheses#` is enabled, then include a tabstop after the parentheses for the cursor to move to",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.fillCallArguments": {
+            "markdownDescription": "Fill parameter names in an autocompleted function call, which can be tabbed through. Requires `#luwu.completion.addParentheses#` to be enabled",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.showPropertiesOnMethodCall": {
+            "markdownDescription": "Whether to show non-function properties when performing a method call with a colon (e.g., `foo:bar`)",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.completion.showKeywords": {
+            "markdownDescription": "Whether to show keywords (`if` / `then` / `and` / etc.) during autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.showAnonymousAutofilledFunction": {
+            "markdownDescription": "Whether to show the auto-generated anonymous function completion item when autocompleting callback arguments",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.completion.anonymousAutofilledFunction.enabled#` instead.",
+            "deprecationMessage": "Deprecated: Please use luwu.completion.anonymousAutofilledFunction.enabled instead."
+          },
+          "luwu.completion.anonymousAutofilledFunction.enabled": {
+            "markdownDescription": "Whether to show the auto-generated anonymous function completion item when autocompleting callback arguments",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.anonymousAutofilledFunction.addTypeAnnotations": {
+            "markdownDescription": "Whether to include type annotations in the generated anonymous function snippet",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.anonymousAutofilledFunction.addTabstopForParameters": {
+            "markdownDescription": "Whether to add snippet tabstops on each parameter name in the generated anonymous function snippet, allowing quick navigation and editing",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.showDeprecatedItems": {
+            "markdownDescription": "Whether to show deprecated items in autocomplete suggestions",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.suggestImports": {
+            "markdownDescription": "Suggest automatic imports in completion items",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.completion.imports.enabled#` instead.",
+            "deprecationMessage": "Deprecated: Please use luwu.completion.imports.enabled instead."
+          },
+          "luwu.completion.imports.enabled": {
+            "markdownDescription": "Suggest automatic imports in completion items",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.imports.suggestServices": {
+            "markdownDescription": "Whether GetService completions are suggested in autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.imports.includedServices": {
+            "markdownDescription": "When non-empty, only show the services listed when auto-importing",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource"
+          },
+          "luwu.completion.imports.excludedServices": {
+            "markdownDescription": "Do not show any of the listed services when auto-importing",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource"
+          },
+          "luwu.completion.imports.suggestRequires": {
+            "markdownDescription": "Whether module requires are suggested in autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.completion.imports.requireStyle": {
+            "markdownDescription": "The style of requires when autocompleted",
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "alwaysRelative",
+              "alwaysAbsolute"
+            ],
+            "enumDescriptions": [
+              "Automatically compute the style of require to use based on heuristics",
+              "Always require the module relative to the current file",
+              "Always require the module absolute based on root"
+            ],
+            "scope": "resource"
+          },
+          "luwu.completion.imports.stringRequires.enabled": {
+            "markdownDescription": "Whether to use string requires when auto-importing requires. Only checked if `#luwu.platform.type#` is `roblox`",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.completion.imports.separateGroupsWithLine": {
+            "markdownDescription": "Whether services and requires should be separated by an empty line",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.completion.imports.useConst": {
+            "markdownDescription": "Whether to use `const` instead of `local` for auto-imported requires and services",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luwu.completion.imports.ignoreGlobs": {
+            "markdownDescription": "Files that match these globs will not be shown during auto-import",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/_Index/**"
+            ],
+            "scope": "resource"
+          },
+          "luwu.completion.enableFragmentAutocomplete": {
+            "markdownDescription": "Enables the fragment autocomplete system for performance improvements",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.signatureHelp.enabled": {
+            "markdownDescription": "Enable signature help",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.studioPlugin.enabled": {
+            "markdownDescription": "Use Roblox Studio Plugin to provide DataModel information",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luwu.studioPlugin.port": {
+            "markdownDescription": "Port number to connect to the Studio Plugin",
+            "type": "number",
+            "default": 3667,
+            "scope": "window"
+          },
+          "luwu.studioPlugin.maximumRequestBodySize": {
+            "markdownDescription": "The maximum request body size accepted from the plugin, in a string representation parse-able by the [bytes](https://www.npmjs.com/package/bytes) library",
+            "type": "string",
+            "default": "3mb",
+            "scope": "window"
+          },
+          "luwu.plugin.enabled": {
+            "markdownDescription": "Use Roblox Studio Plugin to provide DataModel information",
+            "type": "boolean",
+            "default": false,
+            "scope": "window",
+            "markdownDeprecationMessage": "**Deprecated**: Use `luwu.studioPlugin.enabled` instead.",
+            "deprecationMessage": "Deprecated: Use luwu.studioPlugin.enabled instead."
+          },
+          "luwu.plugin.port": {
+            "markdownDescription": "Port number to connect to the Studio Plugin",
+            "type": "number",
+            "default": 3667,
+            "scope": "window",
+            "markdownDeprecationMessage": "**Deprecated**: Use `luwu.studioPlugin.port` instead.",
+            "deprecationMessage": "Deprecated: Use luwu.studioPlugin.port instead."
+          },
+          "luwu.plugin.maximumRequestBodySize": {
+            "markdownDescription": "The maximum request body size accepted from the plugin, in a string representation parse-able by the [bytes](https://www.npmjs.com/package/bytes) library",
+            "type": "string",
+            "default": "3mb",
+            "scope": "window",
+            "markdownDeprecationMessage": "**Deprecated**: Use `luwu.studioPlugin.maximumRequestBodySize` instead.",
+            "deprecationMessage": "Deprecated: Use luwu.studioPlugin.maximumRequestBodySize instead."
+          },
+          "luwu.require.fileAliases": {
+            "markdownDescription": "A mapping of custom require string aliases to file paths",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "resource",
+            "markdownDeprecationMessage": "**Deprecated**: Please use `aliases` in a `.luaurc` file instead.",
+            "deprecationMessage": "Deprecated: Please use aliases in a .luaurc file instead."
+          },
+          "luwu.require.directoryAliases": {
+            "markdownDescription": "A mapping of custom require string prefixes to directory paths. The aliases should include trailing slashes",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "resource",
+            "markdownDeprecationMessage": "**Deprecated**: Please use `aliases` in a `.luaurc` file instead.",
+            "deprecationMessage": "Deprecated: Please use aliases in a .luaurc file instead."
+          },
+          "luwu.require.useOriginalRequireByStringSemantics": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "markdownDescription": "Use the old require-by-string semantics for init.luau resolution",
+            "markdownDeprecationMessage": "**Deprecated**: Use the new require-by-string semantics instead. This option may be removed at any time in the future",
+            "deprecationMessage": "Deprecated: Use the new require-by-string semantics instead. This option may be removed at any time in the future"
+          },
+          "luwu.index.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "markdownDescription": "Whether all files in a workspace should be indexed into memory. If disabled, only limited support is available for features such as 'Find All References' and 'Rename'"
+          },
+          "luwu.index.maxFiles": {
+            "type": "number",
+            "default": 10000,
+            "scope": "window",
+            "markdownDescription": "The maximum amount of files that can be indexed. If more files are indexed, more memory is needed"
+          },
+          "luwu.bytecode.debugLevel": {
+            "type": "number",
+            "default": 1,
+            "scope": "resource",
+            "minimum": 0,
+            "maximum": 2,
+            "markdownDescription": "The `debugLevel` to use when compiling bytecode"
+          },
+          "luwu.bytecode.typeInfoLevel": {
+            "type": "number",
+            "default": 1,
+            "scope": "resource",
+            "minimum": 0,
+            "maximum": 1,
+            "markdownDescription": "The `typeInfoLevel` to use when compiling bytecode"
+          },
+          "luwu.bytecode.vectorLib": {
+            "type": "string",
+            "default": "Vector3",
+            "scope": "resource",
+            "markdownDescription": "The `vectorLib` to use when compiling bytecode"
+          },
+          "luwu.bytecode.vectorCtor": {
+            "type": "string",
+            "default": "new",
+            "scope": "resource",
+            "markdownDescription": "The `vectorCtor` to use when compiling bytecode"
+          },
+          "luwu.bytecode.vectorType": {
+            "type": "string",
+            "default": "Vector3",
+            "scope": "resource",
+            "markdownDescription": "The `vectorType` to use when compiling bytecode"
+          },
+          "luwu.plugins.enabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "markdownDescription": "Enable source code transformation plugins. Plugins are Luau scripts that can transform source code before type checking."
+          },
+          "luwu.plugins.paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource",
+            "markdownDescription": "Paths to Luau plugin scripts. Plugins are executed in order and can transform source code before type checking."
+          },
+          "luwu.plugins.timeoutMs": {
+            "type": "number",
+            "default": 5000,
+            "minimum": 100,
+            "scope": "resource",
+            "markdownDescription": "Timeout in milliseconds for plugin execution. If a plugin takes longer than this, it will be terminated."
+          },
+          "luwu.plugins.fileSystem.enabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "markdownDescription": "Allow plugins to read files within the workspace. Only files within the workspace can be accessed for security."
+          },
+          "luwu.inheritLuauLspSettings": {
+            "markdownDescription": "Read settings written under the legacy `luau-lsp.*` namespace, which this extension used before it was renamed and which external tooling still generates. A `luwu.*` setting always wins over its `luau-lsp.*` counterpart.\n\nTurn this off to ignore `luau-lsp.*` entirely, which is what you want if upstream's Luau Language Server is installed alongside this one and you need the two configured separately.",
+            "type": "boolean",
+            "default": true,
+            "scope": "window"
+          }
+        }
+      },
+      {
+        "title": "Luau LSP (legacy names, read while luwu.inheritLuauLspSettings is on)",
+        "properties": {
+          "luau-lsp.server.path": {
+            "markdownDescription": "Path to the Luau LSP server binary. If not provided, uses the binary included in the extension.",
+            "type": "string",
+            "default": ""
+          },
+          "luau-lsp.server.communicationChannel": {
+            "markdownDescription": "Type of communication channel to use for communicating with the server. Only useful for debug purposes",
+            "type": "string",
+            "enum": [
+              "stdio",
+              "pipe"
+            ],
+            "default": "stdio",
+            "enumDescriptions": [
+              "Communicate via stdin/stdout (default)",
+              "Communicate via UNIX socket files. Useful for debugging"
+            ]
+          },
+          "luau-lsp.server.delayStartup": {
+            "markdownDescription": "Make the server spin indefinitely when starting up to allow time to attach a debugger. Only useful for debug purposes",
+            "type": "boolean",
+            "default": false
+          },
+          "luau-lsp.server.crashReporting.enabled": {
+            "markdownDescription": "Upload crash reports to Sentry",
+            "type": "boolean",
+            "default": false,
+            "tags": [
+              "usesOnlineServices"
+            ]
+          },
+          "luau-lsp.server.baseLuaurc": {
+            "markdownDescription": "Path to a `.luaurc` file which acts as the default baseline Luau configuration",
+            "type": "string",
+            "scope": "window"
+          },
+          "luau-lsp.fileExtensions": {
+            "markdownDescription": "The file extensions this language server is responsible for. Remove `lua` and `luau` to leave those files to a different language server; `.luwu` files are always Luwu's own. Requires still resolve across extensions either way, so a `.luwu` module can require a `.luau` one.\n\nRequires a reload of the language server to take effect.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "luwu",
+                "luau",
+                "lua"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
               "luwu",
               "luau",
               "lua"
+            ],
+            "scope": "window"
+          },
+          "luau-lsp.ignoreGlobs": {
+            "markdownDescription": "Diagnostics will not be reported for any file matching these globs unless the file is currently open",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/_Index/**"
+            ],
+            "scope": "resource"
+          },
+          "luau-lsp.platform.type": {
+            "markdownDescription": "Platform-specific support features",
+            "type": "string",
+            "enum": [
+              "standard",
+              "roblox"
+            ],
+            "scope": "window",
+            "default": "standard"
+          },
+          "luau-lsp.sourcemap.enabled": {
+            "markdownDescription": "Whether Rojo sourcemap parsing is enabled",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.autogenerate": {
+            "markdownDescription": "Automatically run the `rojo sourcemap` command to regenerate sourcemaps on changes",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.rojoPath": {
+            "markdownDescription": "Path to the Rojo executable. If not provided, attempts to run `rojo` in the workspace directory, so it must be available on the PATH",
+            "type": "string",
+            "default": null,
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.rojoProjectFile": {
+            "markdownDescription": "The name of the Rojo project file to generate a sourcemap for.\nOnly applies if `#luwu.sourcemap.autogenerate#` is enabled",
+            "type": "string",
+            "default": "default.project.json",
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.includeNonScripts": {
+            "markdownDescription": "Include non-script instances in the generated sourcemap",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.sourcemapFile": {
+            "markdownDescription": "The name of the sourcemap file",
+            "type": "string",
+            "default": "sourcemap.json",
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.generatorCommand": {
+            "markdownDescription": "A command to run to generate the sourcemap. If not specified, defaults to `rojo`",
+            "type": "string",
+            "scope": "resource"
+          },
+          "luau-lsp.sourcemap.useVSCodeWatcher": {
+            "markdownDescription": "Whether the VSCode filesystem watchers are used to regenerate the sourcemap. If disabled, delegates to the generator process. If using `rojo`, this command stops using `--watch`",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.format.convertQuotes": {
+            "markdownDescription": "Whether to automatically convert single/double quotes to backticks when typing `{` inside strings",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.fflags.enableByDefault": {
+            "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luau-lsp.fflags.enableNewSolver": {
+            "markdownDescription": "Enables the flags required for Luau's new type solver. These flags can be overriden by `#luwu.fflags.override#`",
+            "type": "boolean",
+            "default": true,
+            "scope": "window"
+          },
+          "luau-lsp.luauCompatibilityMode": {
+            "markdownDescription": "Luau compatibility mode: disable Luwu's own language features (classes, default arguments, ...)",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luau-lsp.fflags.sync": {
+            "markdownDescription": "Sync currently enabled FFlags with Roblox's published FFlags.\nThis currently only syncs FFlags which begin with 'Luau'",
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "tags": [
+              "usesOnlineServices"
             ]
           },
-          "uniqueItems": true,
-          "default": [
-            "luwu",
-            "luau",
-            "lua"
-          ],
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.fileExtensions`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.fileExtensions. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.ignoreGlobs": {
-          "markdownDescription": "Diagnostics will not be reported for any file matching these globs unless the file is currently open",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.fflags.override": {
+            "markdownDescription": "Override FFlags passed to Luau",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "window"
           },
-          "default": [
-            "**/_Index/**"
-          ],
-          "scope": "resource"
-        },
-        "luau-lsp.ignoreGlobs": {
-          "markdownDescription": "Renamed to `luwu.ignoreGlobs`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.diagnostics.includeDependents": {
+            "markdownDescription": "Recompute diagnostics for dependents when a file changes. If `#luwu.diagnostics.workspace#` is enabled, this is ignored",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "default": [
-            "**/_Index/**"
-          ],
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.ignoreGlobs`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.ignoreGlobs. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.platform.type": {
-          "markdownDescription": "Platform-specific support features",
-          "type": "string",
-          "enum": [
-            "standard",
-            "roblox"
-          ],
-          "scope": "window",
-          "default": "standard"
-        },
-        "luau-lsp.platform.type": {
-          "markdownDescription": "Renamed to `luwu.platform.type`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "enum": [
-            "standard",
-            "roblox"
-          ],
-          "scope": "window",
-          "default": "standard",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.platform.type`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.platform.type. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.enabled": {
-          "markdownDescription": "Whether Rojo sourcemap parsing is enabled",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.enabled": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.autogenerate": {
-          "markdownDescription": "Automatically run the `rojo sourcemap` command to regenerate sourcemaps on changes",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.autogenerate": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.autogenerate`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.autogenerate`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.autogenerate. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.rojoPath": {
-          "markdownDescription": "Path to the Rojo executable. If not provided, attempts to run `rojo` in the workspace directory, so it must be available on the PATH",
-          "type": "string",
-          "default": null,
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.rojoPath": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.rojoPath`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": null,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.rojoPath`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.rojoPath. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.rojoProjectFile": {
-          "markdownDescription": "The name of the Rojo project file to generate a sourcemap for.\nOnly applies if `#luwu.sourcemap.autogenerate#` is enabled",
-          "type": "string",
-          "default": "default.project.json",
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.rojoProjectFile": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.rojoProjectFile`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "default.project.json",
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.rojoProjectFile`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.rojoProjectFile. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.includeNonScripts": {
-          "markdownDescription": "Include non-script instances in the generated sourcemap",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.includeNonScripts": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.includeNonScripts`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.includeNonScripts`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.includeNonScripts. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.sourcemapFile": {
-          "markdownDescription": "The name of the sourcemap file",
-          "type": "string",
-          "default": "sourcemap.json",
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.sourcemapFile": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.sourcemapFile`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "sourcemap.json",
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.sourcemapFile`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.sourcemapFile. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.generatorCommand": {
-          "markdownDescription": "A command to run to generate the sourcemap. If not specified, defaults to `rojo`",
-          "type": "string",
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.generatorCommand": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.generatorCommand`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.generatorCommand`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.generatorCommand. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.sourcemap.useVSCodeWatcher": {
-          "markdownDescription": "Whether the VSCode filesystem watchers are used to regenerate the sourcemap. If disabled, delegates to the generator process. If using `rojo`, this command stops using `--watch`",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.sourcemap.useVSCodeWatcher": {
-          "markdownDescription": "Renamed to `luwu.sourcemap.useVSCodeWatcher`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.sourcemap.useVSCodeWatcher`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.sourcemap.useVSCodeWatcher. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.format.convertQuotes": {
-          "markdownDescription": "Whether to automatically convert single/double quotes to backticks when typing `{` inside strings",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.format.convertQuotes": {
-          "markdownDescription": "Renamed to `luwu.format.convertQuotes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.format.convertQuotes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.format.convertQuotes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.fflags.enableByDefault": {
-          "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
-          "type": "boolean",
-          "default": false,
-          "scope": "window"
-        },
-        "luau-lsp.fflags.enableByDefault": {
-          "markdownDescription": "Renamed to `luwu.fflags.enableByDefault`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.fflags.enableByDefault`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.fflags.enableByDefault. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.fflags.enableNewSolver": {
-          "markdownDescription": "Enables the flags required for Luau's new type solver. These flags can be overriden by `#luwu.fflags.override#`",
-          "type": "boolean",
-          "default": true,
-          "scope": "window"
-        },
-        "luau-lsp.fflags.enableNewSolver": {
-          "markdownDescription": "Renamed to `luwu.fflags.enableNewSolver`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.fflags.enableNewSolver`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.fflags.enableNewSolver. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.luauCompatibilityMode": {
-          "markdownDescription": "Luau compatibility mode: disable Luwu's own language features (classes, default arguments, ...)",
-          "type": "boolean",
-          "default": false,
-          "scope": "window"
-        },
-        "luau-lsp.luauCompatibilityMode": {
-          "markdownDescription": "Renamed to `luwu.luauCompatibilityMode`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.luauCompatibilityMode`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.luauCompatibilityMode. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.fflags.sync": {
-          "markdownDescription": "Sync currently enabled FFlags with Roblox's published FFlags.\nThis currently only syncs FFlags which begin with 'Luau'",
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "tags": [
-            "usesOnlineServices"
-          ]
-        },
-        "luau-lsp.fflags.sync": {
-          "markdownDescription": "Renamed to `luwu.fflags.sync`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "tags": [
-            "usesOnlineServices"
-          ],
-          "markdownDeprecationMessage": "**Renamed** to `luwu.fflags.sync`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.fflags.sync. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.fflags.override": {
-          "markdownDescription": "Override FFlags passed to Luau",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.diagnostics.workspace": {
+            "markdownDescription": "Compute diagnostics for the whole workspace",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
           },
-          "scope": "window"
-        },
-        "luau-lsp.fflags.override": {
-          "markdownDescription": "Renamed to `luwu.fflags.override`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.diagnostics.strictDatamodelTypes": {
+            "markdownDescription": "Use strict DataModel types in diagnostics. When on, this is equivalent to the more expressive autocompletion types. When this is off, `game`/`script`/`workspace` (and their members) are all typed as `any`, and helps to prevent false positives. [Read More](https://github.com/JohnnyMorganz/luau-lsp/issues/83#issuecomment-1192865024)",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
           },
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.fflags.override`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.fflags.override. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.diagnostics.includeDependents": {
-          "markdownDescription": "Recompute diagnostics for dependents when a file changes. If `#luwu.diagnostics.workspace#` is enabled, this is ignored",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.diagnostics.includeDependents": {
-          "markdownDescription": "Renamed to `luwu.diagnostics.includeDependents`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.diagnostics.includeDependents`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.diagnostics.includeDependents. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.diagnostics.workspace": {
-          "markdownDescription": "Compute diagnostics for the whole workspace",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.diagnostics.workspace": {
-          "markdownDescription": "Renamed to `luwu.diagnostics.workspace`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.diagnostics.workspace`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.diagnostics.workspace. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.diagnostics.strictDatamodelTypes": {
-          "markdownDescription": "Use strict DataModel types in diagnostics. When on, this is equivalent to the more expressive autocompletion types. When this is off, `game`/`script`/`workspace` (and their members) are all typed as `any`, and helps to prevent false positives. [Read More](https://github.com/JohnnyMorganz/luau-lsp/issues/83#issuecomment-1192865024)",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.diagnostics.strictDatamodelTypes": {
-          "markdownDescription": "Renamed to `luwu.diagnostics.strictDatamodelTypes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.diagnostics.strictDatamodelTypes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.diagnostics.strictDatamodelTypes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.diagnostics.pullOnChange": {
-          "markdownDescription": "Whether to update document diagnostics whenever the text file changes",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.diagnostics.pullOnChange": {
-          "markdownDescription": "Renamed to `luwu.diagnostics.pullOnChange`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.diagnostics.pullOnChange`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.diagnostics.pullOnChange. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.diagnostics.pullOnSave": {
-          "markdownDescription": "Whether to update document diagnostics whenever the text file is saved",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.diagnostics.pullOnSave": {
-          "markdownDescription": "Renamed to `luwu.diagnostics.pullOnSave`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.diagnostics.pullOnSave`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.diagnostics.pullOnSave. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.types.definitionFiles": {
-          "markdownDescription": "A mapping of package names to paths of definition files to load in to the type checker. Note that definition file syntax is currently unstable and may change at any time",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.diagnostics.pullOnChange": {
+            "markdownDescription": "Whether to update document diagnostics whenever the text file changes",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "scope": "window"
-        },
-        "luau-lsp.types.definitionFiles": {
-          "markdownDescription": "Renamed to `luwu.types.definitionFiles`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.diagnostics.pullOnSave": {
+            "markdownDescription": "Whether to update document diagnostics whenever the text file is saved",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.types.definitionFiles`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.types.definitionFiles. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.types.documentationFiles": {
-          "markdownDescription": "A list of paths to documentation files which provide documentation support to the definition files provided",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
+          "luau-lsp.types.definitionFiles": {
+            "markdownDescription": "A mapping of package names to paths of definition files to load in to the type checker. Note that definition file syntax is currently unstable and may change at any time",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "window"
           },
-          "scope": "window"
-        },
-        "luau-lsp.types.documentationFiles": {
-          "markdownDescription": "Renamed to `luwu.types.documentationFiles`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
+          "luau-lsp.types.documentationFiles": {
+            "markdownDescription": "A list of paths to documentation files which provide documentation support to the definition files provided",
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "scope": "window"
           },
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.types.documentationFiles`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.types.documentationFiles. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.types.disabledGlobals": {
-          "markdownDescription": "A list of globals to remove from the global scope. Accepts full libraries or particular functions (e.g., `table` or `table.clone`)",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
+          "luau-lsp.types.disabledGlobals": {
+            "markdownDescription": "A list of globals to remove from the global scope. Accepts full libraries or particular functions (e.g., `table` or `table.clone`)",
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "scope": "window"
           },
-          "scope": "window"
-        },
-        "luau-lsp.types.disabledGlobals": {
-          "markdownDescription": "Renamed to `luwu.types.disabledGlobals`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
+          "luau-lsp.types.roblox": {
+            "markdownDescription": "Load in and automatically update Roblox type definitions for the type checker",
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "tags": [
+              "usesOnlineServices"
+            ]
           },
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.types.disabledGlobals`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.types.disabledGlobals. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.types.roblox": {
-          "markdownDescription": "Load in and automatically update Roblox type definitions for the type checker",
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "tags": [
-            "usesOnlineServices"
-          ],
-          "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.platform.type#` instead.",
-          "deprecationMessage": "Deprecated: Please use luwu.platform.type instead."
-        },
-        "luau-lsp.types.roblox": {
-          "markdownDescription": "Renamed to `luwu.types.roblox`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "tags": [
-            "usesOnlineServices"
-          ],
-          "markdownDeprecationMessage": "**Renamed** to `luwu.types.roblox`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.types.roblox. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.types.robloxSecurityLevel": {
-          "markdownDescription": "Security Level to use in the Roblox API definitions",
-          "type": "string",
-          "default": "PluginSecurity",
-          "scope": "window",
-          "enum": [
-            "None",
-            "LocalUserSecurity",
-            "PluginSecurity",
-            "RobloxScriptSecurity"
-          ]
-        },
-        "luau-lsp.types.robloxSecurityLevel": {
-          "markdownDescription": "Renamed to `luwu.types.robloxSecurityLevel`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "PluginSecurity",
-          "scope": "window",
-          "enum": [
-            "None",
-            "LocalUserSecurity",
-            "PluginSecurity",
-            "RobloxScriptSecurity"
-          ],
-          "markdownDeprecationMessage": "**Renamed** to `luwu.types.robloxSecurityLevel`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.types.robloxSecurityLevel. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.parameterNames": {
-          "markdownDescription": "Show inlay hints for function parameter names",
-          "type": "string",
-          "default": "none",
-          "enum": [
-            "none",
-            "literals",
-            "all"
-          ],
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.parameterNames": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.parameterNames`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "none",
-          "enum": [
-            "none",
-            "literals",
-            "all"
-          ],
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.parameterNames`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.parameterNames. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.variableTypes": {
-          "markdownDescription": "Show inlay hints for variable types",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.variableTypes": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.variableTypes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.variableTypes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.variableTypes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.parameterTypes": {
-          "markdownDescription": "Show inlay hints for parameter types",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.parameterTypes": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.parameterTypes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.parameterTypes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.parameterTypes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.functionReturnTypes": {
-          "markdownDescription": "Show inlay hints for function return types",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.functionReturnTypes": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.functionReturnTypes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.functionReturnTypes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.functionReturnTypes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.hideHintsForErrorTypes": {
-          "markdownDescription": "Whether type hints should be hidden if they resolve to an error type",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.hideHintsForErrorTypes": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.hideHintsForErrorTypes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.hideHintsForErrorTypes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.hideHintsForErrorTypes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.hideHintsForMatchingParameterNames": {
-          "markdownDescription": "Whether type hints should be hidden if the resolved variable name matches the parameter name",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.hideHintsForMatchingParameterNames": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.hideHintsForMatchingParameterNames`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.hideHintsForMatchingParameterNames`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.hideHintsForMatchingParameterNames. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.typeHintMaxLength": {
-          "markdownDescription": "The maximum length a type hint should be before being truncated",
-          "type": "number",
-          "default": 50,
-          "minimum": 10,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.typeHintMaxLength": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.typeHintMaxLength`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "number",
-          "default": 50,
-          "minimum": 10,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.typeHintMaxLength`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.typeHintMaxLength. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.makeInsertable": {
-          "markdownDescription": "Whether type annotation inlay hints can be made insertable by clicking",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.makeInsertable": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.makeInsertable`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.makeInsertable`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.makeInsertable. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.blockEndHints": {
-          "markdownDescription": "Show a hint on the `end` of a long function, loop, `if` chain or class naming what it closes, similar to rust-analyzer's closing brace hints",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.blockEndHints": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.blockEndHints`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.blockEndHints`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.blockEndHints. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inlayHints.blockEndHintsMinLines": {
-          "markdownDescription": "The number of lines a block must span, from its opening keyword to its `end`, before `#luwu.inlayHints.blockEndHints#` labels it",
-          "type": "integer",
-          "minimum": 1,
-          "default": 35,
-          "scope": "resource"
-        },
-        "luau-lsp.inlayHints.blockEndHintsMinLines": {
-          "markdownDescription": "Renamed to `luwu.inlayHints.blockEndHintsMinLines`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "integer",
-          "minimum": 1,
-          "default": 35,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.inlayHints.blockEndHintsMinLines`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.inlayHints.blockEndHintsMinLines. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.hover.enabled": {
-          "markdownDescription": "Enable hover",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.hover.enabled": {
-          "markdownDescription": "Renamed to `luwu.hover.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.hover.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.hover.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.hover.showTableKinds": {
-          "markdownDescription": "Show table kinds",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.hover.showTableKinds": {
-          "markdownDescription": "Renamed to `luwu.hover.showTableKinds`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.hover.showTableKinds`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.hover.showTableKinds. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.hover.multilineFunctionDefinitions": {
-          "markdownDescription": "Show function definitions on multiple lines",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.hover.multilineFunctionDefinitions": {
-          "markdownDescription": "Renamed to `luwu.hover.multilineFunctionDefinitions`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.hover.multilineFunctionDefinitions`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.hover.multilineFunctionDefinitions. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.hover.strictDatamodelTypes": {
-          "markdownDescription": "Use strict DataModel types in hover display. When on, this is equivalent to autocompletion types. When off, this is equivalent to diagnostic types",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.hover.strictDatamodelTypes": {
-          "markdownDescription": "Renamed to `luwu.hover.strictDatamodelTypes`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.hover.strictDatamodelTypes`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.hover.strictDatamodelTypes. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.hover.includeStringLength": {
-          "markdownDescription": "Show string length when hovering over a string literal",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.hover.includeStringLength": {
-          "markdownDescription": "Renamed to `luwu.hover.includeStringLength`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.hover.includeStringLength`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.hover.includeStringLength. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.enabled": {
-          "markdownDescription": "Enable autocomplete",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.enabled": {
-          "markdownDescription": "Renamed to `luwu.completion.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.autocompleteEnd": {
-          "markdownDescription": "Automatically insert an `end` when opening a block",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.completion.autocompleteEnd#` instead.",
-          "deprecationMessage": "Deprecated: Please use luwu.completion.autocompleteEnd instead."
-        },
-        "luau-lsp.autocompleteEnd": {
-          "markdownDescription": "Renamed to `luwu.autocompleteEnd`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.autocompleteEnd`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.autocompleteEnd. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.autocompleteEnd": {
-          "markdownDescription": "Automatically insert an `end` when opening a block",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.autocompleteEnd": {
-          "markdownDescription": "Renamed to `luwu.completion.autocompleteEnd`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.autocompleteEnd`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.autocompleteEnd. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.addParentheses": {
-          "markdownDescription": "Add parentheses after completing a function call",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.addParentheses": {
-          "markdownDescription": "Renamed to `luwu.completion.addParentheses`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.addParentheses`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.addParentheses. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.addTabstopAfterParentheses": {
-          "markdownDescription": "If `#luwu.completion.addParentheses#` is enabled, then include a tabstop after the parentheses for the cursor to move to",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.addTabstopAfterParentheses": {
-          "markdownDescription": "Renamed to `luwu.completion.addTabstopAfterParentheses`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.addTabstopAfterParentheses`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.addTabstopAfterParentheses. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.fillCallArguments": {
-          "markdownDescription": "Fill parameter names in an autocompleted function call, which can be tabbed through. Requires `#luwu.completion.addParentheses#` to be enabled",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.fillCallArguments": {
-          "markdownDescription": "Renamed to `luwu.completion.fillCallArguments`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.fillCallArguments`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.fillCallArguments. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.showPropertiesOnMethodCall": {
-          "markdownDescription": "Whether to show non-function properties when performing a method call with a colon (e.g., `foo:bar`)",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.showPropertiesOnMethodCall": {
-          "markdownDescription": "Renamed to `luwu.completion.showPropertiesOnMethodCall`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.showPropertiesOnMethodCall`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.showPropertiesOnMethodCall. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.showKeywords": {
-          "markdownDescription": "Whether to show keywords (`if` / `then` / `and` / etc.) during autocomplete",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.showKeywords": {
-          "markdownDescription": "Renamed to `luwu.completion.showKeywords`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.showKeywords`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.showKeywords. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.showAnonymousAutofilledFunction": {
-          "markdownDescription": "Whether to show the auto-generated anonymous function completion item when autocompleting callback arguments",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.completion.anonymousAutofilledFunction.enabled#` instead.",
-          "deprecationMessage": "Deprecated: Please use luwu.completion.anonymousAutofilledFunction.enabled instead."
-        },
-        "luau-lsp.completion.showAnonymousAutofilledFunction": {
-          "markdownDescription": "Renamed to `luwu.completion.showAnonymousAutofilledFunction`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.showAnonymousAutofilledFunction`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.showAnonymousAutofilledFunction. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.anonymousAutofilledFunction.enabled": {
-          "markdownDescription": "Whether to show the auto-generated anonymous function completion item when autocompleting callback arguments",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.anonymousAutofilledFunction.enabled": {
-          "markdownDescription": "Renamed to `luwu.completion.anonymousAutofilledFunction.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.anonymousAutofilledFunction.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.anonymousAutofilledFunction.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.anonymousAutofilledFunction.addTypeAnnotations": {
-          "markdownDescription": "Whether to include type annotations in the generated anonymous function snippet",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.anonymousAutofilledFunction.addTypeAnnotations": {
-          "markdownDescription": "Renamed to `luwu.completion.anonymousAutofilledFunction.addTypeAnnotations`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.anonymousAutofilledFunction.addTypeAnnotations`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.anonymousAutofilledFunction.addTypeAnnotations. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.anonymousAutofilledFunction.addTabstopForParameters": {
-          "markdownDescription": "Whether to add snippet tabstops on each parameter name in the generated anonymous function snippet, allowing quick navigation and editing",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.anonymousAutofilledFunction.addTabstopForParameters": {
-          "markdownDescription": "Renamed to `luwu.completion.anonymousAutofilledFunction.addTabstopForParameters`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.anonymousAutofilledFunction.addTabstopForParameters`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.anonymousAutofilledFunction.addTabstopForParameters. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.showDeprecatedItems": {
-          "markdownDescription": "Whether to show deprecated items in autocomplete suggestions",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.showDeprecatedItems": {
-          "markdownDescription": "Renamed to `luwu.completion.showDeprecatedItems`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.showDeprecatedItems`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.showDeprecatedItems. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.suggestImports": {
-          "markdownDescription": "Suggest automatic imports in completion items",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Deprecated**: Please use `#luwu.completion.imports.enabled#` instead.",
-          "deprecationMessage": "Deprecated: Please use luwu.completion.imports.enabled instead."
-        },
-        "luau-lsp.completion.suggestImports": {
-          "markdownDescription": "Renamed to `luwu.completion.suggestImports`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.suggestImports`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.suggestImports. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.enabled": {
-          "markdownDescription": "Suggest automatic imports in completion items",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.enabled": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.suggestServices": {
-          "markdownDescription": "Whether GetService completions are suggested in autocomplete",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.suggestServices": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.suggestServices`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.suggestServices`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.suggestServices. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.includedServices": {
-          "markdownDescription": "When non-empty, only show the services listed when auto-importing",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.types.robloxSecurityLevel": {
+            "markdownDescription": "Security Level to use in the Roblox API definitions",
+            "type": "string",
+            "default": "PluginSecurity",
+            "scope": "window",
+            "enum": [
+              "None",
+              "LocalUserSecurity",
+              "PluginSecurity",
+              "RobloxScriptSecurity"
+            ]
           },
-          "default": [],
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.includedServices": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.includedServices`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.inlayHints.parameterNames": {
+            "markdownDescription": "Show inlay hints for function parameter names",
+            "type": "string",
+            "default": "none",
+            "enum": [
+              "none",
+              "literals",
+              "all"
+            ],
+            "scope": "resource"
           },
-          "default": [],
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.includedServices`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.includedServices. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.excludedServices": {
-          "markdownDescription": "Do not show any of the listed services when auto-importing",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.inlayHints.variableTypes": {
+            "markdownDescription": "Show inlay hints for variable types",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
           },
-          "default": [],
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.excludedServices": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.excludedServices`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.inlayHints.parameterTypes": {
+            "markdownDescription": "Show inlay hints for parameter types",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
           },
-          "default": [],
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.excludedServices`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.excludedServices. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.suggestRequires": {
-          "markdownDescription": "Whether module requires are suggested in autocomplete",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.suggestRequires": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.suggestRequires`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.suggestRequires`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.suggestRequires. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.requireStyle": {
-          "markdownDescription": "The style of requires when autocompleted",
-          "type": "string",
-          "default": "auto",
-          "enum": [
-            "auto",
-            "alwaysRelative",
-            "alwaysAbsolute"
-          ],
-          "enumDescriptions": [
-            "Automatically compute the style of require to use based on heuristics",
-            "Always require the module relative to the current file",
-            "Always require the module absolute based on root"
-          ],
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.requireStyle": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.requireStyle`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "auto",
-          "enum": [
-            "auto",
-            "alwaysRelative",
-            "alwaysAbsolute"
-          ],
-          "enumDescriptions": [
-            "Automatically compute the style of require to use based on heuristics",
-            "Always require the module relative to the current file",
-            "Always require the module absolute based on root"
-          ],
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.requireStyle`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.requireStyle. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.stringRequires.enabled": {
-          "markdownDescription": "Whether to use string requires when auto-importing requires. Only checked if `#luwu.platform.type#` is `roblox`",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.stringRequires.enabled": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.stringRequires.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.stringRequires.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.stringRequires.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.separateGroupsWithLine": {
-          "markdownDescription": "Whether services and requires should be separated by an empty line",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.separateGroupsWithLine": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.separateGroupsWithLine`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.separateGroupsWithLine`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.separateGroupsWithLine. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.useConst": {
-          "markdownDescription": "Whether to use `const` instead of `local` for auto-imported requires and services",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.useConst": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.useConst`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.useConst`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.useConst. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.imports.ignoreGlobs": {
-          "markdownDescription": "Files that match these globs will not be shown during auto-import",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.inlayHints.functionReturnTypes": {
+            "markdownDescription": "Show inlay hints for function return types",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
           },
-          "default": [
-            "**/_Index/**"
-          ],
-          "scope": "resource"
-        },
-        "luau-lsp.completion.imports.ignoreGlobs": {
-          "markdownDescription": "Renamed to `luwu.completion.imports.ignoreGlobs`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.inlayHints.hideHintsForErrorTypes": {
+            "markdownDescription": "Whether type hints should be hidden if they resolve to an error type",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
           },
-          "default": [
-            "**/_Index/**"
-          ],
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.imports.ignoreGlobs`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.imports.ignoreGlobs. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.completion.enableFragmentAutocomplete": {
-          "markdownDescription": "Enables the fragment autocomplete system for performance improvements",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.completion.enableFragmentAutocomplete": {
-          "markdownDescription": "Renamed to `luwu.completion.enableFragmentAutocomplete`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.completion.enableFragmentAutocomplete`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.completion.enableFragmentAutocomplete. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.signatureHelp.enabled": {
-          "markdownDescription": "Enable signature help",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource"
-        },
-        "luau-lsp.signatureHelp.enabled": {
-          "markdownDescription": "Renamed to `luwu.signatureHelp.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.signatureHelp.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.signatureHelp.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.studioPlugin.enabled": {
-          "markdownDescription": "Use Roblox Studio Plugin to provide DataModel information",
-          "type": "boolean",
-          "default": false,
-          "scope": "window"
-        },
-        "luau-lsp.studioPlugin.enabled": {
-          "markdownDescription": "Renamed to `luwu.studioPlugin.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.studioPlugin.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.studioPlugin.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.studioPlugin.port": {
-          "markdownDescription": "Port number to connect to the Studio Plugin",
-          "type": "number",
-          "default": 3667,
-          "scope": "window"
-        },
-        "luau-lsp.studioPlugin.port": {
-          "markdownDescription": "Renamed to `luwu.studioPlugin.port`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "number",
-          "default": 3667,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.studioPlugin.port`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.studioPlugin.port. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.studioPlugin.maximumRequestBodySize": {
-          "markdownDescription": "The maximum request body size accepted from the plugin, in a string representation parse-able by the [bytes](https://www.npmjs.com/package/bytes) library",
-          "type": "string",
-          "default": "3mb",
-          "scope": "window"
-        },
-        "luau-lsp.studioPlugin.maximumRequestBodySize": {
-          "markdownDescription": "Renamed to `luwu.studioPlugin.maximumRequestBodySize`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "3mb",
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.studioPlugin.maximumRequestBodySize`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.studioPlugin.maximumRequestBodySize. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugin.enabled": {
-          "markdownDescription": "Use Roblox Studio Plugin to provide DataModel information",
-          "type": "boolean",
-          "default": false,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Deprecated**: Use `luwu.studioPlugin.enabled` instead.",
-          "deprecationMessage": "Deprecated: Use luwu.studioPlugin.enabled instead."
-        },
-        "luau-lsp.plugin.enabled": {
-          "markdownDescription": "Renamed to `luwu.plugin.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "boolean",
-          "default": false,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugin.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugin.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugin.port": {
-          "markdownDescription": "Port number to connect to the Studio Plugin",
-          "type": "number",
-          "default": 3667,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Deprecated**: Use `luwu.studioPlugin.port` instead.",
-          "deprecationMessage": "Deprecated: Use luwu.studioPlugin.port instead."
-        },
-        "luau-lsp.plugin.port": {
-          "markdownDescription": "Renamed to `luwu.plugin.port`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "number",
-          "default": 3667,
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugin.port`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugin.port. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugin.maximumRequestBodySize": {
-          "markdownDescription": "The maximum request body size accepted from the plugin, in a string representation parse-able by the [bytes](https://www.npmjs.com/package/bytes) library",
-          "type": "string",
-          "default": "3mb",
-          "scope": "window",
-          "markdownDeprecationMessage": "**Deprecated**: Use `luwu.studioPlugin.maximumRequestBodySize` instead.",
-          "deprecationMessage": "Deprecated: Use luwu.studioPlugin.maximumRequestBodySize instead."
-        },
-        "luau-lsp.plugin.maximumRequestBodySize": {
-          "markdownDescription": "Renamed to `luwu.plugin.maximumRequestBodySize`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "string",
-          "default": "3mb",
-          "scope": "window",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugin.maximumRequestBodySize`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugin.maximumRequestBodySize. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.require.fileAliases": {
-          "markdownDescription": "A mapping of custom require string aliases to file paths",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.inlayHints.hideHintsForMatchingParameterNames": {
+            "markdownDescription": "Whether type hints should be hidden if the resolved variable name matches the parameter name",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Deprecated**: Please use `aliases` in a `.luaurc` file instead.",
-          "deprecationMessage": "Deprecated: Please use aliases in a .luaurc file instead."
-        },
-        "luau-lsp.require.fileAliases": {
-          "markdownDescription": "Renamed to `luwu.require.fileAliases`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.inlayHints.typeHintMaxLength": {
+            "markdownDescription": "The maximum length a type hint should be before being truncated",
+            "type": "number",
+            "default": 50,
+            "minimum": 10,
+            "scope": "resource"
           },
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.require.fileAliases`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.require.fileAliases. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.require.directoryAliases": {
-          "markdownDescription": "A mapping of custom require string prefixes to directory paths. The aliases should include trailing slashes",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.inlayHints.makeInsertable": {
+            "markdownDescription": "Whether type annotation inlay hints can be made insertable by clicking",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Deprecated**: Please use `aliases` in a `.luaurc` file instead.",
-          "deprecationMessage": "Deprecated: Please use aliases in a .luaurc file instead."
-        },
-        "luau-lsp.require.directoryAliases": {
-          "markdownDescription": "Renamed to `luwu.require.directoryAliases`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
+          "luau-lsp.inlayHints.blockEndHints": {
+            "markdownDescription": "Show a hint on the `end` of a long function, loop, `if` chain or class naming what it closes, similar to rust-analyzer's closing brace hints",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "scope": "resource",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.require.directoryAliases`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.require.directoryAliases. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.require.useOriginalRequireByStringSemantics": {
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDescription": "Use the old require-by-string semantics for init.luau resolution",
-          "markdownDeprecationMessage": "**Deprecated**: Use the new require-by-string semantics instead. This option may be removed at any time in the future",
-          "deprecationMessage": "Deprecated: Use the new require-by-string semantics instead. This option may be removed at any time in the future"
-        },
-        "luau-lsp.require.useOriginalRequireByStringSemantics": {
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.require.useOriginalRequireByStringSemantics`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.require.useOriginalRequireByStringSemantics`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.require.useOriginalRequireByStringSemantics. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.index.enabled": {
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "markdownDescription": "Whether all files in a workspace should be indexed into memory. If disabled, only limited support is available for features such as 'Find All References' and 'Rename'"
-        },
-        "luau-lsp.index.enabled": {
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "markdownDescription": "Renamed to `luwu.index.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.index.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.index.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.index.maxFiles": {
-          "type": "number",
-          "default": 10000,
-          "scope": "window",
-          "markdownDescription": "The maximum amount of files that can be indexed. If more files are indexed, more memory is needed"
-        },
-        "luau-lsp.index.maxFiles": {
-          "type": "number",
-          "default": 10000,
-          "scope": "window",
-          "markdownDescription": "Renamed to `luwu.index.maxFiles`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.index.maxFiles`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.index.maxFiles. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.bytecode.debugLevel": {
-          "type": "number",
-          "default": 1,
-          "scope": "resource",
-          "minimum": 0,
-          "maximum": 2,
-          "markdownDescription": "The `debugLevel` to use when compiling bytecode"
-        },
-        "luau-lsp.bytecode.debugLevel": {
-          "type": "number",
-          "default": 1,
-          "scope": "resource",
-          "minimum": 0,
-          "maximum": 2,
-          "markdownDescription": "Renamed to `luwu.bytecode.debugLevel`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.bytecode.debugLevel`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.bytecode.debugLevel. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.bytecode.typeInfoLevel": {
-          "type": "number",
-          "default": 1,
-          "scope": "resource",
-          "minimum": 0,
-          "maximum": 1,
-          "markdownDescription": "The `typeInfoLevel` to use when compiling bytecode"
-        },
-        "luau-lsp.bytecode.typeInfoLevel": {
-          "type": "number",
-          "default": 1,
-          "scope": "resource",
-          "minimum": 0,
-          "maximum": 1,
-          "markdownDescription": "Renamed to `luwu.bytecode.typeInfoLevel`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.bytecode.typeInfoLevel`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.bytecode.typeInfoLevel. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.bytecode.vectorLib": {
-          "type": "string",
-          "default": "Vector3",
-          "scope": "resource",
-          "markdownDescription": "The `vectorLib` to use when compiling bytecode"
-        },
-        "luau-lsp.bytecode.vectorLib": {
-          "type": "string",
-          "default": "Vector3",
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.bytecode.vectorLib`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.bytecode.vectorLib`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.bytecode.vectorLib. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.bytecode.vectorCtor": {
-          "type": "string",
-          "default": "new",
-          "scope": "resource",
-          "markdownDescription": "The `vectorCtor` to use when compiling bytecode"
-        },
-        "luau-lsp.bytecode.vectorCtor": {
-          "type": "string",
-          "default": "new",
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.bytecode.vectorCtor`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.bytecode.vectorCtor`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.bytecode.vectorCtor. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.bytecode.vectorType": {
-          "type": "string",
-          "default": "Vector3",
-          "scope": "resource",
-          "markdownDescription": "The `vectorType` to use when compiling bytecode"
-        },
-        "luau-lsp.bytecode.vectorType": {
-          "type": "string",
-          "default": "Vector3",
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.bytecode.vectorType`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.bytecode.vectorType`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.bytecode.vectorType. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugins.enabled": {
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDescription": "Enable source code transformation plugins. Plugins are Luau scripts that can transform source code before type checking."
-        },
-        "luau-lsp.plugins.enabled": {
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.plugins.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugins.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugins.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugins.paths": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.inlayHints.blockEndHintsMinLines": {
+            "markdownDescription": "The number of lines a block must span, from its opening keyword to its `end`, before `#luwu.inlayHints.blockEndHints#` labels it",
+            "type": "integer",
+            "minimum": 1,
+            "default": 35,
+            "scope": "resource"
           },
-          "default": [],
-          "scope": "resource",
-          "markdownDescription": "Paths to Luau plugin scripts. Plugins are executed in order and can transform source code before type checking."
-        },
-        "luau-lsp.plugins.paths": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "luau-lsp.hover.enabled": {
+            "markdownDescription": "Enable hover",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
           },
-          "default": [],
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.plugins.paths`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugins.paths`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugins.paths. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugins.timeoutMs": {
-          "type": "number",
-          "default": 5000,
-          "minimum": 100,
-          "scope": "resource",
-          "markdownDescription": "Timeout in milliseconds for plugin execution. If a plugin takes longer than this, it will be terminated."
-        },
-        "luau-lsp.plugins.timeoutMs": {
-          "type": "number",
-          "default": 5000,
-          "minimum": 100,
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.plugins.timeoutMs`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugins.timeoutMs`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugins.timeoutMs. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.plugins.fileSystem.enabled": {
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDescription": "Allow plugins to read files within the workspace. Only files within the workspace can be accessed for security."
-        },
-        "luau-lsp.plugins.fileSystem.enabled": {
-          "type": "boolean",
-          "default": false,
-          "scope": "resource",
-          "markdownDescription": "Renamed to `luwu.plugins.fileSystem.enabled`. Still read while `luwu.inheritLuauLspSettings` is enabled, so configs generated for the upstream Luau Language Server keep working.",
-          "markdownDeprecationMessage": "**Renamed** to `luwu.plugins.fileSystem.enabled`. This name is still honoured while `luwu.inheritLuauLspSettings` is enabled.",
-          "deprecationMessage": "Renamed to luwu.plugins.fileSystem.enabled. Still honoured while luwu.inheritLuauLspSettings is enabled."
-        },
-        "luwu.inheritLuauLspSettings": {
-          "markdownDescription": "Read settings written under the legacy `luau-lsp.*` namespace, which this extension used before it was renamed and which external tooling still generates. A `luwu.*` setting always wins over its `luau-lsp.*` counterpart.\n\nTurn this off to ignore `luau-lsp.*` entirely, which is what you want if upstream's Luau Language Server is installed alongside this one and you need the two configured separately.",
-          "type": "boolean",
-          "default": true,
-          "scope": "window"
+          "luau-lsp.hover.showTableKinds": {
+            "markdownDescription": "Show table kinds",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.hover.multilineFunctionDefinitions": {
+            "markdownDescription": "Show function definitions on multiple lines",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.hover.strictDatamodelTypes": {
+            "markdownDescription": "Use strict DataModel types in hover display. When on, this is equivalent to autocompletion types. When off, this is equivalent to diagnostic types",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.hover.includeStringLength": {
+            "markdownDescription": "Show string length when hovering over a string literal",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.enabled": {
+            "markdownDescription": "Enable autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.autocompleteEnd": {
+            "markdownDescription": "Automatically insert an `end` when opening a block",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.autocompleteEnd": {
+            "markdownDescription": "Automatically insert an `end` when opening a block",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.addParentheses": {
+            "markdownDescription": "Add parentheses after completing a function call",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.addTabstopAfterParentheses": {
+            "markdownDescription": "If `#luwu.completion.addParentheses#` is enabled, then include a tabstop after the parentheses for the cursor to move to",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.fillCallArguments": {
+            "markdownDescription": "Fill parameter names in an autocompleted function call, which can be tabbed through. Requires `#luwu.completion.addParentheses#` to be enabled",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.showPropertiesOnMethodCall": {
+            "markdownDescription": "Whether to show non-function properties when performing a method call with a colon (e.g., `foo:bar`)",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.showKeywords": {
+            "markdownDescription": "Whether to show keywords (`if` / `then` / `and` / etc.) during autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.showAnonymousAutofilledFunction": {
+            "markdownDescription": "Whether to show the auto-generated anonymous function completion item when autocompleting callback arguments",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.anonymousAutofilledFunction.enabled": {
+            "markdownDescription": "Whether to show the auto-generated anonymous function completion item when autocompleting callback arguments",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.anonymousAutofilledFunction.addTypeAnnotations": {
+            "markdownDescription": "Whether to include type annotations in the generated anonymous function snippet",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.anonymousAutofilledFunction.addTabstopForParameters": {
+            "markdownDescription": "Whether to add snippet tabstops on each parameter name in the generated anonymous function snippet, allowing quick navigation and editing",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.showDeprecatedItems": {
+            "markdownDescription": "Whether to show deprecated items in autocomplete suggestions",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.suggestImports": {
+            "markdownDescription": "Suggest automatic imports in completion items",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.enabled": {
+            "markdownDescription": "Suggest automatic imports in completion items",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.suggestServices": {
+            "markdownDescription": "Whether GetService completions are suggested in autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.includedServices": {
+            "markdownDescription": "When non-empty, only show the services listed when auto-importing",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.excludedServices": {
+            "markdownDescription": "Do not show any of the listed services when auto-importing",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.suggestRequires": {
+            "markdownDescription": "Whether module requires are suggested in autocomplete",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.requireStyle": {
+            "markdownDescription": "The style of requires when autocompleted",
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "alwaysRelative",
+              "alwaysAbsolute"
+            ],
+            "scope": "resource",
+            "enumDescriptions": [
+              "Automatically compute the style of require to use based on heuristics",
+              "Always require the module relative to the current file",
+              "Always require the module absolute based on root"
+            ]
+          },
+          "luau-lsp.completion.imports.stringRequires.enabled": {
+            "markdownDescription": "Whether to use string requires when auto-importing requires. Only checked if `#luwu.platform.type#` is `roblox`",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.separateGroupsWithLine": {
+            "markdownDescription": "Whether services and requires should be separated by an empty line",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.useConst": {
+            "markdownDescription": "Whether to use `const` instead of `local` for auto-imported requires and services",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.completion.imports.ignoreGlobs": {
+            "markdownDescription": "Files that match these globs will not be shown during auto-import",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/_Index/**"
+            ],
+            "scope": "resource"
+          },
+          "luau-lsp.completion.enableFragmentAutocomplete": {
+            "markdownDescription": "Enables the fragment autocomplete system for performance improvements",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.signatureHelp.enabled": {
+            "markdownDescription": "Enable signature help",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.studioPlugin.enabled": {
+            "markdownDescription": "Use Roblox Studio Plugin to provide DataModel information",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luau-lsp.studioPlugin.port": {
+            "markdownDescription": "Port number to connect to the Studio Plugin",
+            "type": "number",
+            "default": 3667,
+            "scope": "window"
+          },
+          "luau-lsp.studioPlugin.maximumRequestBodySize": {
+            "markdownDescription": "The maximum request body size accepted from the plugin, in a string representation parse-able by the [bytes](https://www.npmjs.com/package/bytes) library",
+            "type": "string",
+            "default": "3mb",
+            "scope": "window"
+          },
+          "luau-lsp.plugin.enabled": {
+            "markdownDescription": "Use Roblox Studio Plugin to provide DataModel information",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luau-lsp.plugin.port": {
+            "markdownDescription": "Port number to connect to the Studio Plugin",
+            "type": "number",
+            "default": 3667,
+            "scope": "window"
+          },
+          "luau-lsp.plugin.maximumRequestBodySize": {
+            "markdownDescription": "The maximum request body size accepted from the plugin, in a string representation parse-able by the [bytes](https://www.npmjs.com/package/bytes) library",
+            "type": "string",
+            "default": "3mb",
+            "scope": "window"
+          },
+          "luau-lsp.require.fileAliases": {
+            "markdownDescription": "A mapping of custom require string aliases to file paths",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "resource"
+          },
+          "luau-lsp.require.directoryAliases": {
+            "markdownDescription": "A mapping of custom require string prefixes to directory paths. The aliases should include trailing slashes",
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "scope": "resource"
+          },
+          "luau-lsp.require.useOriginalRequireByStringSemantics": {
+            "markdownDescription": "Use the old require-by-string semantics for init.luau resolution",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.index.enabled": {
+            "markdownDescription": "Whether all files in a workspace should be indexed into memory. If disabled, only limited support is available for features such as 'Find All References' and 'Rename'",
+            "type": "boolean",
+            "default": true,
+            "scope": "window"
+          },
+          "luau-lsp.index.maxFiles": {
+            "markdownDescription": "The maximum amount of files that can be indexed. If more files are indexed, more memory is needed",
+            "type": "number",
+            "default": 10000,
+            "scope": "window"
+          },
+          "luau-lsp.bytecode.debugLevel": {
+            "markdownDescription": "The `debugLevel` to use when compiling bytecode",
+            "type": "number",
+            "default": 1,
+            "scope": "resource",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "luau-lsp.bytecode.typeInfoLevel": {
+            "markdownDescription": "The `typeInfoLevel` to use when compiling bytecode",
+            "type": "number",
+            "default": 1,
+            "scope": "resource",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "luau-lsp.bytecode.vectorLib": {
+            "markdownDescription": "The `vectorLib` to use when compiling bytecode",
+            "type": "string",
+            "default": "Vector3",
+            "scope": "resource"
+          },
+          "luau-lsp.bytecode.vectorCtor": {
+            "markdownDescription": "The `vectorCtor` to use when compiling bytecode",
+            "type": "string",
+            "default": "new",
+            "scope": "resource"
+          },
+          "luau-lsp.bytecode.vectorType": {
+            "markdownDescription": "The `vectorType` to use when compiling bytecode",
+            "type": "string",
+            "default": "Vector3",
+            "scope": "resource"
+          },
+          "luau-lsp.plugins.enabled": {
+            "markdownDescription": "Enable source code transformation plugins. Plugins are Luau scripts that can transform source code before type checking.",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.plugins.paths": {
+            "markdownDescription": "Paths to Luau plugin scripts. Plugins are executed in order and can transform source code before type checking.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource"
+          },
+          "luau-lsp.plugins.timeoutMs": {
+            "markdownDescription": "Timeout in milliseconds for plugin execution. If a plugin takes longer than this, it will be terminated.",
+            "type": "number",
+            "default": 5000,
+            "minimum": 100,
+            "scope": "resource"
+          },
+          "luau-lsp.plugins.fileSystem.enabled": {
+            "markdownDescription": "Allow plugins to read files within the workspace. Only files within the workspace can be accessed for security.",
+            "type": "boolean",
+            "default": false,
+            "scope": "resource"
+          }
         }
       }
-    },
+    ],
     "walkthroughs": [
       {
         "id": "getting-started",

@@ -9,7 +9,7 @@ export const NAMESPACE = "luwu";
 /// Luau/Roblox work is a supported case, so these are read permanently.
 export const LEGACY_NAMESPACE = "luau-lsp";
 
-const INHERIT_LEGACY_KEY = "inheritLuauLspSettings";
+export const INHERIT_LEGACY_KEY = "inheritLuauLspSettings";
 
 /// What `WorkspaceConfiguration.inspect` tells us about one key. Only the parts
 /// we need, so the resolution below can be tested without a workspace.
@@ -64,6 +64,18 @@ export function resolveSetting<T>(
   return inspected?.defaultValue ?? legacyInspected?.defaultValue;
 }
 
+/// Whether someone wrote `luwu.inheritLuauLspSettings` themselves, and what
+/// they wrote, as opposed to it sitting at its declared default. The notice
+/// about `luau-lsp.*` settings is only worth showing while nobody has made
+/// that choice.
+export function explicitInheritLegacySettings(): boolean | undefined {
+  return explicitValue(
+    vscode.workspace
+      .getConfiguration(NAMESPACE)
+      .inspect<boolean>(INHERIT_LEGACY_KEY),
+  );
+}
+
 export function isInheritingLegacySettings(): boolean {
   return vscode.workspace
     .getConfiguration(NAMESPACE)
@@ -71,7 +83,7 @@ export function isInheritingLegacySettings(): boolean {
 }
 
 /// Reads one setting by its dotted key, e.g. `inlayHints.blockEndHints`,
-/// honouring the legacy namespace. Use this instead of
+/// honoring the legacy namespace. Use this instead of
 /// `vscode.workspace.getConfiguration("luwu-lsp")` so that a `luau-lsp.*` value
 /// is never silently ignored.
 export function getSetting<T>(
@@ -144,22 +156,24 @@ const CLIENT_ONLY_SETTINGS = new Set(["trace.server", INHERIT_LEGACY_KEY]);
 
 /// Every settable key, without its namespace prefix, taken from our own
 /// contributions so that a new setting never has to be registered in two
-/// places.
+/// places. `contributes.configuration` may be a single section or a list of
+/// them; ours is a list, with the `luau-lsp.*` names in a section of their own.
 export function settingKeys(packageJSON: unknown): string[] {
-  const properties = (
-    packageJSON as {
-      contributes?: {
-        configuration?: { properties?: Record<string, unknown> };
-      };
-    }
-  )?.contributes?.configuration?.properties;
+  type Section = { properties?: Record<string, unknown> };
+  const configuration = (
+    packageJSON as { contributes?: { configuration?: Section | Section[] } }
+  )?.contributes?.configuration;
 
-  if (!properties) {
+  if (!configuration) {
     return [];
   }
 
+  const sections = Array.isArray(configuration)
+    ? configuration
+    : [configuration];
   const prefix = `${NAMESPACE}.`;
-  return Object.keys(properties)
+  return sections
+    .flatMap((section) => Object.keys(section.properties ?? {}))
     .filter((key) => key.startsWith(prefix))
     .map((key) => key.slice(prefix.length))
     .filter((key) => !CLIENT_ONLY_SETTINGS.has(key));

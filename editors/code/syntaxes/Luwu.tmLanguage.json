@@ -215,6 +215,9 @@
           "include": "#attribute"
         },
         {
+          "include": "#destructure-pattern"
+        },
+        {
           "begin": "(:)",
           "beginCaptures": {
             "1": {
@@ -257,6 +260,9 @@
           "include": "#attribute"
         },
         {
+          "include": "#destructure-pattern"
+        },
+        {
           "begin": "(:)",
           "beginCaptures": {
             "1": {
@@ -269,6 +275,69 @@
               "include": "#type_literal"
             }
           ]
+        },
+        {
+          "name": "variable.other.constant.luwu",
+          "match": "\\b([A-Z_][A-Z0-9_]*)\\b"
+        },
+        {
+          "name": "variable.other.readwrite.luwu",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b"
+        }
+      ]
+    },
+    "destructure-pattern": {
+      "comment": "A Luwu destructuring pattern, `.{key, key as name, key.{inner}, key: T}` (rfcs/destructuring.md), after `local`/`const` and an optional name. A key followed by `as` is only the field being read, so it is scoped as a property; the name after `as`, a bare key, and a key with its own `.{...}` are what get bound.",
+      "begin": "(\\.)?\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.accessor.luwu"
+        },
+        "2": {
+          "name": "punctuation.definition.destructure.begin.luwu"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.destructure.end.luwu"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s+(as)\\b",
+          "captures": {
+            "1": {
+              "name": "variable.other.property.luwu"
+            },
+            "2": {
+              "name": "keyword.control.as.luwu"
+            }
+          }
+        },
+        {
+          "include": "#destructure-pattern"
+        },
+        {
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.type.luwu"
+            }
+          },
+          "end": "(?=\\s*[,}])",
+          "patterns": [
+            {
+              "include": "#type_literal"
+            }
+          ]
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.luwu"
         },
         {
           "name": "variable.other.constant.luwu",

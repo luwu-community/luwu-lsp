@@ -6,6 +6,47 @@
 #include "LSP/LuauExt.hpp"
 #include "Luau/TimeTrace.h"
 #include "LuauFileUtils.hpp"
+#include "Luau/Error.h"
+
+#include <algorithm>
+
+/// Luwu (helpful subtyping errors): a type mismatch's explanation writes paths like `Drop#2` and `[i]`, and says
+/// which notation it used rather than explaining it. The editor shows every diagnostic under the cursor
+/// in one hover, so errors whose ranges overlap are grouped and the last of each group gets one legend
+/// for everything the group used.
+static void appendMismatchLegends(std::vector<lsp::Diagnostic>& items, const std::vector<std::pair<size_t, uint8_t>>& notations)
+{
+    std::vector<std::pair<size_t, uint8_t>> ordered = notations;
+    std::sort(
+        ordered.begin(),
+        ordered.end(),
+        [&](const auto& a, const auto& b)
+        {
+            return items[a.first].range.start < items[b.first].range.start;
+        }
+    );
+
+    size_t start = 0;
+    while (start < ordered.size())
+    {
+        uint8_t notation = ordered[start].second;
+        lsp::Position groupEnd = items[ordered[start].first].range.end;
+        size_t end = start + 1;
+        while (end < ordered.size() && !(groupEnd < items[ordered[end].first].range.start))
+        {
+            notation |= ordered[end].second;
+            if (groupEnd < items[ordered[end].first].range.end)
+                groupEnd = items[ordered[end].first].range.end;
+            ++end;
+        }
+
+        std::string legend = Luau::mismatchNotationLegend(notation);
+        if (!legend.empty())
+            items[ordered[end - 1].first].message += "\n\n" + legend;
+
+        start = end;
+    }
+}
 
 bool usingPullDiagnostics(const lsp::ClientCapabilities& capabilities)
 {
@@ -88,11 +129,14 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
 
     // Report Type Errors
     // Note that type errors can extend to related modules in the require graph - so we report related information here
+    std::vector<std::pair<size_t, uint8_t>> mismatchNotations;
     for (auto& error : cr.errors)
     {
         if (error.moduleName == moduleName)
         {
             auto diagnostic = createTypeErrorDiagnostic(error, &fileResolver, *textDocument);
+            if (const auto* mismatch = Luau::get_if<Luau::TypeMismatch>(&error.data); mismatch && mismatch->notation)
+                mismatchNotations.emplace_back(report.items.size(), mismatch->notation);
             report.items.emplace_back(diagnostic);
         }
         else if (supportsRelatedDocuments(client->capabilities))
@@ -108,6 +152,8 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
             currentDiagnostics.emplace_back(diagnostic);
         }
     }
+
+    appendMismatchLegends(report.items, mismatchNotations);
 
     // Convert the related diagnostics map into an equivalent report
     if (supportsRelatedDocuments(client->capabilities) && !relatedDiagnostics.empty())

@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- Luwu's own language features are now enabled by default: every `Luwu`-prefixed FFlag, plus the `DebugLuauUserDefinedClasses`/`DebugLuauUserDefinedClassesRuntime` flags that gate classes. Pass `--luau-compat` (or set `luau-lsp.luauCompatibilityMode`) for Luau compatibility mode, which turns them all off
+- Luwu's own language features are now enabled by default: every `Luwu`-prefixed FFlag, including `LuwuClasses`, which gates classes. Pass `--luau-compat` (or set `luau-lsp.luauCompatibilityMode`) for Luau compatibility mode, which turns them all off
 - The new type solver (`LuauSolverV2`) is now enabled in every configuration, including Luau compatibility mode. `luau-lsp.fflags.enableNewSolver` now defaults to `true`. Both remain overridable via `--flag:LuauSolverV2=false` / `luau-lsp.fflags.override`
 - `platform.type` now defaults to `standard` instead of `roblox`; set it to `roblox` to enable Roblox support (sourcemaps, DataModel types, Roblox definitions)
 

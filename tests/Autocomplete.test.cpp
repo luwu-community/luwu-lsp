@@ -6,8 +6,7 @@
 #include "LSP/Completion.hpp"
 #include "Platform/InstanceRequireAutoImporter.hpp"
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 std::optional<lsp::CompletionItem> getItem(const std::vector<lsp::CompletionItem>& items, const std::string& label)
 {
@@ -1378,7 +1377,7 @@ static std::vector<lsp::TextEdit> requireEndAutocompletionEdits(const TestClient
 
 TEST_CASE_FIXTURE(Fixture, "autocomplete_end_inside_class_method_function")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag sff{FFlag::LuwuClasses, true};
     client->globalConfig.completion.autocompleteEnd = true;
 
     auto [source, marker] = sourceWithMarker(R"(

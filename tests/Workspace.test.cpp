@@ -1,4 +1,6 @@
 #include "doctest.h"
+
+#include <filesystem>
 #include "Fixture.h"
 #include "TempDir.h"
 #include "LSP/WorkspaceFileResolver.hpp"
@@ -164,6 +166,93 @@ TEST_CASE_FIXTURE(Fixture, "ignored_files_are_marked_as_dirty_when_changed_exter
     workspace.onDidChangeWatchedFiles({event});
 
     CHECK(workspace.frontend.isDirty(moduleName));
+}
+
+/// The event a client sends once a file is gone from disk
+static lsp::FileEvent fileEvent(const Uri& uri, lsp::FileChangeType type)
+{
+    lsp::FileEvent event;
+    event.uri = uri;
+    event.type = type;
+    return event;
+}
+
+TEST_CASE_FIXTURE(Fixture, "deleting_a_file_removes_its_module_from_the_frontend")
+{
+    // A module used to stay in the frontend for the rest of the session once its file was gone,
+    // because a deletion only marked it dirty. Anything that walks sourceNodes -- auto-imports,
+    // the require graph, workspace symbols -- kept offering a file that no longer existed.
+    tempDir.write_child("temporary.luau", "return {}");
+    auto uri = newDocument("temporary.luau", "return {}");
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+
+    REQUIRE(workspace.frontend.sourceNodes.count(moduleName) == 1);
+
+    std::filesystem::remove(std::filesystem::path(uri.fsPath()));
+    workspace.closeTextDocument(uri);
+    workspace.onDidChangeWatchedFiles({fileEvent(uri, lsp::FileChangeType::Deleted)});
+
+    CHECK(workspace.frontend.sourceNodes.count(moduleName) == 0);
+}
+
+TEST_CASE_FIXTURE(Fixture, "deleting_a_file_makes_the_files_that_required_it_check_again")
+{
+    // The dependents have to be dirtied, or a module that required the deleted file keeps its
+    // cached result and never reports the require that is now broken.
+    tempDir.write_child("dependency.luau", "return {}");
+    tempDir.write_child("dependent.luau", R"(local dependency = require("./dependency"))");
+    auto dependency = newDocument("dependency.luau", "return {}");
+    auto dependent = newDocument("dependent.luau", R"(local dependency = require("./dependency"))");
+
+    auto dependentModule = workspace.fileResolver.getModuleName(dependent);
+    workspace.frontend.check(dependentModule);
+    REQUIRE(workspace.frontend.isDirty(dependentModule) == false);
+
+    std::filesystem::remove(std::filesystem::path(dependency.fsPath()));
+    workspace.closeTextDocument(dependency);
+    workspace.onDidChangeWatchedFiles({fileEvent(dependency, lsp::FileChangeType::Deleted)});
+
+    CHECK(workspace.frontend.isDirty(dependentModule));
+}
+
+TEST_CASE_FIXTURE(Fixture, "a_deleted_file_stops_showing_up_in_workspace_symbols")
+{
+    // The symptom of a module outliving its file: workspace symbols walks frontend.sourceModules,
+    // so every deleted file keeps answering Ctrl+T for the rest of the session.
+    tempDir.write_child("temporary.luau", "local temporarySymbol = 1");
+    auto uri = newDocument("temporary.luau", "local temporarySymbol = 1");
+
+    lsp::WorkspaceSymbolParams params;
+    params.query = "temporarySymbol";
+
+    auto before = workspace.workspaceSymbol(params);
+    REQUIRE(before);
+    REQUIRE_FALSE(before->empty());
+
+    std::filesystem::remove(std::filesystem::path(uri.fsPath()));
+    workspace.closeTextDocument(uri);
+    workspace.onDidChangeWatchedFiles({fileEvent(uri, lsp::FileChangeType::Deleted)});
+
+    auto after = workspace.workspaceSymbol(params);
+    REQUIRE(after);
+    CHECK(after->empty());
+}
+
+TEST_CASE_FIXTURE(Fixture, "a_file_deleted_and_written_again_in_one_batch_keeps_its_module")
+{
+    // What a test run's temporary files look like from here: the file is gone and back before we
+    // are told about either event, so the batch must not leave us having forgotten a file that is
+    // sitting on disk.
+    tempDir.write_child("temporary.luau", "return {}");
+    auto uri = newDocument("temporary.luau", "return {}");
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+
+    workspace.onDidChangeWatchedFiles({
+        fileEvent(uri, lsp::FileChangeType::Deleted),
+        fileEvent(uri, lsp::FileChangeType::Created),
+    });
+
+    CHECK(workspace.frontend.sourceNodes.count(moduleName) == 1);
 }
 
 TEST_SUITE_END();

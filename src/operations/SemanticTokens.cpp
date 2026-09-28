@@ -89,16 +89,18 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     const Luau::ModulePtr& module;
     const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals;
     Luau::NotNull<Luau::BuiltinTypes> builtinTypes;
+    bool grammarHighlightsNone;
     std::vector<SemanticToken> tokens{};
     std::unordered_map<Luau::AstLocal*, AstLocalInfo> localMap{};
     std::unordered_set<Luau::AstType*> syntheticTypes{};
 
     explicit SemanticTokensVisitor(
         const Luau::ModulePtr& module, const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals,
-        Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
+        Luau::NotNull<Luau::BuiltinTypes> builtinTypes, bool grammarHighlightsNone)
         : module(module)
         , builtinGlobals(builtinGlobals)
         , builtinTypes(builtinTypes)
+        , grammarHighlightsNone(grammarHighlightsNone)
     {
     }
 
@@ -308,6 +310,10 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         auto it = builtinGlobals.find(global->name);
         if (it != builtinGlobals.end() && strlen(global->name.value) > 0)
         {
+            // The Luwu grammar scopes `none` like `nil`; a variable token would override that
+            if (grammarHighlightsNone && global->name == "none")
+                return true;
+
             // SPECIAL CASE: if name is "Enum", classify it as an enum
             if (global->name == "Enum")
             {
@@ -414,12 +420,13 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     }
 };
 
-std::vector<SemanticToken> getSemanticTokens(const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule)
+std::vector<SemanticToken> getSemanticTokens(
+    const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule, bool grammarHighlightsNone)
 {
     std::unordered_map<Luau::AstName, Luau::TypeId> builtinGlobals{};
     fillBuiltinGlobals(builtinGlobals, *sourceModule->names, frontend.globals.globalScope);
 
-    SemanticTokensVisitor visitor{module, builtinGlobals, frontend.builtinTypes};
+    SemanticTokensVisitor visitor{module, builtinGlobals, frontend.builtinTypes, grammarHighlightsNone};
     visitor.visit(sourceModule->root);
     return visitor.tokens;
 }
@@ -485,7 +492,7 @@ std::optional<lsp::SemanticTokens> WorkspaceFolder::semanticTokens(
     if (!sourceModule || !module)
         return std::nullopt;
 
-    auto tokens = getSemanticTokens(frontend, module, sourceModule);
+    auto tokens = getSemanticTokens(frontend, module, sourceModule, /* grammarHighlightsNone= */ isLuwuFile(*textDocument));
     lsp::SemanticTokens result;
     result.data = packTokens(textDocument, tokens);
     return result;

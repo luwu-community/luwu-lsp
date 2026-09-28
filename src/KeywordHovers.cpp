@@ -1,6 +1,6 @@
 #include "LSP/KeywordHovers.hpp"
+#include "LSP/EmbeddedResources.hpp"
 
-#include <fstream>
 #include <unordered_map>
 
 #include "nlohmann/json.hpp"
@@ -16,18 +16,11 @@ const std::unordered_map<std::string, std::string>& keywordHoverDatabase()
     {
         std::unordered_map<std::string, std::string> result;
 
-#ifdef LSP_KEYWORD_HOVERS_PATH
-        std::ifstream file(LSP_KEYWORD_HOVERS_PATH);
-        if (file)
-        {
-            json data;
-            file >> data;
-            if (data.is_object())
-                for (const auto& [keyword, docs] : data.items())
-                    if (docs.is_string())
-                        result[keyword] = docs.get<std::string>();
-        }
-#endif
+        json data = json::parse(embedded::keywordHovers(), /* cb= */ nullptr, /* allow_exceptions= */ false);
+        if (data.is_object())
+            for (const auto& [keyword, docs] : data.items())
+                if (docs.is_string())
+                    result[keyword] = docs.get<std::string>();
 
         return result;
     }();

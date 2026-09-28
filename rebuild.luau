@@ -59,19 +59,27 @@ const parsed = args.parse(
             - Pass '--luwu=here' to explicitly specify using the luwu path inside this directory if overriden by LUWU_TEST_PATH`
         ):default("test"),
         args.flag("--release", "Compiles the luwu-lsp binary in --config Release mode (defaults to false)"),
+        args.flag("--static", "Linux only: fully statically link luwu-lsp into ./build-static, so it runs on distros with an older glibc than yours"),
         args.flag("--clean", "remove the build dir and reconfigure (do this luwu-lsp doesnt compile and you think partial build is stale)"),
         args.named("--targets", "Which of the CMake build targets should we build? Defaults to CLI (Luwu.LanguageServer.CLI). Specify multiple targets by separating them with commas.")
             :default("CLI")
     ),
     args.command("submodule-update", "update ./luwu submodule with whatever path"),
-    args.command("vsix", "package editors/code into an installable .vsix (does not build the server binary)")
+    args.command("vsix", "package editors/code into an installable .vsix (does not build the server binary)"):args(
+        args.flag("--install", "install the freshly packaged .vsix into VSCode with `code --install-extension`")
+    )
 )
 
 const luwu_lsp_dir =
     -- use instead of cwd in case ppl dont run this in correct dir
     fs.dir.from(script:parent())
 
-const build_dir_path = luwu_lsp_dir:join("build")
+const is_static = parsed.flags["--static"] == true
+
+--- Static builds get their own dir: switching the linker flags back and forth in ./build would
+--- relink everything each time, and ./build/luwu-lsp is usually the binary your editor is running.
+const build_dir_name = if is_static then "build-static" else "build"
+const build_dir_path = luwu_lsp_dir:join(build_dir_name)
 
 --- Version of luwu vendored in as a submodule, should always be included
 --- we build against this version by default when LUWU_TEST_PATH doesn't exist
@@ -83,6 +91,10 @@ const luwu_submodule_path = luwu_lsp_dir:join("luwu")
 const luwu_test_path = env.vars.get("LUWU_TEST_PATH")
 
 const is_release = parsed.flags["--release"] == true
+
+if is_static and env.os ~= "Linux" then
+    error("--static is only supported on Linux; macOS doesn't allow fully static binaries and Windows already links the CRT statically in CI")
+end
 
 const function ensure_dependencies()
     const has_cmake = #env.where("cmake") > 0
@@ -134,7 +146,7 @@ const function can_crash_editor()
                 if not exe_path then
                     continue
                 end
-                if str.trim(exe_path) == luwu_lsp_dir:join("build", "luwu-lsp") then
+                if str.trim(exe_path) == fs.path.join(build_dir_path, "luwu-lsp") then
                     return true
                 end
             end
@@ -146,7 +158,7 @@ const function can_crash_editor()
         }
         if res.ok then
             for _, p in str.splitlines(res.out) do
-                if str.trim(p) == luwu_lsp_dir:join("build", "luwu-lsp.exe") then
+                if str.trim(p) == fs.path.join(build_dir_path, "luwu-lsp.exe") then
                     return true
                 end
             end
@@ -182,7 +194,7 @@ const function clean_and_configure(luwu_path: string)
         elseif res == "NotFound" then
             false
         else
-            error(`Unexpected ./build directory removal status {res}`)
+            error(`Unexpected ./{build_dir_name} directory removal status {res}`)
 
     fs.dir.ensure(build_dir_path)
     --[[
@@ -190,19 +202,25 @@ const function clean_and_configure(luwu_path: string)
         luwu itself can throw LUAU_ASSERT for things the luau team said are TODO
         and thereby crash the entire lsp instead of silently ignoring the TODO items
     ]]
+    const configure_args = {
+        "..",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        `-DLSP_LUAU_PATH={luwu_path}`,
+    }
+    if is_static then
+        -- glibc, libstdc++ and libgcc all baked in. Safe because nothing here uses NSS
+        -- (getpwnam, getaddrinfo) or dlopen, which static glibc can't do
+        table.insert(configure_args, "-DCMAKE_EXE_LINKER_FLAGS=-static")
+    end
     const configure_result = process.run {
         program = "cmake",
-        args = {
-            "..",
-            "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
-            `-DLSP_LUAU_PATH={luwu_path}`,
-        },
+        args = configure_args,
         cwd = build_dir_path
     }
     if not configure_result.ok then
         error(`Could not configure the luwu-lsp cmake build dir due to error: {configure_result.err}`)
     end
-    print(`{if rebuilt then "Cleaned" else "Made"} and {if rebuilt then "re" else ""}configured ./build directory with CMake.`)
+    print(`{if rebuilt then "Cleaned" else "Made"} and {if rebuilt then "re" else ""}configured ./{build_dir_name} directory with CMake.`)
 end
 
 const function update_submodules()
@@ -225,7 +243,7 @@ const extension_dir_path = luwu_lsp_dir:join("editors", "code")
 
 --- Packages the VSCode extension. Deliberately does not touch the server binary: the .vsix
 --- carries no bin/server, so an installed extension uses whatever luau-lsp.server.path points at.
-const function package_vsix()
+const function package_vsix(): string
     if #env.where("npm") == 0 then
         error("Missing npm in $PATH; it's needed to typecheck, bundle and package the extension.")
     end
@@ -286,8 +304,27 @@ const function package_vsix()
     end
 
     print(`Packaged {colors.green(packaged)}`)
-    print(`Install it with {colors.blue(`code --install-extension {packaged} --force`)}`)
     print("The .vsix contains no server binary; the extension uses your server.path setting.")
+    return packaged
+end
+
+--- Installs a packaged .vsix into VSCode. `--force` so reinstalling the same version replaces it.
+const function install_vsix(packaged: string)
+    if #env.where("code") == 0 then
+        error("Missing the VSCode `code` CLI in $PATH; install it or run `code --install-extension` yourself.")
+    end
+
+    print(`Installing {colors.green(packaged)}...`)
+    const install_result = process.run {
+        program = "code",
+        args = { "--install-extension", packaged, "--force" },
+        cwd = extension_dir_path,
+    }
+    if not install_result.ok then
+        error(`Installing the extension failed:\n{install_result.stdout}{install_result.stderr}`)
+    end
+
+    print("Installed. Reload your VSCode windows to pick it up.")
 end
 
 const function pick_luwu_path(): string
@@ -409,7 +446,12 @@ if parsed.command == "submodule-update" then
 end
 
 if parsed.command == "vsix" then
-    package_vsix()
+    const packaged = package_vsix()
+    if parsed.flags["--install"] then
+        install_vsix(packaged)
+    else
+        print(`Install it with {colors.blue(`code --install-extension {packaged} --force`)}, or pass --install next time`)
+    end
     process.exit(0)
 end
 
@@ -417,12 +459,12 @@ assert(parsed.command == "default", `Unknown command {parsed.command}, see --hel
 
 if can_crash_editor() then
     const scare_message = `{colors.bold.yellow("[WARN]")} \z
-    luwu-lsp in ./build dir is already running; rebuilding it now *may* crash your entire editor.\n\z
+    luwu-lsp in ./{build_dir_name} dir is already running; rebuilding it now *may* crash your entire editor.\n\z
     Save everything you're working on before building!!\n\z
     Continue building?`
     if not terminal.tty() then
         const is_agentic_tool = (env.vars.get("AI_AGENT") or env.vars.get("CLAUDECODE") or env.vars.get("CURSOR_AGENT")) ~= nil
-        error(`The luwu-lsp binary in ./build/luwu-lsp(.exe) is already running; rebuilding it now can crash any open editors. {
+        error(`The luwu-lsp binary in ./{build_dir_name}/luwu-lsp(.exe) is already running; rebuilding it now can crash any open editors. {
             if is_agentic_tool then
                 "Detected you are an AI agent; please inform the user to save their work, close any open editors, \z
                 or run seal rebuild.luau themselves to agree to the interactive prompt and override."
@@ -477,7 +519,7 @@ for _, target in targets do
     const spawned = process.spawn {
         program = "cmake",
         args = {
-            "--build", "build",
+            "--build", build_dir_name,
             "--target", target,
             "--config", if is_release then "Release" else "Debug",
             "-j", tostring(cpus // #targets),

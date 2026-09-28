@@ -1,6 +1,7 @@
 #include "Flags.hpp"
 #include "LSP/LanguageServer.hpp"
 #include "LSP/DocumentationParser.hpp"
+#include "LSP/EmbeddedResources.hpp"
 #include "Analyze/AnalyzeCli.hpp"
 #include "Analyze/CliConfigurationParser.hpp"
 #include "Luau/ExperimentalFlags.h"
@@ -139,13 +140,8 @@ int startLanguageServer(const argparse::ArgumentParser& program)
     // Luwu's own documentation goes in last so it wins over the entries the client supplied: those
     // come from upstream's database, where `require` is documented as taking a Roblox Instance and
     // Luwu's own libraries aren't documented at all.
-#ifdef LSP_LUWU_DOCS_PATH
     if (luwuFeaturesEnabled())
-    {
-        std::vector<std::string> luwuDocumentationFiles{LSP_LUWU_DOCS_PATH};
-        parseDocumentation(luwuDocumentationFiles, client.documentation, &client);
-    }
-#endif
+        parseDocumentationContents(embedded::luwuDocs(), "luwu_docs.json", client.documentation, &client);
 
     // Parse LSP Settings
     if (auto settingsPath = program.present<std::string>("--settings"))

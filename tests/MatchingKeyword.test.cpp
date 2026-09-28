@@ -1,8 +1,7 @@
 #include "doctest.h"
 #include "Fixture.h"
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 TEST_SUITE_BEGIN("MatchingKeyword");
 
@@ -248,7 +247,7 @@ TEST_CASE_FIXTURE(Fixture, "nested_blocks_match_the_right_end")
 
 TEST_CASE_FIXTURE(Fixture, "jumps_from_end_to_class")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ENABLE_NEW_SOLVER();
 
     checkJump(this, R"(
@@ -260,7 +259,7 @@ TEST_CASE_FIXTURE(Fixture, "jumps_from_end_to_class")
 
 TEST_CASE_FIXTURE(Fixture, "jumps_from_end_to_class_method")
 {
-    ScopedFastFlag sffs[] = {{FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ENABLE_NEW_SOLVER();
 
     checkJump(this, R"(

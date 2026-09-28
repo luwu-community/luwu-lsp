@@ -87,9 +87,8 @@ void registerFastFlagsCLI(std::unordered_map<std::string, std::string>& fastFlag
 }
 
 // Luwu's own language features (classes, default arguments, `none`, managed refs, ...) sit behind
-// `Luwu`-prefixed flags, plus the upstream `DebugLuau`-prefixed flags that gate class parsing and
-// runtime support. This is Luwu's language server, so they're all on unless the user asks for Luau
-// compatibility mode. Applied before user-provided flags, so an explicit `--flag:Name=false` (or
+// `Luwu`-prefixed flags. This is Luwu's language server, so they're all on unless the user asks for
+// Luau compatibility mode. Applied before user-provided flags, so an explicit `--flag:Name=false` (or
 // `luau-lsp.fflags.override`) still wins.
 static bool luwuFeaturesEnabled_ = true;
 
@@ -102,8 +101,6 @@ void applyLuwuFlags(bool luauCompatibilityMode)
 {
     luwuFeaturesEnabled_ = !luauCompatibilityMode;
 
-    static constexpr const char* kLuwuDebugFlags[] = {"DebugLuauUserDefinedClasses", "DebugLuauUserDefinedClassesRuntime"};
-
     const bool enabled = !luauCompatibilityMode;
 
     // The new type solver is required for essentially everything modern, Luwu classes included, so
@@ -113,19 +110,7 @@ void applyLuwuFlags(bool luauCompatibilityMode)
     for (Luau::FValue<bool>* flag = Luau::FValue<bool>::list; flag; flag = flag->next)
     {
         if (strncmp(flag->name, "Luwu", 4) == 0)
-        {
             flag->value = enabled;
-            continue;
-        }
-
-        for (const char* debugFlag : kLuwuDebugFlags)
-        {
-            if (strcmp(flag->name, debugFlag) == 0)
-            {
-                flag->value = enabled;
-                break;
-            }
-        }
     }
 }
 

@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "nlohmann/json.hpp"
@@ -16,6 +17,9 @@ const std::string kDocumentationBreaker = "\n----------\n";
 
 Luau::FunctionParameterDocumentation parseDocumentationParameter(const json& j);
 void parseDocumentation(const std::vector<std::string>& documentationFiles, Luau::DocumentationDatabase& database, const Client* client);
+/// Adds the entries of one documentation database, already read into memory, to `database`.
+/// `sourceName` names it in error messages.
+void parseDocumentationContents(std::string_view contents, const std::string& sourceName, Luau::DocumentationDatabase& database, const Client* client);
 
 /// Returns a markdown string of the provided documentation
 /// If we can't find any documentation for the given symbol, then we return nullopt

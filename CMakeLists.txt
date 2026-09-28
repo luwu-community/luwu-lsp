@@ -41,6 +41,25 @@ endif ()
 set(LSP_LUAU_PATH "${CMAKE_CURRENT_SOURCE_DIR}/luwu" CACHE PATH "Path to the Luau source tree to build against (defaults to the luwu submodule)")
 add_subdirectory(${LSP_LUAU_PATH} luwu)
 add_library(Luwu.LanguageServer STATIC)
+
+# Regenerated whenever one of the JSON files changes.
+# `|`-separated rather than a CMake list, which add_custom_command would split into separate arguments
+set(LSP_EMBEDDED_RESOURCES
+    "keywordHovers=${CMAKE_CURRENT_SOURCE_DIR}/keyword_hovers.json|luwuDocs=${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json")
+set(LSP_EMBEDDED_RESOURCES_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/EmbeddedResources.cpp")
+add_custom_command(
+    OUTPUT "${LSP_EMBEDDED_RESOURCES_SOURCE}"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DOUTPUT=${LSP_EMBEDDED_RESOURCES_SOURCE}"
+        "-DRESOURCES=${LSP_EMBEDDED_RESOURCES}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake"
+    DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/keyword_hovers.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json"
+    COMMENT "Embedding keyword_hovers.json and luwu_docs.json"
+    VERBATIM
+)
 add_executable(Luwu.LanguageServer.CLI)
 add_executable(Luwu.LanguageServer.Test)
 
@@ -54,6 +73,7 @@ target_sources(Luwu.LanguageServer PRIVATE
         src/Client.cpp
         src/DocumentationParser.cpp
         src/KeywordHovers.cpp
+        ${LSP_EMBEDDED_RESOURCES_SOURCE}
         src/LuauExt.cpp
         src/LuauFileUtils.cpp
         src/IostreamHelpers.cpp
@@ -206,8 +226,6 @@ target_compile_options(Luwu.LanguageServer PRIVATE ${LUAU_LSP_OPTIONS})
 target_compile_definitions(Luwu.LanguageServer PUBLIC
     LSP_VERSION="${LSP_VERSION}"
     LSP_NAME="${LSP_NAME}"
-    LSP_KEYWORD_HOVERS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/keyword_hovers.json"
-    LSP_LUWU_DOCS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json"
     $<$<BOOL:${LSP_BUILD_WITH_SENTRY}>:LSP_BUILD_WITH_SENTRY>
 )
 target_include_directories(Luwu.LanguageServer PUBLIC src/include)

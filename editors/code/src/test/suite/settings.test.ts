@@ -142,6 +142,22 @@ suite("Settings Test Suite", () => {
       );
     });
 
+    test("reads every section when configuration is a list", () => {
+      assert.deepStrictEqual(
+        settingKeys({
+          contributes: {
+            configuration: [
+              { properties: { "luwu.fileExtensions": {} } },
+              { properties: { "luau-lsp.fileExtensions": {} } },
+              { properties: { "luwu.ignoreGlobs": {} } },
+              { title: "no properties" },
+            ],
+          },
+        }),
+        ["fileExtensions", "ignoreGlobs"],
+      );
+    });
+
     test("returns nothing for a package.json without contributions", () => {
       assert.deepStrictEqual(settingKeys({}), []);
       assert.deepStrictEqual(settingKeys(undefined), []);

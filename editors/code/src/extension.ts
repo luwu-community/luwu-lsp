@@ -40,6 +40,7 @@ import {
 } from "./settings";
 
 import { registerLongBracketAutoClose } from "./longBracketAutoClose";
+import { registerLegacySettingsNotice } from "./legacySettingsNotice";
 
 import { registerRequireGraph } from "./requireGraph";
 import { registerMatchingKeyword } from "./matchingKeyword";
@@ -721,6 +722,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   registerConflictingExtensionCheck(context);
   registerLongBracketAutoClose(context);
+  registerLegacySettingsNotice(context);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("luwu.reloadServer", async () => {

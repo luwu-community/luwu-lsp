@@ -1,6 +1,8 @@
 #include "LSP/Workspace.hpp"
 
+#include <algorithm>
 #include <memory>
+#include <set>
 
 #include "LSP/Diagnostics.hpp"
 #include "Platform/LSPPlatform.hpp"
@@ -204,6 +206,10 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
 
     std::vector<Luau::ModuleName> dirtyFiles;
     std::vector<Uri> deletedFiles;
+    // Modules whose file is gone by the end of this batch. A file that is deleted and written
+    // again before we get to look -- which is what a test run's temporary files do -- must not be
+    // treated as deleted, so a later event for the same module takes it back out of the set.
+    std::set<Luau::ModuleName> deletedModules;
     bool pluginFileChanged = false;
 
     for (const auto& change : changes)
@@ -238,12 +244,39 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
             frontend.markDirty(moduleName, &dirtyFiles);
 
             if (change.type == lsp::FileChangeType::Deleted)
+            {
                 deletedFiles.push_back(change.uri);
+                deletedModules.insert(moduleName);
+            }
+            else
+            {
+                deletedModules.erase(moduleName);
+            }
         }
     }
 
     if (pluginFileChanged)
         reloadPlugins();
+
+    // A deleted file's module has to actually leave the frontend. Marking it dirty only says
+    // "read it again", so on its own the module lingers in sourceNodes for the rest of the
+    // session: still offered by auto-imports, still a node in the require graph, still a name we
+    // hand back to the frontend to re-read every time anything nearby changes. clearModules marks
+    // the modules that required it dirty as it goes, so they re-check and report the require that
+    // is now broken.
+    if (!deletedModules.empty())
+    {
+        frontend.clearModules({deletedModules.begin(), deletedModules.end()});
+
+        dirtyFiles.erase(
+            std::remove_if(dirtyFiles.begin(), dirtyFiles.end(),
+                [&deletedModules](const Luau::ModuleName& moduleName)
+                {
+                    return deletedModules.count(moduleName) > 0;
+                }),
+            dirtyFiles.end()
+        );
+    }
 
     // Parse require graph for files if indexing enable
     if (config.index.enabled && appliedFirstTimeConfiguration)

@@ -5,6 +5,8 @@
 #include "LSP/IostreamHelpers.hpp"
 #include "Platform/StringRequireAutoImporter.hpp"
 
+LUAU_FASTFLAG(LuwuDestructuring)
+
 static std::optional<lsp::CompletionItem> getItem(const std::vector<lsp::CompletionItem>& items, const std::string& label)
 {
     for (const auto& item : items)
@@ -2228,6 +2230,41 @@ TEST_CASE_FIXTURE(RobloxFixture, "string_requires_server_can_see_server")
 
     CHECK(getItem(result, "ServerStorageModule"));
     CHECK(getItem(result, "SharedModule"));
+}
+
+// Luwu Destructuring (rfcs/destructuring.md): a pattern's field keys complete the value's properties; they are
+// never an expression, so no imports are offered there
+TEST_CASE_FIXTURE(Fixture, "no_auto_imports_inside_a_destructuring_pattern")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    client->globalConfig.completion.imports.enabled = true;
+
+    newDocument("foo.luau", "return {}");
+
+    auto [source, marker] = sourceWithMarker(R"(
+        local value = { alpha = 1, beta = "b" }
+        local .{alpha, |} = value
+    )");
+    auto uri = newDocument("user.luau", source);
+
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    auto result = workspace.completion(params, nullptr);
+
+    CHECK(getItem(result, "beta"));
+    CHECK(!getItem(result, "alpha"));
+    CHECK(!getItem(result, "foo"));
+
+    // The same file outside the pattern does offer the import, so the check above isn't vacuous
+    auto [plainSource, plainMarker] = sourceWithMarker(R"(
+        local value = { alpha = 1, beta = "b" }
+        local x = |
+    )");
+    auto plainUri = newDocument("plain.luau", plainSource);
+    params.textDocument = lsp::TextDocumentIdentifier{plainUri};
+    params.position = plainMarker;
+    CHECK(getItem(workspace.completion(params, nullptr), "foo"));
 }
 
 TEST_SUITE_END();
