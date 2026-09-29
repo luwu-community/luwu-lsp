@@ -37,7 +37,7 @@ if not check_seal_semver("0.8.1") then
     (got seal semver {if _RUNTIME then _RUNTIME.version.display else _VERSION})`)
 end
 
-const generate_keywords = require("./scripts/generate_keywords")
+const generate_hovers = require("./scripts/generate_hovers")
 
 const eol4 = "\n    "
 const eol2 = "\n  "
@@ -182,6 +182,12 @@ const function should_reconfigure(luwu_path: string)
     if current_luwu_path ~= luwu_path then
         return true
     end
+    -- switching between --release (warnings aren't errors) and a dev build (they are)
+    const werror_splits = str.split(content, "LSP_WERROR:BOOL=")
+    const current_werror = if werror_splits[2] then str.splitfront(werror_splits[2], "\n", 1)[1] else nil
+    if current_werror ~= (if is_release then "OFF" else "ON") then
+        return true
+    end
     return false
 end
 
@@ -206,6 +212,9 @@ const function clean_and_configure(luwu_path: string)
         "..",
         "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
         `-DLSP_LUAU_PATH={luwu_path}`,
+        -- people running --release just want a working binary, so a warning their compiler raises
+        -- and ours doesn't (e.g. Ubuntu gcc's default _FORTIFY_SOURCE) is logged, not fatal
+        if is_release then "-DLSP_WERROR=OFF" else "-DLSP_WERROR=ON",
     }
     if is_static then
         -- glibc, libstdc++ and libgcc all baked in. Safe because nothing here uses NSS
@@ -484,7 +493,7 @@ if should_reconfigure(luwu_path) then
 end
 
 -- update hover docs
-generate_keywords()
+generate_hovers()
 
 const targets = get_targets()
 --- Gives us a slightly better chance at not crashing a running editor
@@ -533,13 +542,34 @@ for i = 1, #targets do
 end
 
 const is_tty = terminal.tty()
-const some_errors = {}
+--- everything the compilers wrote to stderr, plus diagnostic lines from stdout (ninja writes them there)
+const diagnostics: { string } = {}
+--- set on the first problem that fails the build, so we can kill every target right away
+--- instead of waiting for the jobs already in flight
+local stop_now = false
+
+const function is_error(text: string): boolean
+    return string.find(text, ": error", 1, true) ~= nil or string.find(text, ": fatal error", 1, true) ~= nil
+end
+
+const function is_diagnostic_line(line: string): boolean
+    return string.find(line, ": warning", 1, true) ~= nil or is_error(line)
+end
+
+const function record_diagnostics(text: string)
+    table.insert(diagnostics, text)
+    -- dev builds fail on anything the compiler says (warnings are errors there);
+    -- --release only on errors
+    if not is_release or is_error(text) then
+        stop_now = true
+    end
+end
 
 const size = terminal.size()
 
 --- keep track of stdout history because ninja writes errors to stdout instead of stderr
 const history: { string } = {}
-while children:any_alive() and #some_errors == 0 and not children:any_failed() do
+while children:any_alive() and not children:any_failed() and not stop_now do
     for index, child in children do
         local content = child.stdout:read_to("\n", false, time.milliseconds(1))
         if content then
@@ -548,6 +578,9 @@ while children:any_alive() and #some_errors == 0 and not children:any_failed() d
             content = str.replace(content, "CMakeFiles/Luwu.LanguageServer.dir", "")
             content = str.replace(content, "luwu/CMakeFiles", "")
             table.insert(history, content)
+            if is_diagnostic_line(content) then
+                record_diagnostics(content)
+            end
             if is_tty then
                 -- make sure fits in terminal
                 if str.width(content) > size.x then
@@ -564,33 +597,69 @@ while children:any_alive() and #some_errors == 0 and not children:any_failed() d
             end
         end
         -- note ninja (one of cmake's possible underlying build systems) in its infinite wisdom writes errors to stdout instead of stderr
-        -- not caught by this but caught by history + any_failed (hopefully it gives failing status code)
+        -- those are picked out of stdout above
         const errors = child.stderr:read(nil, 0)
         if errors then
-            table.insert(some_errors, errors)
-            const more_errors = child.stderr:read(nil, time.seconds(2))
-            if more_errors then
-                table.insert(some_errors, more_errors)
+            record_diagnostics(errors)
+            if stop_now then
+                -- give the compiler a moment to finish printing the whole diagnostic
+                const more_errors = child.stderr:read(nil, time.seconds(2))
+                if more_errors then
+                    record_diagnostics(more_errors)
+                end
+                break
             end
         end
     end
 end
 
-if #some_errors > 0 or children:any_failed() then
+-- whatever the targets wrote after the loop's last read
+for _, child in children do
+    const rest_out = child.stdout:read(nil, 0)
+    if rest_out then
+        for _, line in str.split(rest_out, "\n") do
+            table.insert(history, line)
+            if is_diagnostic_line(line) then
+                record_diagnostics(line)
+            end
+        end
+    end
+    const rest_err = child.stderr:read(nil, 0)
+    if rest_err then
+        record_diagnostics(rest_err)
+    end
+end
+
+if stop_now or children:any_failed() then
     -- uh oh
     children:abort_all()
-    if #some_errors > 0 then
-        const build_errors = table.concat(some_errors, "\n")
+    if #diagnostics > 0 then
+        const build_errors = table.concat(diagnostics, "\n")
         fs.writefile("./build_errors.log", build_errors)
         output.ewriteln(build_errors)
         output.ewriteln(`If this failure looks like it's from stale artifacts, try clearing the build directory by running this script with --clean.`)
-        error(`At least one target threw an error or warning (printed above and saved to file ./build_errors.log)`)
+        if is_release then
+            error(`At least one target threw an error (printed above and saved to file ./build_errors.log)`)
+        else
+            error(
+                `At least one target threw an error or warning (printed above and saved to file ./build_errors.log).\n\z
+                If you just want a working binary, run with --release, which logs warnings without failing on them.`
+            )
+        end
     else
         output.ewriteln(`If this failure looks like it's from stale artifacts, try clearing the build directory by running this script with --clean.`)
         const build_history = table.concat(history, "\n")
         fs.writefile("./build_errors.log", build_history)
         error("At least one target exited with a failing status code (without writing to stderr)..., dumping stdout history to ./build_errors.log")
     end
+end
+
+if #diagnostics > 0 then
+    -- only --release gets here with diagnostics: warnings that didn't stop the build but are worth seeing
+    const build_warnings = table.concat(diagnostics, "\n")
+    fs.writefile("./build_errors.log", build_warnings)
+    output.ewriteln(build_warnings)
+    output.ewriteln("The build succeeded with the warnings above (saved to ./build_errors.log); --release doesn't fail on warnings.")
 end
 
 print("Rebuilt luwu lsp binary! Please reload your current editor")

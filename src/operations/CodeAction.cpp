@@ -262,7 +262,9 @@ Luau::Position classMemberQualifierPosition(const Luau::AstClassMember& member)
     if (const auto* prop = member.get_if<Luau::AstClassProperty>())
         return prop->constLocation ? prop->constLocation->begin : prop->nameLocation.begin;
 
-    return member.get_if<Luau::AstClassMethod>()->keywordLocation.begin;
+    // Luwu Traits (rfcs/classes/traits.md): `final` follows the access specifier, so the specifier goes in front of it
+    const auto* method = member.get_if<Luau::AstClassMethod>();
+    return method->finalLocation ? method->finalLocation->begin : method->keywordLocation.begin;
 }
 
 ClassAccessSpecifiers computeClassAccessSpecifiers(Luau::AstStatClass* classStat)

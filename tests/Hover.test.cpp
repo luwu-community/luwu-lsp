@@ -1,7 +1,7 @@
 #include "doctest.h"
 #include "Fixture.h"
 #include "LSP/DocumentationParser.hpp"
-#include "LSP/KeywordHovers.hpp"
+#include "LSP/Hovers.hpp"
 #include "Flags.hpp"
 
 LUAU_FASTFLAG(LuwuClasses)
@@ -920,7 +920,7 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_
 {
     // Regression test: `export class Foo ... end` used to record the location of `export` (not
     // `class`) as AstStatClass::keywordLocation, so hovering the literal `class` keyword found no
-    // match here and hovering `export` matched against text that isn't in keyword_hovers.json --
+    // match here and hovering `export` matched against text that isn't in hovers.json --
     // in both cases, nothing showed up. `export class` is documented as the one thing it is, so
     // either half of it hovers to the same docs.
     ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};

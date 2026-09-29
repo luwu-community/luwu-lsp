@@ -3,6 +3,7 @@
     "documentation": "Refinement and runtime reflection of Luwu classes and objects.",
     "keys": {
       "fields": "@luau/global/class.fields",
+      "implements": "@luau/global/class.implements",
       "isinstance": "@luau/global/class.isinstance",
       "name": "@luau/global/class.name",
       "of": "@luau/global/class.of"
@@ -29,6 +30,31 @@
   },
   "@luau/global/class.fields/returns/1": {
     "documentation": "Whether the map returned is a complete representation of the object's fields; this will be `true` if the class only has public fields and `false` if the class has any private fields."
+  },
+  "@luau/global/class.implements": {
+    "documentation": "Returns `true` if `o` is an object of a class that implements trait `t`, whether the class lists\n`t` after `implements` or gets it through another trait that `needs` it.\n\nIf `o` is not an object, returns `false`. Raises a runtime error if `t` is a class rather than a trait\n(use `class.isinstance` for classes).\n\nIn the type system, this refines `o` to the trait:\n\n```luwu\nlocal function describe(value: unknown): string?\n    if class.implements(value, Named) then\n        return value.name\n    end\n    return nil\nend\n```\n",
+    "params": [
+      {
+        "documentation": "@luau/global/class.implements/params/0",
+        "name": "o"
+      },
+      {
+        "documentation": "@luau/global/class.implements/params/1",
+        "name": "t"
+      }
+    ],
+    "returns": [
+      "@luau/global/class.implements/returns/0"
+    ]
+  },
+  "@luau/global/class.implements/params/0": {
+    "documentation": "The value you want to test. Anything is accepted here, passing a non-object just causes this function to return `false`."
+  },
+  "@luau/global/class.implements/params/1": {
+    "documentation": "The trait you want to check against. Must be a trait."
+  },
+  "@luau/global/class.implements/returns/0": {
+    "documentation": "Whether the object `o`'s class implements trait `t`."
   },
   "@luau/global/class.isinstance": {
     "documentation": "Returns `true` if `o` is an object of class `c`.\n\nIf `o` is not an object, returns `false`. Raises a runtime error if `c` is not a `class`.\n\nIn the type system, you can use this to refine upon an object that could be of one or more classes:\n\n```luwu\ntype Animal = Cat | Dog\nclass Cat(name: string, age: number, meows = 2) end\nclass Dog(name: string, age: number, barks = 3) end\n\nconst animal: Animal = get_animal()\nif class.isinstance(animal, Cat) then\n    print(`found a Cat! {animal.name} with {animal.meows} meows`)\nelseif class.isinstance(animal, Dog) then\n    print(`found a Dog! {animal.name} with {animal.barks} barks`)\nend\n```\n\nSince Luwu doesn't support is-a inheritance relationships between classes, you can treat\nthis as an exact check that an object was instantiated from class `c`.\n",

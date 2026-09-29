@@ -7,13 +7,13 @@ format.defaults {
 }
 
 const function regen()
-    const markdown_path = fs.path.join(script:parent(), "keywords.md")
+    const markdown_path = fs.path.join(script:parent(), "hovers.md")
     const commstart = "<!-- "
     const commend = " -->\n"
     const contents = fs.readfile(markdown_path)
     const splits = str.splitaround(contents, commstart, commend)
     
-    const keywords = json.readfile("./keyword_hovers.json") :: { [string]: string }
+    const keywords = json.readfile("./hovers.json") :: { [string]: string }
     
     local last_was_commstart = false
     local last_was_commend = false
@@ -52,7 +52,7 @@ const function regen()
     -- print(keywords)
     -- sorted: Luau table iteration order isn't stable between runs, so without this every
     -- regeneration reshuffles the keys and shows up as a diff of the whole file
-    json.writefile("./keyword_hovers.json", keywords, { sorted = true })
+    json.writefile("./hovers.json", keywords, { sorted = true })
 end
 
 if script:path() == script.entry_path then

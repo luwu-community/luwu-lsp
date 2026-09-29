@@ -1,4 +1,4 @@
-#include "LSP/KeywordHovers.hpp"
+#include "LSP/Hovers.hpp"
 #include "LSP/EmbeddedResources.hpp"
 
 #include <unordered_map>
@@ -16,7 +16,7 @@ const std::unordered_map<std::string, std::string>& keywordHoverDatabase()
     {
         std::unordered_map<std::string, std::string> result;
 
-        json data = json::parse(embedded::keywordHovers(), /* cb= */ nullptr, /* allow_exceptions= */ false);
+        json data = json::parse(embedded::hovers(), /* cb= */ nullptr, /* allow_exceptions= */ false);
         if (data.is_object())
             for (const auto& [keyword, docs] : data.items())
                 if (docs.is_string())
@@ -63,8 +63,19 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
     // back to the generic node-based checks below.
     for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
     {
-        if (auto classStat = (*it)->as<Luau::AstStatClass>())
+        // Luwu Declare Statements: a declared class's members and constructor live on its shape
+        Luau::AstStatClass* classStat = (*it)->as<Luau::AstStatClass>();
+        if (auto declaredClass = (*it)->as<Luau::AstStatDeclareClass>())
+            classStat = declaredClass->shape;
+
+        if (classStat)
         {
+            // Luwu Traits (rfcs/classes/traits.md): the `implements` and `needs` lists
+            if (classStat->implementsLocation && contains(*classStat->implementsLocation))
+                return match("implements", *classStat->implementsLocation);
+            if (classStat->needsLocation && contains(*classStat->needsLocation))
+                return match("needs", *classStat->needsLocation);
+
             if (const auto* ctor = classStat->primaryConstructor)
             {
                 // An access specifier written between the class's name and its primary
@@ -99,6 +110,8 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
             {
                 if (auto prop = member.get_if<Luau::AstClassProperty>())
                 {
+                    if (prop->expectLocation && contains(*prop->expectLocation))
+                        return match("expect", *prop->expectLocation);
                     if (prop->qualifierLocation && contains(*prop->qualifierLocation))
                         return match(
                             prop->visibility == Luau::AstClassMemberVisibility::Private ? "private" : "public", *prop->qualifierLocation
@@ -114,6 +127,10 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
                         return match(
                             method->visibility == Luau::AstClassMemberVisibility::Private ? "private" : "public", *method->qualifierLocation
                         );
+                    if (method->expectLocation && contains(*method->expectLocation))
+                        return match("expect", *method->expectLocation);
+                    if (method->finalLocation && contains(*method->finalLocation))
+                        return match("final", *method->finalLocation);
                     if (contains(method->keywordLocation))
                         return match("function", method->keywordLocation);
                 }
@@ -245,12 +262,22 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
     }
     else if (auto stat = node->as<Luau::AstStatDeclareExternType>())
     {
-        if (contains(stat->declareLocation))
-            return match("declare", stat->declareLocation);
-        if (contains(stat->classLocation))
-            return match("class", stat->classLocation);
+        // Luwu: `[export] declare extern type` is documented as one keyword. `classLocation` is the `type` token
+        // (`class` only in upstream's legacy spelling, which Luwu rejects), so the words run from `declare` (or
+        // `export`) to it.
+        Luau::Position keywordsBegin = stat->exportLocation ? stat->exportLocation->begin : stat->declareLocation.begin;
+        Luau::Location keywords(keywordsBegin, stat->classLocation.end);
+        if (contains(keywords))
+            return match("declare_extern_type", keywords);
         if (stat->extendsLocation && contains(*stat->extendsLocation))
             return match("extends", *stat->extendsLocation);
+    }
+    else if (auto stat = node->as<Luau::AstStatDeclareClass>())
+    {
+        if (contains(stat->declareLocation))
+            return match("declare", stat->declareLocation);
+        if (contains(stat->shape->keywordLocation))
+            return match("class", stat->shape->keywordLocation);
     }
     else if (auto stat = node->as<Luau::AstStatClass>())
     {
@@ -262,11 +289,11 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
             Luau::Location exportLocation(stat->location.begin, Luau::Position(stat->location.begin.line, stat->location.begin.column + 6));
             Luau::Location combined(exportLocation.begin, stat->keywordLocation.end);
             if (contains(exportLocation) || contains(stat->keywordLocation))
-                return match("export_class", combined);
+                return match(stat->isTrait ? "export_trait" : "export_class", combined);
         }
         else if (contains(stat->keywordLocation))
         {
-            return match("class", stat->keywordLocation);
+            return match(stat->isTrait ? "trait" : "class", stat->keywordLocation);
         }
     }
     else if (node->is<Luau::AstExprConstantNil>())

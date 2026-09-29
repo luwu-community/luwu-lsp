@@ -66,6 +66,9 @@
       "include": "#private-declaration"
     },
     {
+      "include": "#final-declaration"
+    },
+    {
       "include": "#for-loop"
     },
     {
@@ -110,7 +113,8 @@
   ],
   "repository": {
     "function-definition": {
-      "begin": "\\b(?:(export)\\s+)?(?:(public)\\s+|(private)\\s+)?(?:(local)\\s+|(const)\\s+)?(function)\\b(?![,:])",
+      "comment": "A function definition. Luwu Traits: a trait's function may be `final` after its access specifier -- `public final function on_event(self)`.",
+      "begin": "\\b(?:(export)\\s+)?(?:(public)\\s+|(private)\\s+)?(?:(final)\\s+)?(?:(local)\\s+|(const)\\s+)?(function)\\b(?![,:])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luwu"
@@ -122,12 +126,15 @@
           "name": "storage.modifier.access.luwu"
         },
         "4": {
-          "name": "storage.modifier.local.luwu"
+          "name": "storage.modifier.final.luwu"
         },
         "5": {
-          "name": "storage.modifier.const.luwu"
+          "name": "storage.modifier.local.luwu"
         },
         "6": {
+          "name": "storage.modifier.const.luwu"
+        },
+        "7": {
           "name": "keyword.control.luwu"
         }
       },
@@ -157,6 +164,9 @@
           "patterns": [
             {
               "include": "#comment"
+            },
+            {
+              "include": "#attribute"
             },
             {
               "match": "\\.\\.\\.",
@@ -350,19 +360,22 @@
       ]
     },
     "extern-type-declaration": {
-      "comment": "`declare extern type Name<T> extends Base with ... end` from definition files. `declare` and `with` are optional here only so the `extern type Name ... end` summaries shown in hovers highlight too -- they are required in real Luau source.",
-      "begin": "(?<![^.]\\.|:)\\b(?:(declare)\\s+)?(extern)\\s+(type)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "comment": "`[export] declare extern type Name<T> extends Base [with] ... end`, from a definition file or (Luwu) a source file, where `export` makes it importable and `with` is optional. `declare` is optional here only so the `extern type Name ... end` summaries shown in hovers highlight too.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(?:(declare)\\s+)?(extern)\\s+(type)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
       "beginCaptures": {
         "1": {
-          "name": "storage.modifier.signature.luwu"
+          "name": "storage.modifier.visibility.luwu"
         },
         "2": {
-          "name": "storage.modifier.extern.luwu"
+          "name": "storage.modifier.signature.luwu"
         },
         "3": {
-          "name": "storage.type.luwu"
+          "name": "storage.modifier.extern.luwu"
         },
         "4": {
+          "name": "storage.type.luwu"
+        },
+        "5": {
           "name": "entity.name.type.luwu"
         }
       },
@@ -435,6 +448,9 @@
               "include": "#comment"
             },
             {
+              "include": "#attribute"
+            },
+            {
               "match": "\\.\\.\\.",
               "name": "variable.parameter.function.varargs.luwu"
             },
@@ -478,8 +494,8 @@
       ]
     },
     "declare-function": {
-      "comment": "`declare function name(params): Return` -- a function with no body in a definition file. Anchored to the start of the line so an indented `declare` inside a trait body stays unhighlighted: traits spell this `expect function`.",
-      "begin": "^(declare)\\s+(function)\\b",
+      "comment": "`declare function name(params): Return` -- a function with no body, in a definition file or (Luwu) a source file, where it may be indented inside a `do` block. Only at the start of a line: traits spell a required function `expect function`.",
+      "begin": "^\\s*(declare)\\s+(function)\\b",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.signature.luwu"
@@ -519,8 +535,8 @@
       ]
     },
     "declare-variable": {
-      "comment": "`declare name: Type` -- a global from a definition file. Anchored to the start of the line so an indented `declare` inside a trait body stays unhighlighted: traits spell this `expect name: Type`.",
-      "match": "^(declare)\\s+(?!(?:function|extern|class)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b(?=\\s*:)",
+      "comment": "`declare name: Type` -- a global, from a definition file or (Luwu) a source file, where it may be indented inside a `do` block. Luwu lets a declared value leave its type out: `declare name`. Only at the start of a line: traits spell a required field `expect name: Type`.",
+      "match": "^\\s*(declare)\\s+(?!(?:function|extern|class)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b(?=\\s*(?::|;|--|$))",
       "captures": {
         "1": {
           "name": "storage.modifier.signature.luwu"
@@ -549,19 +565,25 @@
       }
     },
     "class-declaration": {
-      "comment": "A class declaration. `declare` in front marks a class that exists but has no body here -- an embedder's or a definition file's class -- and may be combined with `export`.",
-      "begin": "(?<![^.]\\.|:)\\b(?:(declare)\\s+)?(?:(export)\\s+)?(class)\\s+(?:([\\w]+))\\b",
+      "comment": "A class declaration. `declare class type` marks a class that exists but has no body here -- an embedder's or a definition file's class -- and may be exported: `export declare class type Name`.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(?:(declare)\\s+(class)\\s+(?:(type)\\s+)?|(class)\\s+)(?:([\\w]+))\\b",
       "beginCaptures": {
         "1": {
-          "name": "storage.modifier.signature.luwu"
+          "name": "storage.modifier.visibility.luwu"
         },
         "2": {
-          "name": "storage.modifier.visibility.luwu"
+          "name": "storage.modifier.signature.luwu"
         },
         "3": {
           "name": "keyword.control.luwu"
         },
         "4": {
+          "name": "keyword.control.luwu"
+        },
+        "5": {
+          "name": "keyword.control.luwu"
+        },
+        "6": {
           "name": "entity.name.type.luwu"
         }
       },
@@ -596,6 +618,9 @@
           "patterns": [
             {
               "include": "#comment"
+            },
+            {
+              "include": "#attribute"
             },
             {
               "comment": "Luwu Classes: a primary constructor parameter may carry the access specifier and `const` modifier of the field it implicitly declares, Kotlin-style -- `class SshKey private (public const public_key: string)`. These are only qualifiers when another name follows, so a parameter may still be named `public`, `private` or `const`.",
@@ -671,6 +696,9 @@
           "patterns": [
             {
               "include": "#comment"
+            },
+            {
+              "include": "#attribute"
             },
             {
               "match": "\\b(const)\\b",
@@ -753,19 +781,25 @@
       ]
     },
     "trait-declaration": {
-      "comment": "A trait declaration. `declare` in front marks a trait that exists but has no body here -- an embedder's or a definition file's trait -- and may be combined with `export`.",
-      "begin": "(?<![^.]\\.|:)\\b(?:(declare)\\s+)?(?:(export)\\s+)?(trait)\\s+(?:([\\w]+))\\b",
+      "comment": "A trait declaration. `declare trait type` marks a trait that exists but has no body here -- an embedder's or a definition file's trait -- and may be exported: `export declare trait type Name`.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(?:(declare)\\s+(trait)\\s+(?:(type)\\s+)?|(trait)\\s+)(?:([\\w]+))\\b",
       "beginCaptures": {
         "1": {
-          "name": "storage.modifier.signature.luwu"
+          "name": "storage.modifier.visibility.luwu"
         },
         "2": {
-          "name": "storage.modifier.visibility.luwu"
+          "name": "storage.modifier.signature.luwu"
         },
         "3": {
           "name": "keyword.control.luwu"
         },
         "4": {
+          "name": "keyword.control.luwu"
+        },
+        "5": {
+          "name": "keyword.control.luwu"
+        },
+        "6": {
           "name": "entity.name.type.luwu"
         }
       },
@@ -800,6 +834,9 @@
           "patterns": [
             {
               "include": "#comment"
+            },
+            {
+              "include": "#attribute"
             },
             {
               "comment": "Luwu Classes: a primary constructor parameter may carry the access specifier and `const` modifier of the field it implicitly declares, Kotlin-style -- `class SshKey private (public const public_key: string)`. These are only qualifiers when another name follows, so a parameter may still be named `public`, `private` or `const`.",
@@ -1049,13 +1086,16 @@
       ]
     },
     "public-declaration": {
-      "begin": "\\b(public)\\b(?:\\s+(const)\\b)?",
+      "begin": "\\b(public)\\b(?:\\s+(final)\\b)?(?:\\s+(const)\\b)?",
       "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.access.luwu"
         },
         "2": {
+          "name": "storage.modifier.final.luwu"
+        },
+        "3": {
           "name": "storage.modifier.const.luwu"
         }
       },
@@ -1091,13 +1131,16 @@
       ]
     },
     "private-declaration": {
-      "begin": "\\b(private)\\b(?:\\s+(const)\\b)?",
+      "begin": "\\b(private)\\b(?:\\s+(final)\\b)?(?:\\s+(const)\\b)?",
       "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.access.luwu"
         },
         "2": {
+          "name": "storage.modifier.final.luwu"
+        },
+        "3": {
           "name": "storage.modifier.const.luwu"
         }
       },
@@ -1756,6 +1799,9 @@
               "include": "#comment"
             },
             {
+              "include": "#attribute"
+            },
+            {
               "match": "\\.\\.\\.",
               "name": "variable.parameter.function.varargs.luwu"
             },
@@ -1840,6 +1886,9 @@
       "patterns": [
         {
           "include": "#comment"
+        },
+        {
+          "include": "#attribute"
         },
         {
           "include": "#string"
@@ -1978,7 +2027,65 @@
       ]
     },
     "attribute": {
+      "comment": "An attribute, bare (`@native`) or as a bracketed list (`@[deprecated { use = \"dog\" }, native]`). Only the bracketed form takes arguments (rfcs/attributes-for-types-variables-fields-classes.md). Luwu allows attributes in front of statements, table and table type fields, class members and parameters.",
       "patterns": [
+        {
+          "name": "meta.attribute.luwu",
+          "begin": "(@)(\\[)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.attribute.luwu"
+            },
+            "2": {
+              "name": "punctuation.definition.attribute.begin.luwu"
+            }
+          },
+          "end": "(\\])",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.attribute.end.luwu"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comment"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.attribute.luwu"
+            },
+            {
+              "comment": "One entry: the attribute's name, then its literal arguments -- a string, a table or a parenthesized list.",
+              "begin": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+              "beginCaptures": {
+                "1": {
+                  "name": "storage.type.attribute.luwu"
+                }
+              },
+              "end": "(?=[,\\]])",
+              "patterns": [
+                {
+                  "include": "#comment"
+                },
+                {
+                  "include": "#string"
+                },
+                {
+                  "include": "#number"
+                },
+                {
+                  "include": "#language_constant"
+                },
+                {
+                  "include": "#table"
+                },
+                {
+                  "include": "#parentheses"
+                }
+              ]
+            }
+          ]
+        },
         {
           "name": "meta.attribute.luwu",
           "match": "(@)([a-zA-Z_][a-zA-Z0-9_]*)",
@@ -1990,6 +2097,46 @@
               "name": "storage.type.attribute.luwu"
             }
           }
+        }
+      ]
+    },
+    "final-declaration": {
+      "comment": "Luwu Traits: `final name` -- a trait field an implementing class can't redefine, without an access specifier. Only a modifier when a field name follows it, so `final` still works as an ordinary name. The qualified forms are in #public-declaration, #private-declaration and #function-definition.",
+      "begin": "\\b(final)\\b(?=\\s+(?!(?:and|or|not|then|do|end|else|elseif|in|until|function)\\b)[a-zA-Z_])",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.final.luwu"
+        }
+      },
+      "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#attribute"
+        },
+        {
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.type.luwu"
+            }
+          },
+          "end": "(?=\\s*[=;,])|^(?!\\s*[|&])",
+          "patterns": [
+            {
+              "include": "#type_literal"
+            }
+          ]
+        },
+        {
+          "name": "variable.other.constant.luwu",
+          "match": "\\b([A-Z_][A-Z0-9_]*)\\b"
+        },
+        {
+          "name": "variable.other.readwrite.luwu",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b"
         }
       ]
     }

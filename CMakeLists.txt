@@ -40,12 +40,19 @@ endif ()
 
 set(LSP_LUAU_PATH "${CMAKE_CURRENT_SOURCE_DIR}/luwu" CACHE PATH "Path to the Luau source tree to build against (defaults to the luwu submodule)")
 add_subdirectory(${LSP_LUAU_PATH} luwu)
+# luwu renamed its CMake targets from Luau.* to Luwu.*; a luwu checkout from before that (an older
+# ./luwu submodule) still has the old names
+if (TARGET Luwu.Analysis)
+    set(LUWU_TARGET_PREFIX Luwu)
+else ()
+    set(LUWU_TARGET_PREFIX Luau)
+endif ()
 add_library(Luwu.LanguageServer STATIC)
 
 # Regenerated whenever one of the JSON files changes.
 # `|`-separated rather than a CMake list, which add_custom_command would split into separate arguments
 set(LSP_EMBEDDED_RESOURCES
-    "keywordHovers=${CMAKE_CURRENT_SOURCE_DIR}/keyword_hovers.json|luwuDocs=${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json")
+    "hovers=${CMAKE_CURRENT_SOURCE_DIR}/hovers.json|luwuDocs=${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json")
 set(LSP_EMBEDDED_RESOURCES_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/EmbeddedResources.cpp")
 add_custom_command(
     OUTPUT "${LSP_EMBEDDED_RESOURCES_SOURCE}"
@@ -55,9 +62,9 @@ add_custom_command(
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake"
     DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake"
-        "${CMAKE_CURRENT_SOURCE_DIR}/keyword_hovers.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hovers.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/luwu_docs.json"
-    COMMENT "Embedding keyword_hovers.json and luwu_docs.json"
+    COMMENT "Embedding hovers.json and luwu_docs.json"
     VERBATIM
 )
 add_executable(Luwu.LanguageServer.CLI)
@@ -72,7 +79,7 @@ target_sources(Luwu.LanguageServer PRIVATE
         src/TextDocument.cpp
         src/Client.cpp
         src/DocumentationParser.cpp
-        src/KeywordHovers.cpp
+        src/Hovers.cpp
         ${LSP_EMBEDDED_RESOURCES_SOURCE}
         src/LuauExt.cpp
         src/LuauFileUtils.cpp
@@ -178,7 +185,7 @@ target_sources(Luwu.LanguageServer.Test PRIVATE
         src/AnalyzeCli.cpp # For testing
 )
 
-# TODO: Set Luau.Analysis at O2 to speed up debugging
+# TODO: Set luwu's Analysis target at O2 to speed up debugging
 if (MSVC)
     list(APPEND LUAU_LSP_OPTIONS /W3 /D_CRT_SECURE_NO_WARNINGS /bigobj)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -207,7 +214,7 @@ if (LSP_BUILD_ASAN)
 
     list(APPEND LUAU_LSP_OPTIONS ${ASAN_FLAG})
 
-    set(LUAU_ASAN_TARGETS Luau.Ast Luau.Analysis Luau.Compiler Luau.Config Luau.VM Luau.CodeGen Luau.Common)
+    set(LUAU_ASAN_TARGETS ${LUWU_TARGET_PREFIX}.Ast ${LUWU_TARGET_PREFIX}.Analysis ${LUWU_TARGET_PREFIX}.Compiler ${LUWU_TARGET_PREFIX}.Config ${LUWU_TARGET_PREFIX}.VM ${LUWU_TARGET_PREFIX}.CodeGen ${LUWU_TARGET_PREFIX}.Common)
     foreach (TARGET_NAME IN LISTS LUAU_ASAN_TARGETS)
         target_compile_options(${TARGET_NAME} PRIVATE ${ASAN_FLAG})
     endforeach ()
@@ -230,19 +237,19 @@ target_compile_definitions(Luwu.LanguageServer PUBLIC
 )
 target_include_directories(Luwu.LanguageServer PUBLIC src/include)
 target_include_directories(Luwu.LanguageServer SYSTEM PUBLIC ${EXTERN_INCLUDES})
-target_link_libraries(Luwu.LanguageServer PRIVATE Luau.Ast Luau.Analysis Luau.Compiler Luau.CodeGen)
-target_link_libraries(Luwu.LanguageServer PUBLIC Luau.VM)
+target_link_libraries(Luwu.LanguageServer PRIVATE ${LUWU_TARGET_PREFIX}.Ast ${LUWU_TARGET_PREFIX}.Analysis ${LUWU_TARGET_PREFIX}.Compiler ${LUWU_TARGET_PREFIX}.CodeGen)
+target_link_libraries(Luwu.LanguageServer PUBLIC ${LUWU_TARGET_PREFIX}.VM)
 
 set_target_properties(Luwu.LanguageServer.CLI PROPERTIES OUTPUT_NAME luwu-lsp)
 target_compile_options(Luwu.LanguageServer.CLI PRIVATE ${LUAU_LSP_OPTIONS})
 target_include_directories(Luwu.LanguageServer.CLI PRIVATE src/include)
 target_include_directories(Luwu.LanguageServer.CLI SYSTEM PRIVATE ${EXTERN_INCLUDES})
-target_link_libraries(Luwu.LanguageServer.CLI PRIVATE Luwu.LanguageServer Luau.Analysis)
+target_link_libraries(Luwu.LanguageServer.CLI PRIVATE Luwu.LanguageServer ${LUWU_TARGET_PREFIX}.Analysis)
 
 target_compile_options(Luwu.LanguageServer.Test PRIVATE ${LUAU_LSP_OPTIONS})
 target_include_directories(Luwu.LanguageServer.Test PRIVATE tests)
 target_include_directories(Luwu.LanguageServer.Test SYSTEM PRIVATE ${EXTERN_INCLUDES} extern/doctest)
-target_link_libraries(Luwu.LanguageServer.Test PRIVATE Luau.Ast Luau.Analysis Luwu.LanguageServer)
+target_link_libraries(Luwu.LanguageServer.Test PRIVATE ${LUWU_TARGET_PREFIX}.Ast ${LUWU_TARGET_PREFIX}.Analysis Luwu.LanguageServer)
 
 if (LSP_BUILD_WITH_SENTRY)
     target_link_libraries(Luwu.LanguageServer PRIVATE sentry)

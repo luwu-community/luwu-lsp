@@ -1,3 +1,4 @@
+#include <cctype>
 #include <cstring>
 #include <unordered_set>
 #include <utility>
@@ -5,6 +6,7 @@
 #include "Luau/AstQuery.h"
 #include "Luau/Autocomplete.h"
 #include "Luau/FragmentAutocomplete.h"
+#include "Luau/Module.h"
 #include "Luau/TxnLog.h"
 #include "Luau/TypeUtils.h"
 #include "Luau/TimeTrace.h"
@@ -15,6 +17,7 @@
 #include "LSP/DocumentationParser.hpp"
 
 LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuwuDestructuring)
 
 // Distinguishes a real broken expression (e.g. an unterminated `BrokenString` lexeme spans
 // the offending content) from a synthesized "missing expression" error (zero-width location
@@ -143,6 +146,8 @@ void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
         else if (auto* exprFunction = (*it)->as<Luau::AstExprFunction>(); exprFunction && !exprFunction->body->hasEnd)
             unclosedBlock = true;
         else if (auto* statClass = (*it)->as<Luau::AstStatClass>(); statClass && !statClass->hasEnd)
+            unclosedBlock = true;
+        else if (auto* declaredClass = (*it)->as<Luau::AstStatDeclareClass>(); declaredClass && !declaredClass->shape->hasEnd)
             unclosedBlock = true;
         if (auto* exprBlock = (*it)->as<Luau::AstStatBlock>(); exprBlock && !exprBlock->hasEnd)
             unclosedBlock = true;
@@ -708,6 +713,78 @@ std::optional<std::string> WorkspaceFolder::getDocumentationForAutocompleteEntry
     return std::nullopt;
 }
 
+static bool isNameChar(char c)
+{
+    return isalnum(static_cast<unsigned char>(c)) || c == '_';
+}
+
+// `const .|` or `const cat.|` (or `const |` on an explicit invoke) with nothing after the cursor: offer the
+// destructuring pattern with its value written first. Keys inside `.{}` complete from the value's type, so the
+// first tab stop is the value and the second goes back inside the braces.
+static void suggestDestructuring(const lsp::CompletionParams& params, const TextDocument& textDocument, const Luau::SourceModule* sourceModule,
+    const Luau::Position& position, std::vector<lsp::CompletionItem>& items)
+{
+    if (!FFlag::LuwuDestructuring)
+        return;
+
+    if (sourceModule && Luau::isWithinComment(*sourceModule, position))
+        return;
+
+    std::string line = textDocument.getLine(position.line);
+    if (position.column > line.size())
+        return;
+
+    for (size_t i = position.column; i < line.size(); ++i)
+        if (!isspace(static_cast<unsigned char>(line[i])))
+            return;
+
+    std::string_view prefix(line.data(), position.column);
+    size_t start = prefix.find_first_not_of(" \t");
+    if (start == std::string_view::npos)
+        return;
+    prefix.remove_prefix(start);
+
+    if (prefix.rfind("local", 0) == 0)
+        prefix.remove_prefix(5);
+    else if (prefix.rfind("const", 0) == 0)
+        prefix.remove_prefix(5);
+    else
+        return;
+
+    size_t nameStart = prefix.find_first_not_of(" \t");
+    if (nameStart == 0) // `localx`
+        return;
+    if (nameStart == std::string_view::npos)
+        nameStart = prefix.size();
+    std::string_view pattern = prefix.substr(nameStart);
+
+    bool dotted = !pattern.empty() && pattern.back() == '.';
+    std::string_view name = dotted ? pattern.substr(0, pattern.size() - 1) : pattern;
+    // A name being typed gets no suggestion: Enter or Tab would accept it and turn `local x` into a pattern
+    if (!dotted && !name.empty())
+        return;
+    if (!std::all_of(name.begin(), name.end(), isNameChar) || (!name.empty() && isdigit(static_cast<unsigned char>(name.front()))) ||
+        isKeyword(name))
+        return;
+
+    lsp::Position replaceStart = textDocument.convertPosition(Luau::Position{position.line, unsigned(position.column - pattern.size())});
+
+    lsp::CompletionItem item;
+    item.label = ".{}";
+    item.labelDetails = {{" = value", "destructure"}};
+    item.kind = lsp::CompletionItemKind::Snippet;
+    item.detail = "destructure a value";
+    item.documentation = {lsp::MarkupKind::Markdown, "Write the value first, then pick its fields:\n\n```luau\nconst " + std::string(name) +
+                                                         ".{fields} = value\n```"};
+    item.filterText = std::string(pattern);
+    item.sortText = "0";
+    item.textEdit = lsp::TextEdit{{replaceStart, params.position}, std::string(name) + ".{$2} = $1"};
+    item.insertTextFormat = lsp::InsertTextFormat::Snippet;
+    // Suggest the value right away; the braces complete once the value is written
+    item.command = lsp::Command{"Trigger Suggest", "editor.action.triggerSuggest"};
+    items.emplace_back(item);
+}
+
 std::vector<lsp::CompletionItem> WorkspaceFolder::completion(const lsp::CompletionParams& params, const LSPCancellationToken& cancellationToken)
 {
     LUAU_TIMETRACE_SCOPE("WorkspaceFolder::completion", "LSP");
@@ -993,6 +1070,9 @@ std::vector<lsp::CompletionItem> WorkspaceFolder::completion(const lsp::Completi
 
         items.emplace_back(item);
     }
+
+    if (canUseSnippets(client->capabilities))
+        suggestDestructuring(params, *textDocument, frontend.getSourceModule(moduleName), position, items);
 
     if (auto module = frontend.getSourceModule(moduleName))
         platform->handleCompletion(*textDocument, *module, position, items);

@@ -1,5 +1,8 @@
 #include "LSP/Workspace.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 #include "Luau/AstQuery.h"
 
 static Luau::AstExprConstantString* findStringNodeAtPosition(const Luau::SourceModule& sourceModule, const Luau::Position& position)
@@ -106,12 +109,67 @@ static std::optional<std::vector<lsp::TextEdit>> convertQuotesByHeuristic(const 
     return edits;
 }
 
+// Luwu Attributes (rfcs/attributes-for-types-variables-fields-classes.md): `@deprecated {` becomes
+// `@[deprecated {}]`, since a bare attribute can't take arguments. Only for an attribute that takes them.
+static std::optional<std::vector<lsp::TextEdit>> bracketAttributeArguments(const TextDocument* textDocument, const Luau::Position& position)
+{
+    const std::string lineText = textDocument->getLine(position.line);
+    const size_t brace = position.column - 1;
+    if (position.column == 0 || brace >= lineText.size() || lineText[brace] != '{')
+        return std::nullopt;
+
+    auto isNameChar = [](char c)
+    {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+
+    size_t nameEnd = brace;
+    while (nameEnd > 0 && lineText[nameEnd - 1] == ' ')
+        --nameEnd;
+
+    size_t nameBegin = nameEnd;
+    while (nameBegin > 0 && isNameChar(lineText[nameBegin - 1]))
+        --nameBegin;
+
+    const bool bareAttribute = nameBegin < nameEnd && nameBegin > 0 && lineText[nameBegin - 1] == '@';
+    if (!bareAttribute)
+        return std::nullopt;
+
+    const std::string name = lineText.substr(nameBegin, nameEnd - nameBegin);
+    const auto attributes = Luau::getKnownAttributes();
+    const bool takesArguments = std::any_of(
+        attributes.begin(),
+        attributes.end(),
+        [&name](const Luau::AttributeInfo& info)
+        {
+            return info.argumentFields && name == info.name;
+        }
+    );
+    if (!takesArguments)
+        return std::nullopt;
+
+    auto at = [&](size_t column)
+    {
+        return textDocument->convertPosition(Luau::Position{position.line, static_cast<unsigned int>(column)});
+    };
+
+    const size_t atSign = nameBegin - 1;
+    std::vector<lsp::TextEdit> edits;
+    edits.push_back(lsp::TextEdit{{at(atSign), at(atSign + 1)}, "@["});
+
+    // Most editors have already closed the brace; close the brackets after it.
+    const size_t cursor = position.column;
+    if (cursor < lineText.size() && lineText[cursor] == '}')
+        edits.push_back(lsp::TextEdit{{at(cursor + 1), at(cursor + 1)}, "]"});
+    else
+        edits.push_back(lsp::TextEdit{{at(cursor), at(cursor)}, "}]"});
+
+    return edits;
+}
+
 lsp::DocumentOnTypeFormattingResult WorkspaceFolder::onTypeFormatting(const lsp::DocumentOnTypeFormattingParams& params)
 {
     auto config = client->getConfiguration(rootUri);
-
-    if (!config.format.convertQuotes)
-        return std::nullopt;
 
     if (params.ch != "{")
         return std::nullopt;
@@ -122,6 +180,15 @@ lsp::DocumentOnTypeFormattingResult WorkspaceFolder::onTypeFormatting(const lsp:
         return std::nullopt;
 
     auto position = textDocument->convertPosition(params.position);
+
+    if (config.format.bracketAttributeArguments)
+    {
+        if (auto edits = bracketAttributeArguments(textDocument, position))
+            return edits;
+    }
+
+    if (!config.format.convertQuotes)
+        return std::nullopt;
 
     auto sourceModule = frontend.getSourceModule(moduleName);
     if (!sourceModule)

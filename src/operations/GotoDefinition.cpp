@@ -94,6 +94,20 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
     if (!sourceModule || !module)
         return result;
 
+    // Luwu Attributes (rfcs/attributes-for-types-variables-fields-classes.md): `use = "dog"` in a
+    // `@[deprecated]` goes to `dog`.
+    if (auto attribute = findAttributeAtPosition(*sourceModule, position); attribute && attribute->field == "use" && attribute->fieldValue)
+    {
+        const std::string name(attribute->fieldValue->value.data, attribute->fieldValue->value.size);
+        if (auto scope = Luau::findScopeAtPosition(*module, position))
+        {
+            if (auto target = resolveAttributeUse(*attribute, *scope, name))
+                result.emplace_back(lsp::Location{params.textDocument.uri, textDocument->convertLocation(*target)});
+        }
+
+        return result;
+    }
+
     auto binding = Luau::findBindingAtPosition(*module, *sourceModule, position);
     if (binding)
     {

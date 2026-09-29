@@ -4,7 +4,7 @@
 #include "Luau/AstQuery.h"
 #include "LSP/DocumentationParser.hpp"
 #include "LSP/EmbeddedResources.hpp"
-#include "LSP/KeywordHovers.hpp"
+#include "LSP/Hovers.hpp"
 #include "LSP/LuauExt.hpp"
 
 TEST_SUITE_BEGIN("Documentation");
@@ -656,7 +656,7 @@ TEST_CASE_FIXTURE(Fixture, "luwu_documentation_is_embedded")
     parseDocumentationContents(embedded::luwuDocs(), "luwu_docs.json", database, client.get());
     CHECK(database.find("@luau/global/class"));
 
-    CHECK_FALSE(embedded::keywordHovers().empty());
+    CHECK_FALSE(embedded::hovers().empty());
     CHECK(getKeywordHoverDocs("export_class"));
 }
 

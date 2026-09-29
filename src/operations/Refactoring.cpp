@@ -555,6 +555,201 @@ std::optional<RefactoringResult> computeInlineVariableEdit(
     return RefactoringResult{std::move(workspaceEdit), std::nullopt};
 }
 
+// Where a class member's text starts: its attributes, access specifier or `function` keyword, whichever comes first
+Luau::Position classMethodStart(const Luau::AstClassMethod& method)
+{
+    Luau::Position start = method.keywordLocation.begin;
+
+    if (method.qualifierLocation && method.qualifierLocation->begin < start)
+        start = method.qualifierLocation->begin;
+
+    for (const Luau::AstAttr* attr : method.function->attributes)
+        if (attr->location.begin < start)
+            start = attr->location.begin;
+
+    return start;
+}
+
+// Luwu Traits (rfcs/classes/traits.md): the class a refactoring can extract into a trait, when `position` is on its `class` keyword or name.
+// A trait can't take a class's generic parameters along, and a class with no functions besides `__init` has nothing to
+// move, so neither is offered.
+Luau::AstStatClass* findExtractableClass(const Luau::SourceModule& sourceModule, const TextDocument& textDocument, const Luau::Position& position)
+{
+    for (Luau::AstStat* stat : sourceModule.root->body)
+    {
+        auto* classStat = stat->as<Luau::AstStatClass>();
+        if (!classStat || classStat->isTrait)
+            continue;
+
+        Luau::Location header{classStat->keywordLocation.begin, classStat->name->location.end};
+        if (!header.containsClosed(position))
+            continue;
+
+        bool generic = classStat->generics.size > 0 || classStat->genericPacks.size > 0;
+        bool hasFunctionToMove = false;
+        bool movesWholeLines = true;
+
+        // Functions move by whole lines, so each has to have its lines to itself, strictly inside the class body
+        for (const auto& member : classStat->members)
+        {
+            const auto* method = member.get_if<Luau::AstClassMethod>();
+            if (!method || method->functionName == "__init")
+                continue;
+
+            hasFunctionToMove = true;
+
+            Luau::Position start = classMethodStart(*method);
+            Luau::Position end = method->function->location.end;
+            std::string firstLine = textDocument.getLine(start.line);
+            std::string lastLine = textDocument.getLine(end.line);
+
+            bool aloneAtStart = firstLine.find_first_not_of(" \t") >= start.column;
+            bool aloneAtEnd = lastLine.find_first_not_of(" \t;\r\n", end.column) == std::string::npos;
+            bool insideBody = start.line > classStat->name->location.end.line && end.line < classStat->location.end.line;
+
+            if (!aloneAtStart || !aloneAtEnd || !insideBody)
+                movesWholeLines = false;
+        }
+
+        bool extractable = !generic && hasFunctionToMove && movesWholeLines;
+        return extractable ? classStat : nullptr;
+    }
+
+    return nullptr;
+}
+
+// Luwu Traits (rfcs/classes/traits.md): "Extract class into a trait". The class's functions, except `__init`, move into a new trait
+// `<Class>Behavior` written above the class, which expects every field of the class (so the moved code still has them),
+// and the class implements the trait. Construction stays with the class. The new trait's name is offered for renaming.
+std::optional<RefactoringResult> computeExtractTraitEdit(
+    const lsp::DocumentUri& uri,
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const lsp::Range& range)
+{
+    auto luauRange = textDocument.convertRange(range);
+    Luau::AstStatClass* classStat = findExtractableClass(sourceModule, textDocument, luauRange.begin);
+    if (!classStat)
+        return std::nullopt;
+
+    std::string className = classStat->name->name.value;
+    std::string traitName = className + "Behavior";
+
+    // The all-or-nothing access specifier rule carries over: if the class writes them, the trait's expectations must too
+    bool qualified = false;
+    for (const auto& member : classStat->members)
+        if (Luau::visit([](auto&& m) { return m.qualifierLocation.has_value(); }, member))
+            qualified = true;
+    if (classStat->primaryConstructor)
+        for (const auto& qualifiers : classStat->primaryConstructor->argsQualifiers)
+            if (qualifiers.qualifierLocation)
+                qualified = true;
+
+    auto sourceText = [&](const Luau::Location& location)
+    {
+        return textDocument.getText(textDocument.convertLocation(location));
+    };
+
+    auto expectLine = [&](bool isPrivate, bool isConst, const std::string& name, const Luau::AstType* annotation)
+    {
+        std::string line = "    expect ";
+        if (qualified)
+            line += isPrivate ? "private " : "public ";
+        if (isConst)
+            line += "const ";
+        line += name;
+        if (annotation)
+            line += ": " + sourceText(annotation->location);
+        return line + "\n";
+    };
+
+    std::string expectations;
+    std::vector<std::string> bodyFields;
+    for (const auto& member : classStat->members)
+    {
+        if (const auto* prop = member.get_if<Luau::AstClassProperty>())
+        {
+            bodyFields.push_back(prop->name.value);
+            expectations +=
+                expectLine(prop->visibility == Luau::AstClassMemberVisibility::Private, prop->isConst, prop->name.value, prop->ty);
+        }
+    }
+
+    if (const auto* ctor = classStat->primaryConstructor)
+    {
+        for (size_t i = 0; i < ctor->args.size; i++)
+        {
+            const Luau::AstLocal* arg = ctor->args.data[i];
+            if (std::find(bodyFields.begin(), bodyFields.end(), arg->name.value) != bodyFields.end())
+                continue;
+
+            const Luau::AstClassPrimaryConstructorParamQualifiers* qualifiers =
+                i < ctor->argsQualifiers.size ? &ctor->argsQualifiers.data[i] : nullptr;
+            bool isPrivate = qualifiers && qualifiers->visibility == Luau::AstClassMemberVisibility::Private;
+            bool isConst = qualifiers && qualifiers->isConst;
+            expectations += expectLine(isPrivate, isConst, arg->name.value, arg->annotation);
+        }
+    }
+
+    // Each moved function takes its whole lines along, indentation included: a class body and a trait body indent alike
+    std::string functions;
+    std::vector<lsp::TextEdit> edits;
+    for (const auto& member : classStat->members)
+    {
+        const auto* method = member.get_if<Luau::AstClassMethod>();
+        if (!method || method->functionName == "__init")
+            continue;
+
+        Luau::Position start = classMethodStart(*method);
+        lsp::Range lines{{start.line, 0}, {method->function->location.end.line + 1, 0}};
+        if (!functions.empty())
+            functions += "\n";
+        functions += textDocument.getText(lines);
+
+        // the blank line that separated the function from what came before it goes too, or the class body is left
+        // with a run of them
+        lsp::Range removed = lines;
+        bool blankAbove = start.line > classStat->name->location.end.line + 1 &&
+                          textDocument.getLine(start.line - 1).find_first_not_of(" \t\r\n") == std::string::npos;
+        if (blankAbove)
+            removed.start.line--;
+
+        edits.push_back(lsp::TextEdit{removed, ""});
+    }
+
+    std::string trait = "trait " + traitName + "\n" + expectations;
+    if (!expectations.empty())
+        trait += "\n";
+    trait += functions + "end\n\n";
+
+    lsp::Position classStart{classStat->location.begin.line, 0};
+    edits.insert(edits.begin(), lsp::TextEdit{{classStart, classStart}, trait});
+
+    // The class's header gains the trait: at the end of an existing `implements` list, or after the header
+    Luau::Position headerEnd = classStat->name->location.end;
+    if (classStat->primaryConstructor)
+        headerEnd = classStat->primaryConstructor->argLocation.end;
+
+    if (classStat->implements.size > 0)
+    {
+        Luau::Position listEnd = classStat->implements.data[classStat->implements.size - 1].location.end;
+        lsp::Position at = textDocument.convertPosition(listEnd);
+        edits.push_back(lsp::TextEdit{{at, at}, ", " + traitName});
+    }
+    else
+    {
+        lsp::Position at = textDocument.convertPosition(headerEnd);
+        edits.push_back(lsp::TextEdit{{at, at}, " implements " + traitName});
+    }
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::move(edits));
+
+    // the trait's name, on the first inserted line, which the edit puts where the class started
+    lsp::Position renamePosition{classStat->location.begin.line, 6};
+    return RefactoringResult{std::move(workspaceEdit), renamePosition};
+}
+
 } // anonymous namespace
 
 void computeRefactorings(
@@ -610,6 +805,23 @@ void computeRefactorings(
                     result.push_back(std::move(action));
                 }
             }
+        }
+    }
+
+    // Luwu Traits (rfcs/classes/traits.md): Extract a class's behavior into a trait it implements
+    if (params.context.wants(lsp::CodeActionKind::RefactorExtract))
+    {
+        if (Luau::AstStatClass* classStat = findExtractableClass(sourceModule, textDocument, requestRange.begin))
+        {
+            lsp::CodeAction action;
+            action.title = "Extract class '" + std::string(classStat->name->name.value) + "' into a trait";
+            action.kind = lsp::CodeActionKind::RefactorExtract;
+            action.data = nlohmann::json{
+                {"uri", params.textDocument.uri.toString()},
+                {"type", "extractTrait"},
+                {"range", params.range},
+            };
+            result.push_back(std::move(action));
         }
     }
 
@@ -675,6 +887,8 @@ lsp::CodeAction resolveRefactoring(
         refactorResult = computeExtractFunctionEdit(uri, *sourceModule, *textDocument, range);
     else if (type == "inlineVariable")
         refactorResult = computeInlineVariableEdit(uri, *sourceModule, *textDocument, range);
+    else if (type == "extractTrait")
+        refactorResult = computeExtractTraitEdit(uri, *sourceModule, *textDocument, range);
 
     if (refactorResult)
     {

@@ -207,6 +207,41 @@ const luwu_libraries: { [string]: Table | Function } = {
                     }
                 }
             },
+            implements = Function {
+                documentation = un(5, [[
+                    Returns `true` if `o` is an object of a class that implements trait `t`, whether the class lists
+                    `t` after `implements` or gets it through another trait that `needs` it.
+
+                    If `o` is not an object, returns `false`. Raises a runtime error if `t` is a class rather than a trait
+                    (use `class.isinstance` for classes).
+
+                    In the type system, this refines `o` to the trait:
+
+                    ```luwu
+                    local function describe(value: unknown): string?
+                        if class.implements(value, Named) then
+                            return value.name
+                        end
+                        return nil
+                    end
+                    ```
+                ]]),
+                params = {
+                    Parameter {
+                        name = "o",
+                        documentation = "The value you want to test. Anything is accepted here, passing a non-object just causes this function to return `false`."
+                    },
+                    Parameter {
+                        name = "t",
+                        documentation = "The trait you want to check against. Must be a trait."
+                    }
+                },
+                returns = {
+                    Return {
+                        documentation = "Whether the object `o`'s class implements trait `t`."
+                    }
+                }
+            },
             name = Function {
                 documentation = "Returns the identifier name of the class or the class the object is an instance of. Keep in mind this name isn't globally unique, rely on class.isinstance tests instead.",
                 params = {

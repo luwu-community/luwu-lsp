@@ -272,8 +272,11 @@ struct ClientFormatConfiguration
 {
     /// Whether to convert single/double quotes to backticks when typing `{` inside strings
     bool convertQuotes = false;
+    /// Whether to rewrite a bare attribute to its bracketed form when typing `{` after it, since only the
+    /// bracketed form takes arguments: `@deprecated {` becomes `@[deprecated {}]`
+    bool bracketAttributeArguments = true;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFormatConfiguration, convertQuotes);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFormatConfiguration, convertQuotes, bracketAttributeArguments);
 
 struct ClientPluginFileSystemConfiguration
 {

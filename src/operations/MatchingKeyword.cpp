@@ -212,6 +212,12 @@ struct KeywordGroupVisitor : public Luau::AstVisitor
         add({node->keywordLocation, {}, node->hasEnd ? trailingKeyword(textDocument, node->location, "end") : std::nullopt});
         return true;
     }
+
+    // Luwu Declare Statements: `declare class type ... end`
+    bool visit(Luau::AstStatDeclareClass* node) override
+    {
+        return visit(node->shape);
+    }
 };
 } // namespace
 

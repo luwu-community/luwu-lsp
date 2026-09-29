@@ -9,13 +9,13 @@
 #include "Luau/ParseResult.h"
 
 /// Returns markdown documentation for a keyword doc key (e.g. "if", "local", "class_const"),
-/// loaded from the keyword_hovers.json resource. Returns nullopt if there's no documentation
+/// loaded from the hovers.json resource. Returns nullopt if there's no documentation
 /// registered for it.
 std::optional<std::string> getKeywordHoverDocs(const std::string& keyword);
 
 struct KeywordHoverMatch
 {
-    /// The keyword_hovers.json key that documents this position.
+    /// The hovers.json key that documents this position.
     std::string docKey;
     /// The full span the hover should highlight -- usually just the one keyword token, but for a
     /// combined doc key like "export_class" or "const_function" this covers both keyword tokens
@@ -24,7 +24,7 @@ struct KeywordHoverMatch
     Luau::Location range;
 };
 
-/// If `position` lands on a keyword token, returns the keyword_hovers.json key that documents it,
+/// If `position` lands on a keyword token, returns the hovers.json key that documents it,
 /// along with the span that key's doc applies to.
 ///
 /// The doc key is usually just the keyword's own literal spelling ("if", "local", "class", ...),
@@ -44,7 +44,7 @@ struct KeywordHoverMatch
 /// members' and primary constructor's keyword locations explicitly.
 std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<Luau::AstNode*>& ancestry, Luau::Position position);
 
-/// The keyword_hovers.json key documenting a comment directive (`--!strict`, `--!optimize 2`,
+/// The hovers.json key documenting a comment directive (`--!strict`, `--!optimize 2`,
 /// `--!trust`, ...), or nullopt when it is not one we recognise.
 ///
 /// The key is the directive's name prefixed with `directive_`, taken from the first word of the

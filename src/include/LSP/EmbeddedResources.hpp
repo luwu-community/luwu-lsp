@@ -6,8 +6,8 @@
 namespace embedded
 {
 
-/// keyword_hovers.json: hover documentation for keywords, operators and comment directives
-std::string_view keywordHovers();
+/// hovers.json: hover documentation for keywords, operators, comment directives and attributes
+std::string_view hovers();
 
 /// luwu_docs.json: documentation for Luwu's own globals and libraries
 std::string_view luwuDocs();

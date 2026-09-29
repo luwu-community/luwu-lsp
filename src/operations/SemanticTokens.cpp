@@ -49,12 +49,34 @@ static bool isUserDefinedClassValue(const Luau::TypeId ty, Luau::NotNull<Luau::B
     return et && et->parent == builtinTypes->classType;
 }
 
+// Luwu Traits (rfcs/classes/traits.md): the trait value itself, as opposed to an object of a class implementing it.
+// The trait info lives on the object type, so the value is recognised through its relation to that type.
+static bool isTraitValue(const Luau::TypeId ty)
+{
+    const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    const Luau::Obj* obj = et && et->relation ? Luau::get_if<Luau::Obj>(&*et->relation) : nullptr;
+    const auto* objectEt = obj ? Luau::get<Luau::ExternType>(Luau::follow(obj->ty)) : nullptr;
+    return objectEt && objectEt->traitInfo;
+}
+
+// Luwu Traits: a name that refers to a trait -- the trait value, or the trait as a type.
+// Traits are coloured as interfaces, so they read differently from the classes that implement them.
+static bool namesTrait(const Luau::TypeId ty)
+{
+    const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    return (et && et->traitInfo) || isTraitValue(ty);
+}
+
 static lsp::SemanticTokenTypes inferTokenType(const Luau::TypeId ty, lsp::SemanticTokenTypes base, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
 {
     if (!ty)
         return base;
 
     auto followedTy = Luau::follow(ty);
+
+    // A variable holding an object typed as a trait (`const ent = p:entry()`) is just a variable
+    if (isTraitValue(followedTy))
+        return lsp::SemanticTokenTypes::Interface;
 
     if (isUserDefinedClassValue(followedTy, builtinTypes))
         return lsp::SemanticTokenTypes::Class;
@@ -160,7 +182,9 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         // Highlight name -- as a class when the annotation names one, so `userid: UserId` colors
         // `UserId` the same way its `class UserId` declaration is colored
         auto tokenType = lsp::SemanticTokenTypes::Type;
-        if (auto resolvedTy = module->astResolvedTypes.find(ref); resolvedTy && namesUserDefinedClass(*resolvedTy, builtinTypes))
+        if (auto resolvedTy = module->astResolvedTypes.find(ref); resolvedTy && namesTrait(*resolvedTy))
+            tokenType = lsp::SemanticTokenTypes::Interface;
+        else if (resolvedTy && namesUserDefinedClass(*resolvedTy, builtinTypes))
             tokenType = lsp::SemanticTokenTypes::Class;
 
         Luau::Position endPosition{startPosition.line, startPosition.column + static_cast<unsigned int>(strlen(ref->name.value))};
@@ -272,6 +296,20 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             }
         }
 
+        return true;
+    }
+
+    // Luwu Declare Statements: a declared class's shape is not visited as a class, and its methods are signatures, so
+    // their parameters and restated fields are coloured from here. Its type annotations are visited as usual.
+    bool visit(Luau::AstStatDeclareClass* declared) override
+    {
+        for (const auto& member : declared->shape->members)
+        {
+            if (const auto* method = member.get_if<Luau::AstClassMethod>())
+                visit(method->function);
+        }
+
+        visit(declared->shape);
         return true;
     }
 

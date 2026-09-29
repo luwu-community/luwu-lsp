@@ -1,4 +1,4 @@
-# Keywords
+# Hovers
 
 <!-- keyword: and -->
 Boolean operator that evaluates truthy if the LHS and RHS are both true.
@@ -536,7 +536,7 @@ Set a table property as readonly.
 Make a class available to other modules.
 
 ```luwu
--- list.luau
+-- list.luwu
 export class List<T>
     private inner: { T }
     -- class contains a private field, public fields/functions must be marked explicitly
@@ -546,7 +546,7 @@ export class List<T>
     public function with_capacity(cap: number)
     end
 end
--- useslist.luau
+-- useslist.luwu
 -- due to current lack of an equivalent import keyword, you need to do this
 const list = require("./list")
 const List = list.List
@@ -561,7 +561,7 @@ const listy = List("Taz", "Nanuk", "Nyla")
 Create and export a type alias, usually for a table or function type:
 
 ```luwu
--- cats.luau
+-- cats.luwu
 export type Cat = {
     what: "Cat",
     name: string,
@@ -572,7 +572,7 @@ const cat: Cat = { -- throws type error if missing any fields
     name = "Taz",
     age = 12,
 }
--- other.luau
+-- other.luwu
 const cats = require("./cats")
 type Cat = cats.Cat
 const cat2: Cat = {
@@ -814,6 +814,183 @@ on type annotations. When this is enabled, the runtime will check some type anno
 when a value is not the expected type.
 <!-- /keyword -->
 
+<!-- keyword: attribute_deprecated -->
+
+Marks this API as old, subject to removal, or no longer-recommended in new code.
+Use `@deprecated` to tell users to should stop relying on this function, method, property, alias, field, etc., and what they should use instead.
+
+It has two forms:
+
+- a plain attribute: `@deprecated`
+- a form that takes table parameters: `@[deprecated { reason = " some reason", use = "someotherapi"}]`
+
+```luwu
+@deprecated
+function fs.readfile(path: string): string end
+
+@[deprecated { use = "readfile", reason = "read doesn't say what it reads" }]
+local function read(path: string): string
+    return readfile(path)
+end
+```
+
+Can be written on functions, variables, types, table fields, classes, class fields and parameters.
+<!-- /keyword -->
+
+<!-- keyword: attribute_native -->
+Compiles this function to native code when native code generation is available, without making the whole file `--!native`.
+
+Note this *disables* NCG for every other function in the module. The embedder may be enabling `--!native` on all chunks, so be
+very careful when you use this if you want high performance.
+
+```luwu
+@native
+local function length(x: number, y: number): number
+    return math.sqrt(x * x + y * y)
+end
+```
+<!-- /keyword -->
+
+<!-- keyword: attribute_checked -->
+Arguments passed to calls to this function get typechecked, even in nonstrict mode. Useless outside embedder definition files.
+<!-- /keyword -->
+
+<!-- keyword: attribute_noinline -->
+Prevent a function or method from being inlined in `--!optimize 2` (O2) mode.
+In highly optimize code, you might need this to keep cold paths away from hot paths (and prevent their inlining).
+
+This can also be useful for making sure stack traces are fully accurate for a function; inlining can erase a function's original
+call location, which might be important in debugging.
+
+```luwu
+@noinline
+local function expensive(x: number): number
+    return x * 2
+end
+```
+
+Can be written on a local function, a const function, a class method or a function expression.
+<!-- /keyword -->
+
+<!-- keyword: declare_extern_type -->
+Declare an *extern type*: a type the host provides (userdata from C++ or Rust, say) with no implementation in Luwu. It names a type only; nothing is put in value scope.
+
+```luwu
+-- websocket.luwu
+export declare extern type Websocket
+    read url: string
+    function send(self, message: string)
+    function close(self)
+end
+
+return {} :: { connect: (url: string) -> Websocket }
+-- other.luwu
+const websocket = require("./websocket")
+type Websocket = websocket.Websocket
+```
+
+Outside definition files an extern type belongs to its file unless it's `export`ed, and is imported like a type alias. Every member is public, methods take `self`, and `with` after the name is optional.
+<!-- /keyword -->
+
+<!-- keyword: trait -->
+Define behavior and state that many classes share, without inheritance.
+A trait lists what implementing classes must declare (`expect`), and what it provides them: fields with default values and functions, which each class gets its own copy of.
+
+```luwu
+trait Greeter
+    expect name: string
+    greeting = "hello"
+    function greet(self): string
+        return `{self.greeting}, {self.name}`
+    end
+end
+
+class Cat implements Greeter
+    name = "Taz"
+end
+
+print(Cat():greet()) -- hello, Taz
+print(class.implements(Cat(), Greeter)) -- true
+```
+
+A trait can take parameters, passed by each implementing class: `class Coin(amount: number) implements Item("Currency", amount)`.
+
+A trait that defines `__create` is a factory: calling the trait calls `__create`, which usually returns an object of one of the classes implementing it.
+
+```luwu
+trait Path
+    expect raw: string
+    function __create(raw: string)
+        if string.sub(raw, 1, 1) == "@" then
+            return RequirePath(raw)
+        end
+        return RelativePath(raw)
+    end
+end
+
+const main = Path("./src/main.luwu") -- a RelativePath
+```
+
+A trait's own functions can be called through it: `Greeter.greet(cat)` calls `cat`'s class's `greet`, after checking the class implements `Greeter`.
+`type(Greeter)` and `typeof(Greeter)` are `"trait"`.
+<!-- /keyword -->
+
+<!-- keyword: export_trait -->
+Make a trait available to other modules, which can implement it: `class Dog implements mod.Named end`.
+<!-- /keyword -->
+
+<!-- keyword: implements -->
+Lists the traits a class implements. The class gets each trait's fields and functions, must declare what each trait `expect`s, and passes the arguments of traits that take parameters.
+
+```luwu
+class Rifle implements Gun, Item("Weapon", 1)
+    -- ...
+end
+```
+
+A trait the listed ones `need` is implemented too, when it has no parameters.
+Implementing a trait is checked with `class.implements(object, Trait)`, which also refines the object's type.
+<!-- /keyword -->
+
+<!-- keyword: needs -->
+Lists the traits a trait needs: every class implementing this trait must implement them too.
+A needed trait without parameters is implemented automatically; one with parameters must be listed by the class, with its arguments.
+
+```luwu
+trait Weapon needs Tool
+    expect damage: number
+end
+```
+
+Traits that need each other are always implemented together, so they are an error: combine them into one trait.
+<!-- /keyword -->
+
+<!-- keyword: expect -->
+Marks a member of a trait that every implementing class must declare itself, with the access specifier and `const` written here.
+
+```luwu
+trait Tool
+    expect private model: Model
+    expect public function equipped?(self) -- `?`: classes may leave this one out
+    expect function __init(self, props: Props) -- a constructor taking these arguments
+end
+```
+
+A class missing an expected member is an error when the class is created.
+<!-- /keyword -->
+
+<!-- keyword: final -->
+Marks a function of a trait that implementing classes can't define themselves: every class gets the trait's version.
+
+```luwu
+trait Listener
+    public final function on_event(self, event: Event)
+        -- ...
+    end
+end
+```
+<!-- /keyword -->
+
 <!-- !stop parsing -->
 <!-- The keywords below only ever appear in embedder declaration/definition files which aren't supported yet in hovers -->
 
@@ -821,7 +998,4 @@ when a value is not the expected type.
 <!-- /keyword -->
 
 <!-- keyword: extends -->
-<!-- /keyword -->
-
-<!-- keyword: declare_extern_type -->
 <!-- /keyword -->

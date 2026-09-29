@@ -140,6 +140,93 @@ struct DocumentSymbolsVisitor : public Luau::AstVisitor
 
         return false;
     }
+
+    lsp::DocumentSymbol makeSymbol(const std::string& name, lsp::SymbolKind kind, const Luau::Location& range, const Luau::Location& selection)
+    {
+        lsp::DocumentSymbol symbol;
+        symbol.name = name;
+        symbol.kind = kind;
+        symbol.range = {textDocument->convertPosition(range.begin), textDocument->convertPosition(range.end)};
+        symbol.selectionRange = {textDocument->convertPosition(selection.begin), textDocument->convertPosition(selection.end)};
+        return symbol;
+    }
+
+    // Luwu Classes: a class and its members. A declared class (Luwu Declare Statements) is listed the same way.
+    void addClassSymbol(Luau::AstStatClass* classStat, const Luau::Location& range)
+    {
+        // Luwu Traits (rfcs/classes/traits.md): a trait is listed as an interface, its factory as its constructor
+        lsp::SymbolKind classKind = classStat->isTrait ? lsp::SymbolKind::Interface : lsp::SymbolKind::Class;
+        lsp::DocumentSymbol symbol = makeSymbol(classStat->name->name.value, classKind, range, classStat->name->location);
+
+        auto oldParent = parent;
+        parent = &symbol;
+
+        for (const auto& member : classStat->members)
+        {
+            if (const auto* prop = member.get_if<Luau::AstClassProperty>())
+            {
+                lsp::DocumentSymbol field = makeSymbol(prop->name.value, lsp::SymbolKind::Field, prop->nameLocation, prop->nameLocation);
+                addSymbol(field);
+            }
+            else if (const auto* method = member.get_if<Luau::AstClassMethod>())
+            {
+                bool isConstructor = method->functionName == (classStat->isTrait ? "__create" : "__init");
+                lsp::SymbolKind kind = isConstructor ? lsp::SymbolKind::Constructor : lsp::SymbolKind::Method;
+                lsp::DocumentSymbol methodSymbol = makeSymbol(method->functionName.value, kind, method->function->location, method->nameLocation);
+                visitFunction(method->function, methodSymbol);
+                addSymbol(methodSymbol);
+            }
+        }
+
+        parent = oldParent;
+        addSymbol(symbol);
+    }
+
+    bool visit(Luau::AstStatClass* classStat) override
+    {
+        addClassSymbol(classStat, classStat->location);
+        return false;
+    }
+
+    // Luwu Declare Statements: declarations in a source file
+    bool visit(Luau::AstStatDeclareClass* declaredClass) override
+    {
+        addClassSymbol(declaredClass->shape, declaredClass->location);
+        return false;
+    }
+
+    bool visit(Luau::AstStatDeclareGlobal* global) override
+    {
+        lsp::DocumentSymbol symbol = makeSymbol(global->name.value, lsp::SymbolKind::Variable, global->location, global->nameLocation);
+        addSymbol(symbol);
+        return false;
+    }
+
+    bool visit(Luau::AstStatDeclareFunction* function) override
+    {
+        lsp::DocumentSymbol symbol = makeSymbol(function->name.value, lsp::SymbolKind::Function, function->location, function->nameLocation);
+        addSymbol(symbol);
+        return false;
+    }
+
+    bool visit(Luau::AstStatDeclareExternType* externType) override
+    {
+        lsp::DocumentSymbol symbol = makeSymbol(externType->name.value, lsp::SymbolKind::Class, externType->location, externType->nameLocation);
+
+        auto oldParent = parent;
+        parent = &symbol;
+
+        for (const Luau::AstDeclaredExternTypeProperty& prop : externType->props)
+        {
+            lsp::SymbolKind kind = prop.isMethod ? lsp::SymbolKind::Method : lsp::SymbolKind::Field;
+            lsp::DocumentSymbol member = makeSymbol(prop.name.value, kind, prop.location, prop.nameLocation);
+            addSymbol(member);
+        }
+
+        parent = oldParent;
+        addSymbol(symbol);
+        return false;
+    }
 };
 
 std::optional<std::vector<lsp::DocumentSymbol>> WorkspaceFolder::documentSymbol(const lsp::DocumentSymbolParams& params)

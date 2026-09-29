@@ -415,4 +415,90 @@ print(x)
     CHECK_FALSE(resolved.edit);
 }
 
+// Luwu Traits (rfcs/classes/traits.md): Extract class into a trait
+
+TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait")
+{
+    auto source = R"(
+class Cat
+    public name: string = "Taz"
+    public lives: number = 9
+
+    public function __init(self)
+    end
+
+    public function speak(self): string
+        return `{self.name} meows`
+    end
+
+    public function lose_life(self)
+        self.lives -= 1
+    end
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    // the cursor on the class's name
+    params.range = {{1, 7}, {1, 7}};
+    params.context.only = {lsp::CodeActionKind::RefactorExtract};
+
+    auto result = workspace.codeAction(params, nullptr);
+    auto action = findCodeAction(result, "Extract class 'Cat' into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    auto& changes = resolved.edit->changes.at(uri);
+    auto newSource = applyEdit(source, changes);
+
+    // construction stays with the class; everything else moves, and the trait expects the class's fields
+    CHECK_EQ(newSource, R"(
+trait CatBehavior
+    expect public name: string
+    expect public lives: number
+
+    public function speak(self): string
+        return `{self.name} meows`
+    end
+
+    public function lose_life(self)
+        self.lives -= 1
+    end
+end
+
+class Cat implements CatBehavior
+    public name: string = "Taz"
+    public lives: number = 9
+
+    public function __init(self)
+    end
+end
+)");
+
+    // the new trait's name is offered for renaming
+    REQUIRE(resolved.command);
+    CHECK_EQ(resolved.command->command, "luwu.rename");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait_not_offered_without_functions")
+{
+    auto source = R"(
+class Point
+    x: number = 0
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{1, 7}, {1, 7}};
+    params.context.only = {lsp::CodeActionKind::RefactorExtract};
+
+    auto result = workspace.codeAction(params, nullptr);
+    CHECK_FALSE(findCodeAction(result, "Extract class 'Point' into a trait"));
+}
+
 TEST_SUITE_END();

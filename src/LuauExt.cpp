@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <optional>
 #include <utility>
 
@@ -626,6 +627,113 @@ std::optional<Luau::Location> lookupTypeLocation(const Luau::Scope& deepScope, c
         else
             return std::nullopt;
     }
+}
+
+std::optional<AttributeAtPosition> findAttributeAtPosition(const Luau::SourceModule& source, Luau::Position pos)
+{
+    // Attributes are only in the ancestry when types are included, since a table type's fields carry them.
+    std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(source, pos, /* includeTypes= */ true);
+
+    for (size_t i = ancestry.size(); i > 0; --i)
+    {
+        Luau::AstAttr* attr = ancestry[i - 1]->as<Luau::AstAttr>();
+        if (!attr)
+            continue;
+
+        AttributeAtPosition result;
+        result.attr = attr;
+        result.owner = i >= 2 ? ancestry[i - 2] : nullptr;
+
+        Luau::AstExprTable* table = attr->args.size == 1 ? attr->args.data[0]->as<Luau::AstExprTable>() : nullptr;
+        if (!table)
+            return result;
+
+        for (const Luau::AstExprTable::Item& item : table->items)
+        {
+            Luau::AstExprConstantString* key = item.key ? item.key->as<Luau::AstExprConstantString>() : nullptr;
+            if (item.kind != Luau::AstExprTable::Item::Kind::Record || !key)
+                continue;
+
+            const bool onKey = key->location.containsClosed(pos);
+            const bool onValue = item.value->location.containsClosed(pos);
+            if (!onKey && !onValue)
+                continue;
+
+            result.field = std::string(key->value.data, key->value.size);
+            result.fieldValue = item.value->as<Luau::AstExprConstantString>();
+            result.fieldRange = onKey ? key->location : item.value->location;
+            break;
+        }
+
+        return result;
+    }
+
+    return std::nullopt;
+}
+
+// A field or member named `name` next to the one `attr` is on.
+static std::optional<Luau::Location> findSiblingField(Luau::AstNode* owner, const Luau::AstAttr* attr, const std::string& name)
+{
+    auto isAttr = [attr](const Luau::AstArray<Luau::AstAttr*>& attributes)
+    {
+        return std::find(attributes.begin(), attributes.end(), attr) != attributes.end();
+    };
+
+    if (!owner)
+        return std::nullopt;
+
+    if (auto tableTy = owner->as<Luau::AstTypeTable>())
+    {
+        for (const Luau::AstTableProp& prop : tableTy->props)
+            if (prop.name.value == name)
+                return prop.location;
+    }
+    else if (auto table = owner->as<Luau::AstExprTable>())
+    {
+        for (const Luau::AstExprTable::Item& item : table->items)
+        {
+            auto key = item.key ? item.key->as<Luau::AstExprConstantString>() : nullptr;
+            if (item.kind == Luau::AstExprTable::Item::Kind::Record && key && std::string(key->value.data, key->value.size) == name)
+                return key->location;
+        }
+    }
+    else if (auto cls = owner->as<Luau::AstStatClass>())
+    {
+        // An attribute on the class itself names something outside it, e.g. another class.
+        if (isAttr(cls->attributes))
+            return std::nullopt;
+
+        for (const Luau::AstClassMember& member : cls->members)
+        {
+            if (auto prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name.value == name)
+                return prop->nameLocation;
+            if (auto method = member.get_if<Luau::AstClassMethod>(); method && method->functionName.value == name)
+                return method->nameLocation;
+        }
+
+        if (cls->primaryConstructor)
+            for (Luau::AstLocal* arg : cls->primaryConstructor->args)
+                if (arg->name.value == name)
+                    return arg->location;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<Luau::Location> resolveAttributeUse(const AttributeAtPosition& attribute, const Luau::Scope& scope, const std::string& name)
+{
+    if (auto sibling = findSiblingField(attribute.owner, attribute.attr, name))
+        return sibling;
+
+    // A value first: a class is a value as well as a type, and its declaration is the value's binding.
+    if (auto binding = scope.linearSearchForBinding(name, /* traverseScopeChain= */ true))
+    {
+        const bool isBuiltin = binding->location.begin == Luau::Position{0, 0} && binding->location.end == Luau::Position{0, 0};
+        if (!isBuiltin)
+            return binding->location;
+    }
+
+    return lookupTypeLocation(scope, name);
 }
 
 // Returns [base, property] - base is important during intersections

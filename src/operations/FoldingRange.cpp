@@ -75,6 +75,19 @@ struct FoldingRangeVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // Luwu Declare Statements: a declared class or extern type folds like a block, down to its `end`
+    bool visit(Luau::AstStatDeclareClass* declaredClass) override
+    {
+        addFoldingRange(declaredClass->location.begin, declaredClass->location.end);
+        return true;
+    }
+
+    bool visit(Luau::AstStatDeclareExternType* externType) override
+    {
+        addFoldingRange(externType->location.begin, externType->location.end);
+        return true;
+    }
+
     bool visit(Luau::AstStatBlock* block) override
     {
         // Create a folding range for this block

@@ -380,6 +380,12 @@
             "default": false,
             "scope": "resource"
           },
+          "luwu.format.bracketAttributeArguments": {
+            "markdownDescription": "Whether to rewrite a bare attribute to its bracketed form when typing `{` after it, since only the bracketed form takes arguments: `@deprecated {` becomes `@[deprecated {}]`. Needs `editor.formatOnType`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
           "luwu.fflags.enableByDefault": {
             "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
             "type": "boolean",
@@ -1062,6 +1068,12 @@
             "default": false,
             "scope": "resource"
           },
+          "luau-lsp.format.bracketAttributeArguments": {
+            "markdownDescription": "Whether to rewrite a bare attribute to its bracketed form when typing `{` after it, since only the bracketed form takes arguments: `@deprecated {` becomes `@[deprecated {}]`. Needs `editor.formatOnType`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
           "luau-lsp.fflags.enableByDefault": {
             "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
             "type": "boolean",
@@ -1587,6 +1599,14 @@
         }
       }
     ],
+    "configurationDefaults": {
+      "[luwu]": {
+        "editor.formatOnType": true
+      },
+      "[luau]": {
+        "editor.formatOnType": true
+      }
+    },
     "walkthroughs": [
       {
         "id": "getting-started",

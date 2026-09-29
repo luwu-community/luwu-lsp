@@ -360,7 +360,8 @@ struct InlayHintVisitor : public Luau::AstVisitor
 
     bool visit(Luau::AstStatClass* classStat) override
     {
-        addBlockEndHint(classStat->location, "class " + std::string(classStat->name->name.value));
+        // Luwu Traits (rfcs/classes/traits.md): a trait is parsed as a class
+        addBlockEndHint(classStat->location, (classStat->isTrait ? "trait " : "class ") + std::string(classStat->name->name.value));
         return true;
     }
 

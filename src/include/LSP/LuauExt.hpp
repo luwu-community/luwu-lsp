@@ -91,6 +91,27 @@ std::optional<Luau::Location> getLocation(Luau::TypeId type);
 
 std::optional<Luau::Location> lookupTypeLocation(const Luau::Scope& deepScope, const Luau::Name& name);
 
+// An attribute under the cursor, e.g. `@[deprecated { use = "dog" }]`.
+struct AttributeAtPosition
+{
+    Luau::AstAttr* attr = nullptr;
+    // The node the attribute is written on: a table (value or type) for one of its fields, a class for the
+    // class or one of its fields, a function, a local, and so on.
+    Luau::AstNode* owner = nullptr;
+    // The argument field the cursor is on, its key or its value, e.g. `use`.
+    std::optional<std::string> field;
+    // That field's value, when it is a string.
+    Luau::AstExprConstantString* fieldValue = nullptr;
+    // The key or value the cursor is on.
+    Luau::Location fieldRange;
+};
+
+std::optional<AttributeAtPosition> findAttributeAtPosition(const Luau::SourceModule& source, Luau::Position pos);
+
+// Where the name in `use = "name"` is declared: a field next to the one the attribute is on, or else a value
+// or type in scope.
+std::optional<Luau::Location> resolveAttributeUse(const AttributeAtPosition& attribute, const Luau::Scope& scope, const std::string& name);
+
 struct PropLookup
 {
     Luau::TypeId baseTableTy;

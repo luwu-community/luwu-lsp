@@ -14,6 +14,8 @@
 
 using LSPCancellationToken = std::shared_ptr<Luau::FrontendCancellationToken>;
 
+struct AttributeAtPosition;
+
 struct Reference
 {
     Luau::ModuleName moduleName;
@@ -161,6 +163,13 @@ public:
     lsp::CodeAction codeActionResolve(const lsp::CodeAction& action, const LSPCancellationToken& cancellationToken);
 
     std::optional<lsp::Hover> hover(const lsp::HoverParams& params, const LSPCancellationToken& cancellationToken);
+    std::optional<lsp::Hover> hoverAttribute(
+        const AttributeAtPosition& attribute,
+        const lsp::HoverParams& params,
+        const TextDocument& textDocument,
+        const Luau::Scope& scope,
+        const LSPCancellationToken& cancellationToken
+    );
 
     std::optional<lsp::SignatureHelp> signatureHelp(const lsp::SignatureHelpParams& params, const LSPCancellationToken& cancellationToken);
 

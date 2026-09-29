@@ -192,6 +192,33 @@ end
     CHECK((!ownField || ownField->tokenType != lsp::SemanticTokenTypes::Parameter));
 }
 
+TEST_CASE_FIXTURE(Fixture, "object_typed_as_a_trait_is_not_coloured_as_the_trait")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ENABLE_NEW_SOLVER();
+
+    check(R"(
+trait Entry
+    expect public name: string
+end
+class File(public name: string) implements Entry end
+local function entry(): Entry
+    return File("main.luau")
+end
+local ent = entry()
+print(ent, Entry)
+)");
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+
+    auto object = getSemanticToken(tokens, Luau::Position{9, 6});
+    REQUIRE(object);
+    CHECK_EQ(object->tokenType, lsp::SemanticTokenTypes::Variable);
+
+    auto trait = getSemanticToken(tokens, Luau::Position{9, 11});
+    REQUIRE(trait);
+    CHECK_EQ(trait->tokenType, lsp::SemanticTokenTypes::Interface);
+}
 
 TEST_CASE_FIXTURE(Fixture, "none_is_left_to_the_luwu_grammar")
 {

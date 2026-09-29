@@ -7,7 +7,7 @@
 #include "Luau/ToString.h"
 #include "LSP/LuauExt.hpp"
 #include "LSP/DocumentationParser.hpp"
-#include "LSP/KeywordHovers.hpp"
+#include "LSP/Hovers.hpp"
 
 // Lifted from lutf8lib.cpp
 /*
@@ -103,6 +103,37 @@ struct DocumentationLocation
     Luau::Location location;
 };
 
+// Luwu Declare Statements: whether the file declares `name` (`declare name`, `declare function name`), at its top level
+// or in a `do` block there, the only places a declaration can be.
+static bool declaresGlobal(const Luau::AstStatBlock* block, const Luau::AstName& name)
+{
+    for (const Luau::AstStat* stat : block->body)
+    {
+        if (const auto* inner = stat->as<Luau::AstStatBlock>(); inner && declaresGlobal(inner, name))
+            return true;
+        if (const auto* global = stat->as<Luau::AstStatDeclareGlobal>(); global && global->name == name)
+            return true;
+        if (const auto* function = stat->as<Luau::AstStatDeclareFunction>(); function && function->name == name)
+            return true;
+    }
+
+    return false;
+}
+
+// A global is declared when the file declares it, or when the file doesn't bind it and the environment (the loaded
+// definitions) does. One the file only assigns, or that nothing knows, isn't.
+static bool isDeclaredGlobal(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::AstName& name)
+{
+    if (declaresGlobal(sourceModule.root, name))
+        return true;
+
+    Luau::ScopePtr moduleScope = module.getModuleScope();
+    if (!moduleScope || moduleScope->bindings.count(Luau::Symbol(name)) > 0)
+        return false;
+
+    return moduleScope->parent && moduleScope->parent->lookup(Luau::Symbol(name)).has_value();
+}
+
 // Visitor to find a class statement by name (used to build a hover summary for class values)
 struct FindClassStatByName : Luau::AstVisitor
 {
@@ -177,6 +208,67 @@ static bool isDunderName(std::string_view name)
 static bool isStaticMethod(const Luau::AstClassMethod* method)
 {
     return method->function->args.size == 0 || method->function->args.data[0]->name != "self";
+}
+
+// Luwu Traits (rfcs/classes/traits.md): an `implements` or `needs` list as written, `Gun, Item(...), mod.Named`. Trait arguments are elided:
+// they are expressions over the class's parameters, and the hover is about the class's shape.
+static std::string traitRefListText(const Luau::AstArray<Luau::AstClassTraitRef>& refs)
+{
+    std::string text;
+
+    for (const Luau::AstClassTraitRef& ref : refs)
+    {
+        std::string name;
+        if (auto global = ref.trait->as<Luau::AstExprGlobal>())
+            name = global->name.value;
+        else if (auto local = ref.trait->as<Luau::AstExprLocal>())
+            name = local->local->name.value;
+        else if (auto index = ref.trait->as<Luau::AstExprIndexName>())
+        {
+            if (auto moduleLocal = index->expr->as<Luau::AstExprLocal>())
+                name = std::string(moduleLocal->local->name.value) + "." + index->index.value;
+            else if (auto moduleGlobal = index->expr->as<Luau::AstExprGlobal>())
+                name = std::string(moduleGlobal->name.value) + "." + index->index.value;
+        }
+
+        if (name.empty())
+            continue;
+
+        if (!text.empty())
+            text += ", ";
+
+        text += name;
+        if (ref.hasArgs)
+            text += ref.args.size > 0 ? "(...)" : "()";
+    }
+
+    return text;
+}
+
+// Luwu Traits (rfcs/classes/traits.md): a trait's parameter list, `(category: string, count: number?)`. A trait with parameters is never
+// called, so there is no constructor type to print it from.
+static std::string traitParamListText(const Luau::AstClassPrimaryConstructor* params, const Luau::ModulePtr& definitionModule)
+{
+    std::string text = "(";
+
+    for (size_t i = 0; i < params->args.size; i++)
+    {
+        const Luau::AstLocal* arg = params->args.data[i];
+        if (i > 0)
+            text += ", ";
+
+        text += arg->name.value;
+
+        const Luau::TypeId* resolved = arg->annotation && definitionModule ? definitionModule->astResolvedTypes.find(arg->annotation) : nullptr;
+        if (resolved)
+            text += ": " + Luau::toString(Luau::follow(*resolved));
+
+        bool hasDefault = i < params->argsDefaults.size && params->argsDefaults.data[i];
+        if (hasDefault)
+            text += " = ...";
+    }
+
+    return text + ")";
 }
 
 // Formats a method as "function name(...): ret", printing `self` bare (no type annotation) if
@@ -365,7 +457,8 @@ static std::optional<std::string> buildClassFieldSummary(
     // The object case's "object of X" label is prose, not valid Luau syntax, so the caller
     // prepends it outside the code block; the code block itself always opens with valid
     // `class Name<Generics> ... end` syntax so it can be syntax-highlighted properly.
-    std::string header = "class " + displayName;
+    const bool isTrait = finder.result->isTrait;
+    std::string header = (isTrait ? "trait " : "class ") + displayName;
     bool hasConstructorLine = false;
 
     // Whether the class is constructed by calling it with positional arguments -- which is the
@@ -373,21 +466,25 @@ static std::optional<std::string> buildClassFieldSummary(
     // string)`), the latter being just a terser spelling of the former. When neither is present,
     // the class instead gets the auto-generated POD table constructor, called as `Name{ ... }`,
     // which is displayed quite differently below.
-    bool hasPositionalConstructor = finder.result->primaryConstructor != nullptr;
+    // Luwu Traits (rfcs/classes/traits.md): a trait is called only through its `__create`, and its parameters are no constructor
+    bool hasPositionalConstructor = finder.result->primaryConstructor != nullptr && !isTrait;
     // A private constructor -- `class Account private (...)`, or a `private function __init` --
     // means the class cannot be constructed by calling it from outside its own lexical scope, so
     // the header has to say so: otherwise the signature reads as an invitation to call something
     // that would fail at runtime, and the public factory function that exists precisely because the
     // constructor is private looks redundant.
-    bool constructorIsPrivate =
-        finder.result->primaryConstructor && finder.result->primaryConstructor->visibility == Luau::AstClassMemberVisibility::Private;
+    bool constructorIsPrivate = finder.result->primaryConstructor && !isTrait &&
+                                finder.result->primaryConstructor->visibility == Luau::AstClassMemberVisibility::Private;
     // If nothing in the class is private, the "public " prefix on every member line is just noise
     // -- omit it and let the reader assume public, matching how `private` alone would otherwise
     // stand out on a member line if there were any.
     bool anyPrivateMember = false;
     for (const auto& member : finder.result->members)
     {
-        if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == "__init")
+        // a trait's expected `__init` is a requirement on its implementing classes, and its `__create` is how it's called
+        const auto* method = member.get_if<Luau::AstClassMethod>();
+        bool isConstructor = method && !method->expectLocation && method->functionName == (isTrait ? "__create" : "__init");
+        if (isConstructor)
         {
             hasPositionalConstructor = true;
             if (method->visibility == Luau::AstClassMemberVisibility::Private)
@@ -455,7 +552,7 @@ static std::optional<std::string> buildClassFieldSummary(
                         header += extractArgList(ctorString);
                         hasConstructorLine = true;
                     }
-                    else
+                    else if (!isTrait)
                     {
                         // No custom `__init` -- the class gets an auto-generated ("POD")
                         // constructor that takes a single table of the class's fields, called as
@@ -546,6 +643,25 @@ static std::optional<std::string> buildClassFieldSummary(
             }
         }
     }
+    // Luwu Traits (rfcs/classes/traits.md): a trait's parameters, then the traits a trait needs or a class implements
+    if (isTrait && finder.result->primaryConstructor)
+    {
+        header += traitParamListText(finder.result->primaryConstructor, definitionModule);
+        hasConstructorLine = true;
+    }
+
+    if (std::string needs = traitRefListText(finder.result->needs); !needs.empty())
+    {
+        header += " needs " + needs;
+        hasConstructorLine = true;
+    }
+
+    if (std::string implements = traitRefListText(finder.result->implements); !implements.empty())
+    {
+        header += " implements " + implements;
+        hasConstructorLine = true;
+    }
+
     header += "\n";
 
     // Fields declared by the primary constructor's parameters. These are real fields of the object
@@ -600,7 +716,10 @@ static std::optional<std::string> buildClassFieldSummary(
             if (!showsPrivate(isPrivate))
                 continue;
 
-            std::string line = "    " + visibilityPrefix(isPrivate) + (prop->isConst ? "const " : "") + std::string(prop->name.value) + ": ";
+            std::string expectPrefix = prop->expectLocation ? "expect " : "";
+            // Luwu Traits (rfcs/classes/traits.md): a final field is const already, and is written `final`
+            std::string modifier = prop->finalLocation ? "final " : (prop->isConst ? "const " : "");
+            std::string line = "    " + expectPrefix + visibilityPrefix(isPrivate) + modifier + std::string(prop->name.value) + ": ";
             // Prefer the instantiated type from `et->props` over the AST-resolved type of the
             // annotation, so that generic classes (e.g. `class Box<T> ... end`) show `string`
             // rather than `T` when hovering over a `Box<string>`. See formatMethodLine for the
@@ -617,7 +736,8 @@ static std::optional<std::string> buildClassFieldSummary(
 
             // A class with the auto-generated POD constructor already lists every field in the
             // header's `Name{ ... }` block, so repeating them below it is pure noise.
-            if (isClassValue && !hasPositionalConstructor)
+            // Luwu Traits (rfcs/classes/traits.md): a trait has no such block, so its fields, expected ones included, are listed here
+            if (isClassValue && !hasPositionalConstructor && !isTrait)
                 continue;
 
             pushField(line);
@@ -635,7 +755,10 @@ static std::optional<std::string> buildClassFieldSummary(
         // Skip dunder methods (e.g. `__init`, `__tostring`) -- they're not really part of the
         // "public API surface" this summary is meant to show, and we don't want them crowding
         // out real members when the summary gets truncated.
-        if (isDunderName(method->functionName.value))
+        // Luwu Traits (rfcs/classes/traits.md): except a trait's final and expected ones, which constrain every implementing
+        // class
+        bool constrainsImplementors = isTrait && (method->finalLocation || method->expectLocation);
+        if (isDunderName(method->functionName.value) && !constrainsImplementors)
             continue;
 
         bool isStatic = isStaticMethod(method);
@@ -650,10 +773,79 @@ static std::optional<std::string> buildClassFieldSummary(
         std::string line = formatMethodLine(module, isStatic ? et : objectEt, method, scope, showTableKinds);
         if (line.empty())
             continue;
-        line = "    " + visibilityPrefix(isPrivate) + line;
+
+        // Luwu Traits (rfcs/classes/traits.md): `expect` leads the member, `final` follows the access specifier, as written in the trait
+        std::string expectPrefix = method->expectLocation ? "expect " : "";
+        std::string finalPrefix = method->finalLocation ? "final " : "";
+        line = "    " + expectPrefix + visibilityPrefix(isPrivate) + finalPrefix + line;
 
         totalFunctions++;
         functionEntries.emplace_back(std::move(line), isStatic);
+    }
+
+    // Luwu Traits (rfcs/classes/traits.md): the members a class gets from the traits it implements aren't in its declaration, so they're listed
+    // after its own, each saying which trait it came from
+    if (!isTrait)
+    {
+        // a trait reached twice (listed, and implied through `needs`) lists its members once
+        std::set<std::string> listed;
+
+        auto declaresMember = [&](const std::string& name)
+        {
+            for (const auto& member : finder.result->members)
+            {
+                if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && name == prop->name.value)
+                    return true;
+                if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && name == method->functionName.value)
+                    return true;
+            }
+
+            if (const auto* ctor = finder.result->primaryConstructor)
+                for (const Luau::AstLocal* arg : ctor->args)
+                    if (name == arg->name.value)
+                        return true;
+
+            return false;
+        };
+
+        for (Luau::TypeId trait : objectEt->implementedTraits)
+        {
+            const auto* traitEt = Luau::get<Luau::ExternType>(Luau::follow(trait));
+            if (!traitEt || !traitEt->traitInfo)
+                continue;
+
+            for (const auto& [name, traitProp] : traitEt->props)
+            {
+                // a member the trait has from a trait it needs is listed under that trait
+                bool ownedElsewhere = traitEt->traitInfo->expectations.count(name) || traitEt->traitInfo->fromNeeds.count(name);
+                if (isDunderName(name) || ownedElsewhere || declaresMember(name) || !listed.insert(name).second)
+                    continue;
+
+                auto own = objectEt->props.find(name);
+                if (own == objectEt->props.end() || !own->second.readTy || !showsPrivate(own->second.isPrivate))
+                    continue;
+
+                std::string origin = "  -- from " + traitEt->name;
+                Luau::TypeId ty = Luau::follow(*own->second.readTy);
+
+                if (auto ftv = Luau::get<Luau::FunctionType>(ty))
+                {
+                    types::ToStringNamedFunctionOpts funcOpts;
+                    funcOpts.hideTableKind = !showTableKinds;
+                    funcOpts.hideFirstParameterType = !ftv->argNames.empty() && ftv->argNames[0] && ftv->argNames[0]->name == "self";
+                    funcOpts.baseIndent = "    ";
+                    std::string line =
+                        "    " + visibilityPrefix(own->second.isPrivate) + types::toStringNamedFunction(module, ftv, name, scope, funcOpts) + origin;
+                    totalFunctions++;
+                    functionEntries.emplace_back(std::move(line), false);
+                }
+                else
+                {
+                    std::string modifier = own->second.isFinal ? "final " : (own->second.isConst ? "const " : "");
+                    pushField("    " + visibilityPrefix(own->second.isPrivate) + modifier + name + ": " + Luau::toString(ty) + origin);
+                }
+            }
+        }
     }
 
     // Statics first, instance methods after, each group still in source order.
@@ -875,6 +1067,11 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             return lsp::Hover{{lsp::MarkupKind::Markdown, *docs}, textDocument->convertLocation(keywordMatch->range)};
     }
 
+    // Luwu Attributes (rfcs/attributes-for-types-variables-fields-classes.md): an attribute's own docs, the
+    // reason a `@deprecated` gives, and what its `use` names.
+    if (auto attribute = findAttributeAtPosition(*sourceModule, position))
+        return hoverAttribute(*attribute, params, *textDocument, *scope, cancellationToken);
+
     std::optional<std::pair<std::string, Luau::TypeFun>> typeAliasInformation = std::nullopt;
     std::optional<Luau::TypeId> type = std::nullopt;
     std::optional<std::string> documentationSymbol = getDocumentationSymbolAtPosition(*sourceModule, *module, position);
@@ -882,7 +1079,13 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     std::optional<std::string> classMemberPrefix = std::nullopt;
     std::optional<std::string> classMemberName = std::nullopt;
 
-    if (auto classStat = node->as<Luau::AstStatClass>())
+    // Luwu Declare Statements: a declared class is hovered like a class, through its shape
+    Luau::AstStatClass* classStat = node->as<Luau::AstStatClass>();
+    const bool isDeclaredClass = node->is<Luau::AstStatDeclareClass>();
+    if (isDeclaredClass)
+        classStat = node->as<Luau::AstStatDeclareClass>()->shape;
+
+    if (classStat)
     {
         // Hovering over the class's own name (e.g. `class |Foo ... end`) -- show a summary of the
         // class value itself, same as hovering over a reference to the class elsewhere. Note this
@@ -891,7 +1094,15 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         // value namespace to the class value (the `class` type, with a `__call` constructor).
         if (classStat->name->location.containsClosed(position))
         {
-            if (auto classValueTy = scope->lookup(classStat->name->name))
+            if (isDeclaredClass)
+            {
+                // A declared class binds no value; its class value type hangs off its object type
+                if (auto classTypeFun = scope->lookupType(classStat->name->name.value))
+                    if (auto object = Luau::get<Luau::ExternType>(Luau::follow(classTypeFun->type)); object && object->relation)
+                        if (auto klass = object->relation->get_if<Luau::Klass>())
+                            type = klass->ty;
+            }
+            else if (auto classValueTy = scope->lookup(classStat->name->name))
                 type = *classValueTy;
         }
 
@@ -1009,10 +1220,90 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
                 classMemberName = method->functionName.value;
                 if (auto ty = module->astTypes.find(method->function))
                     type = *ty;
+                else if (auto classTypeFun = scope->lookupType(classStat->name->name.value))
+                {
+                    // A declared method is only a signature, so no expression has its type; the class's own
+                    // member does. A static lives on the class value rather than the instance.
+                    std::vector<PropLookup> propInfo = lookupProp(Luau::follow(classTypeFun->type), method->functionName.value);
+                    if (propInfo.empty())
+                        if (auto object = Luau::get<Luau::ExternType>(Luau::follow(classTypeFun->type)); object && object->relation)
+                            if (auto klass = object->relation->get_if<Luau::Klass>())
+                                propInfo = lookupProp(Luau::follow(klass->ty), method->functionName.value);
+
+                    if (!propInfo.empty() && propInfo[0].property.readTy)
+                        type = propInfo[0].property.readTy;
+                }
                 documentationLocation = {moduleName, method->nameLocation};
             }
 
             break;
+        }
+    }
+    else if (auto externType = node->as<Luau::AstStatDeclareExternType>())
+    {
+        // Luwu Declare Statements: an extern type's name and members aren't nodes of their own
+        std::optional<Luau::TypeFun> externTypeFun = scope->lookupType(externType->name.value);
+        if (externTypeFun && externType->nameLocation.containsClosed(position))
+        {
+            typeAliasInformation = std::make_pair(std::string(externType->name.value), *externTypeFun);
+            type = externTypeFun->type;
+        }
+
+        for (const Luau::AstDeclaredExternTypeProperty& prop : externType->props)
+        {
+            if (type || !externTypeFun)
+                break;
+
+            if (!prop.nameLocation.containsClosed(position))
+                continue;
+
+            if (prop.access == Luau::AstTableAccess::Read)
+                classMemberPrefix = "read ";
+            else if (prop.access == Luau::AstTableAccess::Write)
+                classMemberPrefix = "write ";
+            else
+                classMemberPrefix = "";
+            classMemberName = prop.name.value;
+
+            // The extern type's binding is a placeholder bound to it, and lookupProp doesn't follow
+            if (std::vector<PropLookup> propInfo = lookupProp(Luau::follow(externTypeFun->type), prop.name.value); !propInfo.empty())
+            {
+                const Luau::Property& found = propInfo[0].property;
+                if (found.readTy)
+                    type = found.readTy;
+                else if (found.writeTy)
+                    type = found.writeTy;
+            }
+
+            documentationLocation = {moduleName, prop.nameLocation};
+        }
+    }
+    else if (node->is<Luau::AstStatDeclareGlobal>() || node->is<Luau::AstStatDeclareFunction>())
+    {
+        // Luwu Declare Statements: the declared name itself, shown as `declare name: T` or `declare function name(...)`
+        Luau::AstName declaredName;
+        Luau::Location declaredNameLocation;
+        if (auto declaredGlobal = node->as<Luau::AstStatDeclareGlobal>())
+        {
+            declaredName = declaredGlobal->name;
+            declaredNameLocation = declaredGlobal->nameLocation;
+        }
+        else if (auto declaredFunction = node->as<Luau::AstStatDeclareFunction>())
+        {
+            declaredName = declaredFunction->name;
+            declaredNameLocation = declaredFunction->nameLocation;
+        }
+
+        Luau::ScopePtr moduleScope = module->getModuleScope();
+        if (moduleScope && declaredNameLocation.containsClosed(position))
+        {
+            if (std::optional<Luau::TypeId> declaredTy = moduleScope->lookup(Luau::Symbol(declaredName)))
+            {
+                type = Luau::follow(*declaredTy);
+                classMemberPrefix = "declare ";
+                classMemberName = declaredName.value;
+                documentationLocation = {moduleName, node->location};
+            }
         }
     }
     else if (auto ref = node->as<Luau::AstTypeReference>())
@@ -1634,9 +1925,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     else if (auto global = node->as<Luau::AstExprGlobal>())
     {
         // TODO: should we indicate this is a global somehow?
-        std::string builder = "type ";
+        // Luwu: upstream prints `type name = T`, which reads as a type alias. A global reads like a local instead, as
+        // it was introduced: `declare name: T` when a declaration or the loaded definitions say it exists, and
+        // `global name: T` when the file only assigns it.
+        std::string builder = isDeclaredGlobal(*sourceModule, *module, global->name) ? "declare " : "global ";
         builder += global->name.value;
-        builder += " = " + typeString;
+        builder += ": " + typeString;
         typeString = typeCodeBlock(builder);
     }
     else if (auto string = node->as<Luau::AstExprConstantString>())
@@ -1660,7 +1954,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
 
     std::string objectOfLine;
     if (objectOfType)
-        objectOfLine = typeIdentityLine(*objectOfType, "*Object of* ");
+    {
+        // Luwu Traits (rfcs/classes/traits.md): a value typed as a trait is an object of some class implementing it
+        const auto* objectEt = Luau::get<Luau::ExternType>(*objectOfType);
+        bool isTrait = objectEt && objectEt->traitInfo;
+        objectOfLine = typeIdentityLine(*objectOfType, isTrait ? "*Implements* " : "*Object of* ");
+    }
 
     typeString = importedModuleLine + typeString + objectOfLine + memberOwnerLine;
 
@@ -1719,4 +2018,60 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         hoverRange = textDocument->convertLocation(node->location);
 
     return lsp::Hover{{lsp::MarkupKind::Markdown, typeString}, hoverRange};
+}
+
+std::optional<lsp::Hover> WorkspaceFolder::hoverAttribute(
+    const AttributeAtPosition& attribute,
+    const lsp::HoverParams& params,
+    const TextDocument& textDocument,
+    const Luau::Scope& scope,
+    const LSPCancellationToken& cancellationToken
+)
+{
+    const Luau::AstAttr& attr = *attribute.attr;
+
+    if (!attribute.field)
+    {
+        // The name, up to where its arguments start.
+        Luau::Location nameRange = attr.location;
+        if (attr.args.size > 0)
+            nameRange.end = attr.args.data[0]->location.begin;
+
+        if (auto docs = getKeywordHoverDocs(std::string("attribute_") + attr.name.value))
+            return lsp::Hover{{lsp::MarkupKind::Markdown, *docs}, textDocument.convertLocation(nameRange)};
+
+        return std::nullopt;
+    }
+
+    if (!attribute.fieldValue)
+        return std::nullopt;
+
+    const std::string value(attribute.fieldValue->value.data, attribute.fieldValue->value.size);
+    const lsp::Range range = textDocument.convertLocation(attribute.fieldRange);
+
+    if (*attribute.field == "reason")
+        return lsp::Hover{{lsp::MarkupKind::Markdown, value}, range};
+
+    if (*attribute.field == "use")
+    {
+        // Show whatever `use` names as if it were hovered itself. Its declaration is never inside an
+        // attribute, which also keeps this from coming back here.
+        std::optional<Luau::Location> target = resolveAttributeUse(attribute, scope, value);
+        auto sourceModule = frontend.getSourceModule(fileResolver.getModuleName(params.textDocument.uri));
+        const bool targetIsInAttribute = target && sourceModule && findAttributeAtPosition(*sourceModule, target->begin);
+        if (target && !targetIsInAttribute)
+        {
+            lsp::HoverParams targetParams = params;
+            targetParams.position = textDocument.convertPosition(target->begin);
+            if (std::optional<lsp::Hover> targetHover = hover(targetParams, cancellationToken))
+            {
+                targetHover->range = range;
+                return targetHover;
+            }
+        }
+
+        return lsp::Hover{{lsp::MarkupKind::Markdown, "`" + value + "` is not declared here"}, range};
+    }
+
+    return std::nullopt;
 }

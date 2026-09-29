@@ -39,7 +39,7 @@ commit the pointer).
 
 Use `rebuild.luau` (needs `seal` 0.8.1+) from the repo root. It configures `build/`
 with `-DLSP_LUAU_PATH=<luwu dir>`, reconfigures automatically when that path changes, regenerates keyword hover docs
-(`scripts/generate_keywords`, writes `keyword_hovers.json`), and builds the requested targets.
+(`scripts/generate_hovers`, writes `hovers.json`), and builds the requested targets.
 
 ```bash
 # Dev: build the CLI against LUWU_TEST_PATH (../luwu)

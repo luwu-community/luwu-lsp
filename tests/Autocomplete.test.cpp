@@ -7,6 +7,7 @@
 #include "Platform/InstanceRequireAutoImporter.hpp"
 
 LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(LuwuDestructuring)
 
 std::optional<lsp::CompletionItem> getItem(const std::vector<lsp::CompletionItem>& items, const std::string& label)
 {
@@ -2626,6 +2627,64 @@ TEST_CASE_FIXTURE(RobloxFragmentAutocompleteFixture, "fragment_autocomplete_is_n
 
     auto results = workspace.completion(params, /* cancellationToken= */ nullptr);
     CHECK(!results.empty());
+}
+
+static std::vector<lsp::CompletionItem> completeDestructuring(Fixture& fixture, const std::string& text)
+{
+    auto [source, marker] = sourceWithMarker(text);
+    auto uri = fixture.newDocument("foo.luau", source);
+
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    return fixture.workspace.completion(params, nullptr);
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructuring_snippet_writes_the_value_first")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    enableSnippetSupport(client->capabilities);
+
+    auto item = requireItem(completeDestructuring(*this, "local cat = {name = \"a\"}\nconst .|"), ".{}");
+    REQUIRE(item.textEdit);
+    CHECK_EQ(item.textEdit->newText, ".{$2} = $1");
+    CHECK_EQ(item.textEdit->range.start, lsp::Position{1, 6});
+    CHECK_EQ(item.textEdit->range.end, lsp::Position{1, 7});
+    CHECK_EQ(item.filterText, ".");
+
+    item = requireItem(completeDestructuring(*this, "local fs.|"), ".{}");
+    REQUIRE(item.textEdit);
+    CHECK_EQ(item.textEdit->newText, "fs.{$2} = $1");
+    CHECK_EQ(item.textEdit->range.start, lsp::Position{0, 6});
+    CHECK_EQ(item.filterText, "fs.");
+
+    // Explicit invoke on an empty binding
+    item = requireItem(completeDestructuring(*this, "    const |"), ".{}");
+    REQUIRE(item.textEdit);
+    CHECK_EQ(item.textEdit->newText, ".{$2} = $1");
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructuring_snippet_only_where_a_pattern_can_start")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    enableSnippetSupport(client->capabilities);
+
+    // A name being typed: Enter would accept the snippet
+    CHECK_FALSE(getItem(completeDestructuring(*this, "local x|"), ".{}"));
+    // The value is already there
+    CHECK_FALSE(getItem(completeDestructuring(*this, "local cat = {}\nconst .| = cat"), ".{}"));
+    // An index, not a binding
+    CHECK_FALSE(getItem(completeDestructuring(*this, "local cat = {}\nlocal x = cat.|"), ".{}"));
+    CHECK_FALSE(getItem(completeDestructuring(*this, "local function|"), ".{}"));
+    CHECK_FALSE(getItem(completeDestructuring(*this, "-- const .|"), ".{}"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructuring_snippet_needs_the_flag")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, false};
+    enableSnippetSupport(client->capabilities);
+
+    CHECK_FALSE(getItem(completeDestructuring(*this, "const .|"), ".{}"));
 }
 
 TEST_SUITE_END();
