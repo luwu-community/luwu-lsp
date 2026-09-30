@@ -35,10 +35,12 @@ enum struct AstLocalInfo
 // A name that refers to a Luwu class: either the class value itself, or the type of objects built
 // from it, which is what a `: UserId` annotation resolves to. Host-declared extern types (Roblox's
 // `Instance` and friends) are ExternTypes too, and aren't classes anyone wrote as one.
+// Luwu Traits (rfcs/classes/traits.md): a trait's value is rooted at `trait` rather than `class`.
 static bool namesUserDefinedClass(const Luau::TypeId ty, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
 {
     const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
-    return et && (et->parent == builtinTypes->classType || et->parent == builtinTypes->objectType);
+    return et &&
+           (et->parent == builtinTypes->classType || et->parent == builtinTypes->objectType || et->parent == builtinTypes->traitType);
 }
 
 // The class value itself, as opposed to an object of it: `Player` is a class, `local p = Player(…)`
@@ -46,7 +48,7 @@ static bool namesUserDefinedClass(const Luau::TypeId ty, Luau::NotNull<Luau::Bui
 static bool isUserDefinedClassValue(const Luau::TypeId ty, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
 {
     const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
-    return et && et->parent == builtinTypes->classType;
+    return et && (et->parent == builtinTypes->classType || et->parent == builtinTypes->traitType);
 }
 
 // Luwu Traits (rfcs/classes/traits.md): the trait value itself, as opposed to an object of a class implementing it.

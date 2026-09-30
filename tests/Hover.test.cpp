@@ -6,6 +6,7 @@
 
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuGenericNominals)
+LUAU_FASTFLAG(LuwuTraits)
 
 TEST_SUITE_BEGIN("Hover");
 
@@ -914,6 +915,29 @@ TEST_CASE_FIXTURE(Fixture, "hovering_over_const_class_property_shows_const")
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
     CHECK_EQ(result->contents.value, codeBlock("luwu", "public const name: string"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "hovering_over_optional_expected_function_shows_question_mark")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto [source, marker] = sourceWithMarker(R"(
+        trait Equips
+            expect public function |equipped?(self): boolean
+        end
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_NE(result->contents.value.find("equipped?("), std::string::npos);
 }
 
 TEST_CASE_FIXTURE(Fixture, "hovering_over_class_keyword_of_exported_class_shows_export_class_docs")

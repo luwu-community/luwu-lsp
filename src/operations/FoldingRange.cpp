@@ -75,6 +75,13 @@ struct FoldingRangeVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // Luwu Classes (rfcs/classes): a class or trait folds like a block, down to its `end`
+    bool visit(Luau::AstStatClass* cls) override
+    {
+        addFoldingRange(cls->location.begin, cls->location.end);
+        return true;
+    }
+
     // Luwu Declare Statements: a declared class or extern type folds like a block, down to its `end`
     bool visit(Luau::AstStatDeclareClass* declaredClass) override
     {

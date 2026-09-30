@@ -302,7 +302,9 @@ static std::string formatMethodLine(
     // Member lines are printed at "    " indentation (see buildClassFieldSummary) -- match that so
     // a long parameter list's continuation lines line up with the "public"/"private" keyword.
     funcOpts.baseIndent = "    ";
-    return types::toStringNamedFunction(module, ftv, method->functionName.value, scope, funcOpts);
+    // Luwu Traits (rfcs/classes/traits.md): an optional expected function is written `f?`
+    std::string name = std::string(method->functionName.value) + (method->isOptional ? "?" : "");
+    return types::toStringNamedFunction(module, ftv, name, scope, funcOpts);
 }
 
 // Extracts just the "(args)" portion from a named-function string like "function (x: number): Foo",
@@ -993,6 +995,13 @@ static std::optional<Primitive> builtinPrimitive(const Luau::Frontend& frontend,
             " have multiple classes/objects with the exact same fields but different names and the type solver knows they're"
             " all unique and can't accidentally be mixed up or casted into one another."
         };
+    if (followed == builtins->traitType)
+        return Primitive{"trait",
+            "A trait's value: `trait Name ... end` declares one. Write `trait<Name>` for a specific trait or plain `trait` to allow any"
+            " trait at all. A trait is not a class: it can't be passed to `class.isinstance`; check an object against it with"
+            " `class.implements(obj, SomeTrait)`, which narrows `obj` to the trait in an if statement or expression. `type` and `typeof`"
+            " both answer \"trait\" for one."
+        };
     if (followed == builtins->externType)
         return Primitive{"userdata",
             "A value given to your code by the embedder. Userdata are called extern types in the type system because they're implemented"
@@ -1217,7 +1226,8 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             }
             else if (const auto* method = member.get_if<Luau::AstClassMethod>())
             {
-                classMemberName = method->functionName.value;
+                // Luwu Traits (rfcs/classes/traits.md): an optional expected function is written `f?`
+                classMemberName = std::string(method->functionName.value) + (method->isOptional ? "?" : "");
                 if (auto ty = module->astTypes.find(method->function))
                     type = *ty;
                 else if (auto classTypeFun = scope->lookupType(classStat->name->name.value))
@@ -1526,17 +1536,20 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
                     seen.insert(Luau::follow(relatedTy));
             }
 
-            if (spanTy == builtins->externType || spanTy == builtins->objectType || spanTy == builtins->classType || spanTy == builtins->vectorType)
+            bool isRoot = spanTy == builtins->externType || spanTy == builtins->objectType || spanTy == builtins->classType ||
+                          spanTy == builtins->vectorType || spanTy == builtins->traitType;
+            if (isRoot)
                 continue;
 
             if (isEnclosingClass(spanTy))
                 continue;
 
             std::optional<std::string> summary;
-            if (et->parent == builtins->classType || et->parent == builtins->objectType)
+            // Luwu Traits (rfcs/classes/traits.md): a trait's value is rooted at `trait`, and summarized like a class value
+            bool isClassValue = et->parent == builtins->classType || et->parent == builtins->traitType;
+            if (isClassValue || et->parent == builtins->objectType)
                 summary = buildClassFieldSummary(
-                    frontend, module, moduleName, spanTy, et, scope, config.hover.showTableKinds, et->parent == builtins->classType,
-                    kMaxReferencedSummaryMembers
+                    frontend, module, moduleName, spanTy, et, scope, config.hover.showTableKinds, isClassValue, kMaxReferencedSummaryMembers
                 );
             else if (!et->props.empty())
                 summary = buildExternTypeSummary(module, spanTy, et, scope, config.hover.showTableKinds, kMaxReferencedSummaryMembers);
@@ -1865,7 +1878,8 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             typeString = typeCodeBlock(*classMemberPrefix + *classMemberName + ": " + typeString);
         }
     }
-    else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->parent == frontend.builtinTypes->classType)
+    else if (auto et = Luau::get<Luau::ExternType>(*type);
+             et && (et->parent == frontend.builtinTypes->classType || et->parent == frontend.builtinTypes->traitType))
     {
         // The class value itself: the summary *is* the answer here, rather than something the
         // hovered expression merely has the type of
