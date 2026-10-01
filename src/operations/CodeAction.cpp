@@ -846,6 +846,9 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             computeRefactorings(params, *sourceModule, *textDocument, requestRange, result);
     }
 
+    if (params.context.wants(lsp::CodeActionKind::RefactorExtract))
+        computeClassRefactorings(params, *sourceModule, *textDocument, requestRange, result);
+
     if (params.context.wants(lsp::CodeActionKind::RefactorRewrite))
     {
         FindParameterListAtPosition parameterListFinder(requestRange.begin);

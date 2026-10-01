@@ -1,6 +1,10 @@
 #include "doctest.h"
 #include "Fixture.h"
 
+LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(LuwuTraits)
+LUAU_FASTFLAG(LuwuGenericNominals)
+
 TEST_SUITE_BEGIN("Refactoring");
 
 // Extract Variable
@@ -417,8 +421,23 @@ print(x)
 
 // Luwu Traits (rfcs/classes/traits.md): Extract class into a trait
 
+static std::optional<lsp::CodeAction> extractTraitAction(Fixture& fixture, const lsp::DocumentUri& uri, lsp::Range range, const std::string& title)
+{
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = range;
+    params.context.only = {lsp::CodeActionKind::RefactorExtract};
+
+    auto result = fixture.workspace.codeAction(params, nullptr);
+    return findCodeAction(result, title);
+}
+
 TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait")
 {
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
     auto source = R"(
 class Cat
     public name: string = "Taz"
@@ -438,14 +457,8 @@ end
 )";
     auto uri = newDocument("test.luau", source);
 
-    lsp::CodeActionParams params;
-    params.textDocument.uri = uri;
     // the cursor on the class's name
-    params.range = {{1, 7}, {1, 7}};
-    params.context.only = {lsp::CodeActionKind::RefactorExtract};
-
-    auto result = workspace.codeAction(params, nullptr);
-    auto action = findCodeAction(result, "Extract class 'Cat' into a trait");
+    auto action = extractTraitAction(*this, uri, {{1, 7}, {1, 7}}, "Extract class 'Cat' into a trait");
     REQUIRE(action);
 
     auto resolved = workspace.codeActionResolve(*action, nullptr);
@@ -454,14 +467,208 @@ end
     auto& changes = resolved.edit->changes.at(uri);
     auto newSource = applyEdit(source, changes);
 
-    // construction stays with the class; everything else moves, and the trait expects the class's fields
+    // fields with defaults and functions move; construction stays with the class
     CHECK_EQ(newSource, R"(
 trait CatBehavior
-    expect public name: string
-    expect public lives: number
+    public name: string = "Taz"
+    public lives: number = 9
 
     public function speak(self): string
         return `{self.name} meows`
+    end
+
+    public function lose_life(self)
+        self.lives -= 1
+    end
+end
+
+class Cat implements CatBehavior
+    public function __init(self)
+    end
+end
+)");
+
+    // the new trait's name is offered for renaming
+    REQUIRE(resolved.command);
+    CHECK_EQ(resolved.command->command, "luwu.rename");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait_expects_fields_without_defaults")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+class Dog(private const owner: string)
+    public name: string?
+    public tricks = 0
+
+    public function learn(self)
+        self.tricks += 1
+    end
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    // the cursor on the `class` keyword
+    auto action = extractTraitAction(*this, uri, {{1, 0}, {1, 0}}, "Extract class 'Dog' into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    auto newSource = applyEdit(source, resolved.edit->changes.at(uri));
+
+    // a field without a default, and a primary constructor parameter, stay with the class and are expected
+    CHECK_EQ(newSource, R"(
+trait DogBehavior
+    expect public name: string?
+    expect private const owner: string
+
+    public tricks = 0
+
+    public function learn(self)
+        self.tricks += 1
+    end
+end
+
+class Dog(private const owner: string) implements DogBehavior
+    public name: string?
+end
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait_not_offered_with_nothing_to_move")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+class Point
+    x: number
+
+    function __init(self)
+        self.x = 0
+    end
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_FALSE(extractTraitAction(*this, uri, {{1, 7}, {1, 7}}, "Extract class 'Point' into a trait"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait_not_offered_inside_class_body")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+class Point
+    x = 0
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK(extractTraitAction(*this, uri, {{1, 7}, {1, 7}}, "Extract class 'Point' into a trait"));
+    CHECK_FALSE(extractTraitAction(*this, uri, {{2, 4}, {2, 4}}, "Extract class 'Point' into a trait"));
+}
+
+static const char* const catWithFunctions = R"(
+class Cat
+    public name: string = "Taz"
+    public lives: number = 9
+
+    public function __init(self)
+    end
+
+    public function speak(self): string
+        return `{self.name} {self:sound()}`
+    end
+
+    private function sound(self): string
+        return "meows"
+    end
+
+    public function lose_life(self)
+        self.lives -= 1
+    end
+end
+)";
+
+TEST_CASE_FIXTURE(Fixture, "extract_function_into_trait")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("test.luau", catWithFunctions);
+
+    // the cursor on the function's name
+    auto action = extractTraitAction(*this, uri, {{8, 20}, {8, 20}}, "Extract function 'speak' into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    auto newSource = applyEdit(catWithFunctions, resolved.edit->changes.at(uri));
+
+    // what the function uses of the class, a field and another function, is expected
+    CHECK_EQ(newSource, R"(
+trait CatBehavior
+    expect public name: string
+    expect private function sound(self): string
+
+    public function speak(self): string
+        return `{self.name} {self:sound()}`
+    end
+end
+
+class Cat implements CatBehavior
+    public name: string = "Taz"
+    public lives: number = 9
+
+    public function __init(self)
+    end
+
+    private function sound(self): string
+        return "meows"
+    end
+
+    public function lose_life(self)
+        self.lives -= 1
+    end
+end
+)");
+
+    REQUIRE(resolved.command);
+    CHECK_EQ(resolved.command->command, "luwu.rename");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_selected_functions_into_trait")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("test.luau", catWithFunctions);
+
+    auto action = extractTraitAction(*this, uri, {{12, 4}, {18, 7}}, "Extract 2 functions into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    auto newSource = applyEdit(catWithFunctions, resolved.edit->changes.at(uri));
+
+    CHECK_EQ(newSource, R"(
+trait CatBehavior
+    expect public lives: number
+
+    private function sound(self): string
+        return "meows"
     end
 
     public function lose_life(self)
@@ -475,30 +682,196 @@ class Cat implements CatBehavior
 
     public function __init(self)
     end
+
+    public function speak(self): string
+        return `{self.name} {self:sound()}`
+    end
 end
 )");
-
-    // the new trait's name is offered for renaming
-    REQUIRE(resolved.command);
-    CHECK_EQ(resolved.command->command, "luwu.rename");
 }
 
-TEST_CASE_FIXTURE(Fixture, "extract_class_into_trait_not_offered_without_functions")
+TEST_CASE_FIXTURE(Fixture, "extract_function_from_trait_into_needed_trait")
 {
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
     auto source = R"(
-class Point
-    x: number = 0
+trait Greeter
+    expect name: string
+    greeting = "hello"
+
+    function greet(self)
+        return `{self.greeting}, {self.name}`
+    end
+end
+
+class Cat implements Greeter
+    name = "whiskers"
 end
 )";
     auto uri = newDocument("test.luau", source);
 
-    lsp::CodeActionParams params;
-    params.textDocument.uri = uri;
-    params.range = {{1, 7}, {1, 7}};
-    params.context.only = {lsp::CodeActionKind::RefactorExtract};
+    auto action = extractTraitAction(*this, uri, {{5, 14}, {5, 14}}, "Extract function 'greet' into a trait");
+    REQUIRE(action);
 
-    auto result = workspace.codeAction(params, nullptr);
-    CHECK_FALSE(findCodeAction(result, "Extract class 'Point' into a trait"));
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    auto newSource = applyEdit(source, resolved.edit->changes.at(uri));
+
+    // a trait needs the new trait rather than implementing it
+    CHECK_EQ(newSource, R"(
+trait GreeterBehavior
+    expect name: string
+    expect greeting
+
+    function greet(self)
+        return `{self.greeting}, {self.name}`
+    end
+end
+
+trait Greeter needs GreeterBehavior
+    expect name: string
+    greeting = "hello"
+end
+
+class Cat implements Greeter
+    name = "whiskers"
+end
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_function_into_trait_picks_an_unused_name")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+trait CatBehavior
+end
+
+class Cat implements CatBehavior
+    function speak(self)
+    end
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    auto action = extractTraitAction(*this, uri, {{5, 14}, {5, 14}}, "Extract function 'speak' into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    CHECK_EQ(applyEdit(source, resolved.edit->changes.at(uri)), R"(
+trait CatBehavior
+end
+
+trait CatBehavior2
+    function speak(self)
+    end
+end
+
+class Cat implements CatBehavior, CatBehavior2
+end
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_function_into_trait_not_offered_inside_a_function_body")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("test.luau", catWithFunctions);
+
+    CHECK_FALSE(extractTraitAction(*this, uri, {{9, 8}, {9, 14}}, "Extract function 'speak' into a trait"));
+    CHECK_FALSE(extractTraitAction(*this, uri, {{5, 22}, {5, 22}}, "Extract function '__init' into a trait"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_generic_class_into_trait")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ScopedFastFlag luwuGenericNominals{FFlag::LuwuGenericNominals, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+class Box<T = string>
+    value: T?
+
+    function get(self): T?
+        return self.value
+    end
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    auto action = extractTraitAction(*this, uri, {{1, 7}, {1, 7}}, "Extract class 'Box' into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    // the trait takes the generic parameters as written, and the class passes them on
+    CHECK_EQ(applyEdit(source, resolved.edit->changes.at(uri)), R"(
+trait BoxBehavior<T = string>
+    expect value: T?
+
+    function get(self): T?
+        return self.value
+    end
+end
+
+class Box<T = string> implements BoxBehavior<T>
+    value: T?
+end
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "extract_function_from_generic_trait_into_trait")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ScopedFastFlag luwuGenericNominals{FFlag::LuwuGenericNominals, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+trait Signal<T, A...>
+    expect handlers: { (A...) -> T }
+
+    function fire(self, ...: A...)
+        for _, handler in self.handlers do
+            handler(...)
+        end
+    end
+end
+)";
+    auto uri = newDocument("test.luau", source);
+
+    auto action = extractTraitAction(*this, uri, {{4, 14}, {4, 14}}, "Extract function 'fire' into a trait");
+    REQUIRE(action);
+
+    auto resolved = workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+
+    CHECK_EQ(applyEdit(source, resolved.edit->changes.at(uri)), R"(
+trait SignalBehavior<T, A...>
+    expect handlers: { (A...) -> T }
+
+    function fire(self, ...: A...)
+        for _, handler in self.handlers do
+            handler(...)
+        end
+    end
+end
+
+trait Signal<T, A...> needs SignalBehavior<T, A...>
+    expect handlers: { (A...) -> T }
+end
+)");
 }
 
 TEST_SUITE_END();

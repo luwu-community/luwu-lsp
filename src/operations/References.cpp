@@ -367,6 +367,160 @@ std::vector<Reference> WorkspaceFolder::findAllTypeReferences(
     return result;
 }
 
+namespace
+{
+struct FindClassMemberReferences : public Luau::AstVisitor
+{
+    const Luau::ModuleName& moduleName;
+    const Luau::ModulePtr& module;
+    const Luau::Name& name;
+    const std::vector<types::ClassMemberOrigin>& family;
+    std::vector<Reference>& result;
+
+    FindClassMemberReferences(const Luau::ModuleName& moduleName, const Luau::ModulePtr& module, const Luau::Name& name,
+        const std::vector<types::ClassMemberOrigin>& family, std::vector<Reference>& result)
+        : moduleName(moduleName)
+        , module(module)
+        , name(name)
+        , family(family)
+        , result(result)
+    {
+    }
+
+    void add(const Luau::Location& location)
+    {
+        Reference reference{moduleName, location};
+        if (!contains(result, reference))
+            result.push_back(std::move(reference));
+    }
+
+    bool visit(Luau::AstExprIndexName* indexName) override
+    {
+        if (indexName->index == name.c_str())
+            if (auto ty = module->astTypes.find(indexName->expr))
+                if (auto origin = types::findClassMemberOrigin(*ty, name); origin && contains(family, *origin))
+                    add(indexName->indexLocation);
+        return true;
+    }
+
+    bool visit(Luau::AstStatClass* classStat) override
+    {
+        for (const auto& member : classStat->members)
+        {
+            const Luau::Location* nameLocation = nullptr;
+            if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name == name.c_str())
+                nameLocation = &prop->nameLocation;
+            else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == name.c_str())
+                nameLocation = &method->nameLocation;
+
+            if (nameLocation && contains(family, types::ClassMemberOrigin{moduleName, *nameLocation}))
+                add(*nameLocation);
+        }
+        // methods may use the member through `self`
+        return true;
+    }
+};
+
+// The location of the name of `classStat`'s own member `name`, if it declares one
+std::optional<Luau::Location> findOwnClassMember(Luau::AstStatClass* classStat, const Luau::Name& name)
+{
+    for (const auto& member : classStat->members)
+    {
+        if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name == name.c_str())
+            return prop->nameLocation;
+        else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == name.c_str())
+            return method->nameLocation;
+    }
+    return std::nullopt;
+}
+} // namespace
+
+std::vector<Reference> WorkspaceFolder::findAllClassMemberReferences(
+    const types::ClassMemberOrigin& origin, const Luau::Name& name, const LSPCancellationToken& cancellationToken)
+{
+    // The members to rename together: this one, the trait members it overrides or fulfills, and the members of
+    // implementing classes that override or fulfill those. Classes and traits are always top-level statements.
+    std::vector<types::ClassMemberOrigin> family{origin};
+    std::vector<Luau::ModuleName> modules;
+
+    bool changed = true;
+    while (changed)
+    {
+        changed = false;
+
+        for (size_t i = 0; i < family.size(); i++)
+        {
+            // members of definition-file classes aren't in any module we can edit
+            if (!frontend.sourceNodes.count(family[i].moduleName))
+                continue;
+
+            for (auto& dependent : findReverseDependencies(family[i].moduleName))
+                if (!contains(modules, dependent))
+                    modules.push_back(std::move(dependent));
+        }
+
+        for (const auto& moduleName : modules)
+        {
+            checkStrict(moduleName, cancellationToken);
+            throwIfCancelled(cancellationToken);
+            auto sourceModule = frontend.getSourceModule(moduleName);
+            auto module = getModule(moduleName, /* forAutocomplete: */ true);
+            if (!sourceModule || !module)
+                continue;
+
+            for (Luau::AstStat* stat : sourceModule->root->body)
+            {
+                auto* classStat = stat->as<Luau::AstStatClass>();
+                if (!classStat)
+                    continue;
+
+                auto nameLocation = findOwnClassMember(classStat, name);
+                if (!nameLocation)
+                    continue;
+
+                auto classType = module->getModuleScope()->lookupType(classStat->name->name.value);
+                if (!classType)
+                    continue;
+
+                types::ClassMemberOrigin own{moduleName, *nameLocation};
+                auto traitOrigins = types::findImplementedTraitMemberOrigins(classType->type, name);
+
+                bool inFamily = contains(family, own);
+                if (!inFamily && std::none_of(traitOrigins.begin(), traitOrigins.end(), [&](auto& o) { return contains(family, o); }))
+                    continue;
+
+                if (!inFamily)
+                {
+                    family.push_back(own);
+                    changed = true;
+                }
+                for (auto& traitOrigin : traitOrigins)
+                {
+                    if (!contains(family, traitOrigin))
+                    {
+                        family.push_back(std::move(traitOrigin));
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<Reference> result;
+    for (const auto& moduleName : modules)
+    {
+        auto sourceModule = frontend.getSourceModule(moduleName);
+        auto module = getModule(moduleName, /* forAutocomplete: */ true);
+        if (!sourceModule || !module)
+            continue;
+
+        FindClassMemberReferences finder(moduleName, module, name, family, result);
+        sourceModule->root->visit(&finder);
+    }
+
+    return result;
+}
+
 static std::vector<lsp::Location> processReferences(WorkspaceFileResolver& fileResolver, const std::vector<Reference>& references)
 {
     std::vector<lsp::Location> result{};

@@ -29,6 +29,17 @@ static std::vector<lsp::Location> toLspLocations(
     return result;
 }
 
+static std::vector<lsp::Location> classMemberLocations(
+    WorkspaceFolder* workspaceFolder, const types::ClassMemberOrigin& origin, const Luau::Name& name, const LSPCancellationToken& cancellationToken)
+{
+    std::vector<lsp::Location> result;
+    for (const auto& reference : workspaceFolder->findAllClassMemberReferences(origin, name, cancellationToken))
+        if (auto textDocument = workspaceFolder->fileResolver.getOrCreateTextDocumentFromModuleName(reference.moduleName))
+            result.emplace_back(lsp::Location{textDocument->uri(),
+                {textDocument->convertPosition(reference.location.begin), textDocument->convertPosition(reference.location.end)}});
+    return result;
+}
+
 // Finds the class statement (always top-level) in `root` whose own name is `local`, if any.
 static Luau::AstStatClass* findClassStatByNameLocal(Luau::AstStatBlock* root, Luau::AstLocal* local)
 {
@@ -71,22 +82,16 @@ std::vector<lsp::Location> getReferencesForRenaming(
         classStat && classStat->name->location.containsClosed(position))
         return toLspLocations(params.textDocument.uri, *textDocument, types::findClassNameReferences(*sourceModule, classStat));
 
-    // Renaming a field, method, or static function, from its declaration inside a class.
-    if (auto* classStat = types::findClassStatContainingPosition(sourceModule->root, position))
+    // Renaming a field, method, or static function, from its declaration inside a class or trait. An expected
+    // function's signature spans its name, so this can't skip positions inside methods.
+    if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, position))
     {
         for (const auto& member : classStat->members)
         {
-            Luau::AstName memberName;
             if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->nameLocation.containsClosed(position))
-                memberName = prop->name;
+                return classMemberLocations(workspaceFolder, {moduleName, prop->nameLocation}, prop->name.value, cancellationToken);
             else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->nameLocation.containsClosed(position))
-                memberName = method->functionName;
-            else
-                continue;
-
-            auto module = workspaceFolder->getModule(moduleName, /* forAutocomplete: */ true);
-            return toLspLocations(
-                params.textDocument.uri, *textDocument, types::findClassMemberReferences(*sourceModule, module, classStat, memberName));
+                return classMemberLocations(workspaceFolder, {moduleName, method->nameLocation}, method->functionName.value, cancellationToken);
         }
     }
 
@@ -129,14 +134,18 @@ std::vector<lsp::Location> getReferencesForRenaming(
             symbol = global->name;
         else if (auto indexName = expr->as<Luau::AstExprIndexName>())
         {
-            // Renaming a field, method, or static function from a usage site
-            // (`dog.name`/`Dog.method`/`dog:method`).
+            // Renaming a field, method, or static function from a usage site (`dog.name`/`Dog.method`/`dog:method`),
+            // wherever the class or trait declaring it lives.
             auto module = workspaceFolder->getModule(moduleName, /* forAutocomplete: */ true);
             if (auto ty = module->astTypes.find(indexName->expr))
             {
-                if (auto* classStat = types::findClassStatFromExternType(sourceModule->root, *ty))
-                    return toLspLocations(params.textDocument.uri, *textDocument,
-                        types::findClassMemberReferences(*sourceModule, module, classStat, indexName->index));
+                if (auto origin = types::findClassMemberOrigin(*ty, indexName->index.value))
+                {
+                    auto locations = classMemberLocations(workspaceFolder, *origin, indexName->index.value, cancellationToken);
+                    if (locations.empty())
+                        throw JsonRpcException(lsp::ErrorCode::RequestFailed, "Cannot rename a member declared in a definition file");
+                    return locations;
+                }
             }
         }
     }

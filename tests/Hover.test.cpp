@@ -1647,7 +1647,8 @@ TEST_CASE_FIXTURE(Fixture, "hover_truncates_large_where_clause_tables_without_un
 /// on first.
 struct ClassFlags
 {
-    ScopedFastFlag sffs[] = {{FFlag::LuwuClasses, true}, {FFlag::LuauSolverV2, true}};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag solverV2{FFlag::LuauSolverV2, true};
 };
 
 struct ClassFixture

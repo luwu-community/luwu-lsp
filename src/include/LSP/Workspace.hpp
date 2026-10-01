@@ -11,6 +11,7 @@
 #include "Protocol/Extensions.hpp"
 #include "LSP/Client.hpp"
 #include "LSP/WorkspaceFileResolver.hpp"
+#include "LSP/LuauExt.hpp"
 
 using LSPCancellationToken = std::shared_ptr<Luau::FrontendCancellationToken>;
 
@@ -152,6 +153,11 @@ public:
     std::vector<Reference> findAllFunctionReferences(const Luau::TypeId ty, const LSPCancellationToken& cancellationToken);
     std::vector<Reference> findAllTypeReferences(
         const Luau::ModuleName& moduleName, const Luau::Name& typeName, const LSPCancellationToken& cancellationToken);
+    // Every declaration and `.name`/`:name` access of the class or trait member declared at `origin`, across modules.
+    // Includes the members it's tied to through traits: the trait members it overrides or fulfills, and the members
+    // of implementing classes that override or fulfill it.
+    std::vector<Reference> findAllClassMemberReferences(
+        const types::ClassMemberOrigin& origin, const Luau::Name& name, const LSPCancellationToken& cancellationToken);
 
     std::vector<lsp::CompletionItem> completion(const lsp::CompletionParams& params, const LSPCancellationToken& cancellationToken);
 

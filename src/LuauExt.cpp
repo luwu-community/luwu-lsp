@@ -1281,68 +1281,94 @@ Luau::AstStatClass* types::findClassStatFromExternType(Luau::AstStatBlock* root,
 
 namespace
 {
-// Covers both fields and methods/static functions: usage sites (`obj.member`/`obj:member`) look
-// identical at the AST level regardless of which kind of member is being accessed.
-struct FindClassMemberUsages : public Luau::AstVisitor
+// The member `name` of `ty` (or of one of its parents), with the extern type that has it.
+std::optional<std::pair<const Luau::ExternType*, const Luau::Property*>> lookupClassMember(Luau::TypeId ty, const Luau::Name& name)
 {
-    const Luau::ModulePtr& module;
-    Luau::AstName memberName;
-    Luau::Location classLocation;
-    std::vector<Luau::Location> result;
-
-    FindClassMemberUsages(const Luau::ModulePtr& module, Luau::AstName memberName, Luau::Location classLocation)
-        : module(module)
-        , memberName(memberName)
-        , classLocation(classLocation)
+    const auto* externType = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    while (externType)
     {
-    }
-
-    bool visit(Luau::AstExprIndexName* indexName) override
-    {
-        if (indexName->index == memberName)
+        if (auto it = externType->props.find(name); it != externType->props.end())
         {
-            if (auto ty = module->astTypes.find(indexName->expr))
-            {
-                if (auto location = externTypeDefinitionLocation(*ty); location && *location == classLocation)
-                    result.push_back(indexName->indexLocation);
-            }
+            if (!it->second.location)
+                return std::nullopt;
+            return std::make_pair(externType, &it->second);
         }
 
-        return true;
+        externType = externType->parent ? Luau::get<Luau::ExternType>(Luau::follow(*externType->parent)) : nullptr;
     }
 
-    bool visit(Luau::AstStatClass* classStat) override
-    {
-        if (classStat->location == classLocation)
-        {
-            for (const auto& member : classStat->members)
-            {
-                if (const auto* prop = member.get_if<Luau::AstClassProperty>())
-                {
-                    if (prop->name == memberName)
-                        result.push_back(prop->nameLocation);
-                }
-                else if (const auto* method = member.get_if<Luau::AstClassMethod>())
-                {
-                    if (method->functionName == memberName)
-                        result.push_back(method->nameLocation);
-                }
-            }
-        }
+    return std::nullopt;
+}
 
-        // Continue descending, since methods (including this one) may reference the target member
-        // recursively via `self.member`/`self:member()` in their own bodies.
-        return true;
-    }
-};
+// A class value's own type may not carry its definition module, so fall back to its object type's (and vice versa).
+Luau::ModuleName externTypeModuleName(const Luau::ExternType* externType)
+{
+    if (!externType->definitionModuleName.empty() || !externType->relation)
+        return externType->definitionModuleName;
+
+    Luau::TypeId relatedTy;
+    if (const auto* obj = externType->relation->get_if<Luau::Obj>())
+        relatedTy = obj->ty;
+    else if (const auto* klass = externType->relation->get_if<Luau::Klass>())
+        relatedTy = klass->ty;
+    else
+        return externType->definitionModuleName;
+
+    if (const auto* related = Luau::get<Luau::ExternType>(Luau::follow(relatedTy)))
+        return related->definitionModuleName;
+    return externType->definitionModuleName;
+}
 } // namespace
 
-std::vector<Luau::Location> types::findClassMemberReferences(
-    const Luau::SourceModule& source, const Luau::ModulePtr& module, Luau::AstStatClass* classStat, const Luau::AstName& methodName)
+std::optional<types::ClassMemberOrigin> types::findClassMemberOrigin(Luau::TypeId ty, const Luau::Name& name)
 {
-    FindClassMemberUsages finder(module, methodName, classStat->location);
-    source.root->visit(&finder);
-    return std::move(finder.result);
+    const auto* externType = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    if (!externType)
+        return std::nullopt;
+
+    // A trait intersection (`A & B`) has the members of each of its traits
+    for (Luau::TypeId trait : externType->traitIntersection)
+        if (auto origin = findClassMemberOrigin(trait, name))
+            return origin;
+
+    auto member = lookupClassMember(ty, name);
+    if (!member)
+        return std::nullopt;
+    auto [owner, prop] = *member;
+
+    // A member a class gets from a trait (or a trait from a trait it needs) is a copy of the trait's
+    // property, declaration location included
+    for (Luau::TypeId trait : owner->implementedTraits)
+        if (auto traitMember = lookupClassMember(trait, name); traitMember && traitMember->second->location == prop->location)
+            return findClassMemberOrigin(trait, name);
+
+    Luau::ModuleName moduleName = externTypeModuleName(owner);
+    if (moduleName.empty())
+        return std::nullopt;
+
+    return ClassMemberOrigin{std::move(moduleName), *prop->location};
+}
+
+std::vector<types::ClassMemberOrigin> types::findImplementedTraitMemberOrigins(Luau::TypeId ty, const Luau::Name& name)
+{
+    std::vector<ClassMemberOrigin> result;
+    const auto* externType = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    if (!externType)
+        return result;
+
+    for (Luau::TypeId trait : externType->implementedTraits)
+    {
+        if (auto origin = findClassMemberOrigin(trait, name); origin && std::find(result.begin(), result.end(), *origin) == result.end())
+            result.push_back(*origin);
+
+        // `implementedTraits` already lists what a class gets through `needs`, but a trait only lists the traits
+        // it names
+        for (auto& origin : findImplementedTraitMemberOrigins(trait, name))
+            if (std::find(result.begin(), result.end(), origin) == result.end())
+                result.push_back(std::move(origin));
+    }
+
+    return result;
 }
 
 std::vector<Luau::Location> findTypeReferences(const Luau::SourceModule& source, const Luau::Name& typeName, std::optional<const Luau::Name> prefix)

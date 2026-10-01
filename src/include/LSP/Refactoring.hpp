@@ -22,6 +22,15 @@ void computeRefactorings(
     const Luau::Location& requestRange,
     std::vector<lsp::CodeAction>& result);
 
+// Luwu Traits (rfcs/classes/traits.md): refactorings offered on a class's header, which `computeRefactorings` is never
+// asked about, since a class body holds member declarations rather than statements
+void computeClassRefactorings(
+    const lsp::CodeActionParams& params,
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const Luau::Location& requestRange,
+    std::vector<lsp::CodeAction>& result);
+
 lsp::CodeAction resolveRefactoring(
     const lsp::CodeAction& action,
     WorkspaceFolder& workspace,

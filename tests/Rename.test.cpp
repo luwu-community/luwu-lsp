@@ -1,6 +1,9 @@
 #include "doctest.h"
 #include "Fixture.h"
 
+LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(LuwuTraits)
+
 TEST_SUITE_BEGIN("Rename");
 
 TEST_CASE_FIXTURE(Fixture, "fail_if_new_name_is_empty")
@@ -650,6 +653,165 @@ end
 
 return Bar
     )");
+}
+
+// The position of the `occurrence`th (0-based) `needle` in `source`
+static lsp::Position positionOf(const std::string& source, const std::string& needle, size_t occurrence = 0)
+{
+    size_t offset = source.find(needle);
+    for (size_t i = 0; i < occurrence; i++)
+        offset = source.find(needle, offset + 1);
+    REQUIRE(offset != std::string::npos);
+
+    size_t line = std::count(source.begin(), source.begin() + offset, '\n');
+    size_t lineStart = source.rfind('\n', offset);
+    size_t column = lineStart == std::string::npos ? offset : offset - lineStart - 1;
+    return lsp::Position{line, column};
+}
+
+static std::vector<lsp::Position> renamedPositions(const lsp::RenameResult& result, const Uri& uri)
+{
+    std::vector<lsp::Position> positions;
+    REQUIRE(result);
+    if (auto it = result->changes.find(uri); it != result->changes.end())
+        for (const auto& edit : it->second)
+            positions.push_back(edit.range.start);
+    std::sort(positions.begin(), positions.end(), [](auto& a, auto& b) { return a.line < b.line || (a.line == b.line && a.character < b.character); });
+    return positions;
+}
+
+TEST_CASE_FIXTURE(Fixture, "rename_class_method_across_modules")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string libSource = R"(
+export class Dog
+    public function __init(self) end
+    public function bark(self)
+    end
+end
+return { Dog = Dog }
+)";
+    std::string userSource = R"(
+local lib = require("lib.luau")
+local dog = lib.Dog()
+dog:bark()
+)";
+    auto lib = newDocument("lib.luau", libSource);
+    auto user = newDocument("user.luau", userSource);
+    workspace.checkStrict(workspace.fileResolver.getModuleName(user), nullptr);
+
+    lsp::RenameParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{user};
+    params.position = positionOf(userSource, "bark");
+    params.newName = "woof";
+
+    auto result = workspace.rename(params, nullptr);
+    CHECK_EQ(renamedPositions(result, lib), std::vector{positionOf(libSource, "bark")});
+    CHECK_EQ(renamedPositions(result, user), std::vector{positionOf(userSource, "bark")});
+}
+
+TEST_CASE_FIXTURE(Fixture, "rename_trait_method_from_usage_in_another_module")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string libSource = R"(
+export trait Fs
+    @[truthy(self, Dir)]
+    public function is_dir(self)
+        return class.isinstance(self, Dir)
+    end
+end
+
+export class Dir implements Fs
+    public function __init(self) end
+    public function list(self): { Fs }
+        return { self }
+    end
+end
+
+return { Dir = Dir }
+)";
+    std::string userSource = R"(
+local lib = require("lib.luau")
+local d = lib.Dir()
+if d:is_dir() then
+    for _, x in d:list() do
+        if x:is_dir() then end
+    end
+end
+)";
+    auto lib = newDocument("lib.luau", libSource);
+    auto user = newDocument("user.luau", userSource);
+    workspace.checkStrict(workspace.fileResolver.getModuleName(user), nullptr);
+
+    // on a trait-typed value, and on a value of a class implementing the trait
+    for (size_t occurrence : {0, 1})
+    {
+        lsp::RenameParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{user};
+        params.position = positionOf(userSource, "is_dir", occurrence);
+        params.newName = "is_directory";
+
+        auto result = workspace.rename(params, nullptr);
+        CHECK_EQ(renamedPositions(result, lib), std::vector{positionOf(libSource, "is_dir")});
+        CHECK_EQ(renamedPositions(result, user), std::vector{positionOf(userSource, "is_dir", 0), positionOf(userSource, "is_dir", 1)});
+    }
+}
+
+TEST_CASE_FIXTURE(Fixture, "rename_trait_expected_function_renames_implementations")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+trait A
+    expect function speak(self): string
+    function a(self): string return self:speak() end
+end
+
+trait B
+    expect function speak(self): string
+end
+
+class C implements A, B
+    function speak(self): string return "hi" end
+end
+
+class D implements B
+    function speak(self): string return "bye" end
+end
+
+class Unrelated
+    function speak(self): string return "?" end
+end
+
+local c = C()
+local x = c:speak()
+local u = Unrelated():speak()
+)";
+    auto uri = newDocument("test.luau", source);
+
+    // from A's declaration: C fulfills A and B, so B and D's go too
+    lsp::RenameParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = positionOf(source, "speak");
+    params.newName = "talk";
+
+    auto result = workspace.rename(params, nullptr);
+    CHECK_EQ(renamedPositions(result, uri),
+        std::vector{
+            positionOf(source, "speak", 0), // A
+            positionOf(source, "speak", 1), // self:speak()
+            positionOf(source, "speak", 2), // B
+            positionOf(source, "speak", 3), // C
+            positionOf(source, "speak", 4), // D
+            positionOf(source, "speak", 6), // c:speak()
+        });
 }
 
 TEST_SUITE_END();

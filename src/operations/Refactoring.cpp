@@ -555,24 +555,355 @@ std::optional<RefactoringResult> computeInlineVariableEdit(
     return RefactoringResult{std::move(workspaceEdit), std::nullopt};
 }
 
-// Where a class member's text starts: its attributes, access specifier or `function` keyword, whichever comes first
-Luau::Position classMethodStart(const Luau::AstClassMethod& method)
+// Luwu Traits (rfcs/classes/traits.md): the "extract into a trait" refactorings. Both move members of a class or trait
+// into a new trait written above it, which the class implements (or the trait needs), and offer the new trait's name for
+// renaming. Members move by whole lines, indentation included: a class body and a trait body indent alike.
+
+// Where a member's text starts: its attributes, access specifier, or `const`, `expect`, `final` or `function` keyword,
+// whichever comes first
+Luau::Position classMemberStart(const Luau::AstClassMember& member)
 {
-    Luau::Position start = method.keywordLocation.begin;
+    Luau::Position start{0, 0};
+    auto earliest = [&](const std::optional<Luau::Location>& location)
+    {
+        if (location && location->begin < start)
+            start = location->begin;
+    };
 
-    if (method.qualifierLocation && method.qualifierLocation->begin < start)
-        start = method.qualifierLocation->begin;
-
-    for (const Luau::AstAttr* attr : method.function->attributes)
-        if (attr->location.begin < start)
-            start = attr->location.begin;
+    if (const auto* method = member.get_if<Luau::AstClassMethod>())
+    {
+        start = method->keywordLocation.begin;
+        earliest(method->qualifierLocation);
+        earliest(method->expectLocation);
+        earliest(method->finalLocation);
+        for (const Luau::AstAttr* attr : method->function->attributes)
+            earliest(attr->location);
+    }
+    else if (const auto* prop = member.get_if<Luau::AstClassProperty>())
+    {
+        start = prop->nameLocation.begin;
+        earliest(prop->qualifierLocation);
+        earliest(prop->constLocation);
+        earliest(prop->expectLocation);
+        earliest(prop->finalLocation);
+        for (const Luau::AstAttr* attr : prop->attributes)
+            earliest(attr->location);
+    }
 
     return start;
 }
 
-// Luwu Traits (rfcs/classes/traits.md): the class a refactoring can extract into a trait, when `position` is on its `class` keyword or name.
-// A trait can't take a class's generic parameters along, and a class with no functions besides `__init` has nothing to
-// move, so neither is offered.
+Luau::Position classMemberEnd(const Luau::AstClassMember& member)
+{
+    if (const auto* method = member.get_if<Luau::AstClassMethod>())
+        return method->function->location.end;
+
+    const auto* prop = member.get_if<Luau::AstClassProperty>();
+    if (prop->defaultValue)
+        return prop->defaultValue->location.end;
+    if (prop->ty)
+        return prop->ty->location.end;
+    return prop->nameLocation.end;
+}
+
+// The end of a function's signature: its return annotation, or else its parameter list
+Luau::Position functionSignatureEnd(const Luau::AstClassMethod& method)
+{
+    if (method.function->returnAnnotation)
+        return method.function->returnAnnotation->location.end;
+    if (method.function->argLocation)
+        return method.function->argLocation->end;
+    return method.nameLocation.end;
+}
+
+bool isBlankLine(const TextDocument& textDocument, unsigned int line)
+{
+    return textDocument.getLine(line).find_first_not_of(" \t\r\n") == std::string::npos;
+}
+
+// Whether a member has its lines to itself, strictly inside the class body, so it can move by whole lines
+bool memberHasItsOwnLines(const TextDocument& textDocument, const Luau::AstStatClass& classStat, const Luau::AstClassMember& member)
+{
+    Luau::Position start = classMemberStart(member);
+    Luau::Position end = classMemberEnd(member);
+    std::string firstLine = textDocument.getLine(start.line);
+    std::string lastLine = textDocument.getLine(end.line);
+
+    bool aloneAtStart = firstLine.find_first_not_of(" \t") >= start.column;
+    bool aloneAtEnd = lastLine.find_first_not_of(" \t;\r\n", end.column) == std::string::npos;
+    bool insideBody = start.line > classStat.name->location.end.line && end.line < classStat.location.end.line;
+    return aloneAtStart && aloneAtEnd && insideBody;
+}
+
+// Just past the `>` closing a class's or trait's generic parameter list, or nullopt when it has none. The parameters'
+// locations cover only their names, so the `>` is found after the last one's default, or its name and `...`.
+std::optional<Luau::Position> genericListEnd(const TextDocument& textDocument, const Luau::AstStatClass& classStat)
+{
+    Luau::Position last{0, 0};
+    for (const Luau::AstGenericType* generic : classStat.generics)
+        last = std::max(last, generic->defaultValue ? generic->defaultValue->location.end : generic->location.end);
+    for (const Luau::AstGenericTypePack* pack : classStat.genericPacks)
+        last = std::max(last, pack->defaultValue ? pack->defaultValue->location.end : pack->location.end);
+    if (last == Luau::Position{0, 0})
+        return std::nullopt;
+
+    for (unsigned int line = last.line; line <= classStat.location.end.line; line++)
+    {
+        std::string text = textDocument.getLine(line);
+        size_t close = text.find('>', line == last.line ? last.column : 0);
+        if (close != std::string::npos)
+            return Luau::Position{line, static_cast<unsigned int>(close + 1)};
+    }
+
+    return std::nullopt;
+}
+
+// The generic parameters a new trait copies from the class or trait it's extracted from, as written, defaults included
+// (`<T = string, U...>`), and the arguments the class or trait passes them on with (`<T, U...>`). Both empty when there
+// are none.
+struct TraitGenerics
+{
+    std::string parameters;
+    std::string arguments;
+};
+
+TraitGenerics traitGenerics(const TextDocument& textDocument, const Luau::AstStatClass& classStat)
+{
+    std::optional<Luau::Position> listEnd = genericListEnd(textDocument, classStat);
+    if (!listEnd)
+        return {};
+
+    std::string parameters = textDocument.getText(textDocument.convertLocation(Luau::Location{classStat.name->location.end, *listEnd}));
+    parameters.erase(0, parameters.find('<'));
+
+    std::string arguments;
+    for (const Luau::AstGenericType* generic : classStat.generics)
+        arguments += (arguments.empty() ? "" : ", ") + std::string(generic->name.value);
+    for (const Luau::AstGenericTypePack* pack : classStat.genericPacks)
+        arguments += (arguments.empty() ? "" : ", ") + std::string(pack->name.value) + "...";
+
+    return {parameters, "<" + arguments + ">"};
+}
+
+// `<base>`, or `<base>2`, `<base>3`... when a top-level class, trait or local already has that name
+std::string uniqueTopLevelName(const Luau::SourceModule& sourceModule, const std::string& base)
+{
+    std::unordered_set<std::string> taken;
+    for (Luau::AstStat* stat : sourceModule.root->body)
+    {
+        if (auto* classStat = stat->as<Luau::AstStatClass>())
+            taken.insert(classStat->name->name.value);
+        else if (auto* local = stat->as<Luau::AstStatLocal>())
+            for (Luau::AstLocal* var : local->vars)
+                taken.insert(var->name.value);
+        else if (auto* function = stat->as<Luau::AstStatLocalFunction>())
+            taken.insert(function->name->name.value);
+    }
+
+    std::string name = base;
+    for (int suffix = 2; taken.count(name); suffix++)
+        name = base + std::to_string(suffix);
+    return name;
+}
+
+// Writes a new trait's `expect` lines. The all-or-nothing access specifier rule carries over: if the class writes them,
+// the trait's expectations must too.
+struct ExpectationWriter
+{
+    const TextDocument& textDocument;
+    bool qualified = false;
+
+    ExpectationWriter(const TextDocument& textDocument, const Luau::AstStatClass& classStat)
+        : textDocument(textDocument)
+    {
+        for (const auto& member : classStat.members)
+            if (Luau::visit([](auto&& m) { return m.qualifierLocation.has_value(); }, member))
+                qualified = true;
+        if (classStat.primaryConstructor)
+            for (const auto& qualifiers : classStat.primaryConstructor->argsQualifiers)
+                if (qualifiers.qualifierLocation)
+                    qualified = true;
+    }
+
+    std::string text(const Luau::Location& location) const
+    {
+        return textDocument.getText(textDocument.convertLocation(location));
+    }
+
+    std::string prefix(bool isPrivate) const
+    {
+        std::string line = "    expect ";
+        if (qualified)
+            line += isPrivate ? "private " : "public ";
+        return line;
+    }
+
+    std::string field(bool isPrivate, bool isConst, const char* name, const Luau::AstType* annotation) const
+    {
+        std::string line = prefix(isPrivate);
+        if (isConst)
+            line += "const ";
+        line += name;
+        if (annotation)
+            line += ": " + text(annotation->location);
+        return line + "\n";
+    }
+
+    std::string field(const Luau::AstClassProperty& prop) const
+    {
+        return field(prop.visibility == Luau::AstClassMemberVisibility::Private, prop.isConst, prop.name.value, prop.ty);
+    }
+
+    // `expect function name(self, ...): T`, the signature written as the function writes it
+    std::string function(const Luau::AstClassMethod& method) const
+    {
+        bool isPrivate = method.visibility == Luau::AstClassMemberVisibility::Private;
+        return prefix(isPrivate) + text(Luau::Location{method.keywordLocation.begin, functionSignatureEnd(method)}) + "\n";
+    }
+
+    // The primary constructor's (or trait's) parameters that aren't also declared in the body, as `fieldFn` sees them
+    template<typename F>
+    void forEachParameterField(const Luau::AstStatClass& classStat, F&& fieldFn) const
+    {
+        const auto* ctor = classStat.primaryConstructor;
+        if (!ctor)
+            return;
+
+        for (size_t i = 0; i < ctor->args.size; i++)
+        {
+            const Luau::AstLocal* arg = ctor->args.data[i];
+            bool declaredInBody = false;
+            for (const auto& member : classStat.members)
+                if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name == arg->name)
+                    declaredInBody = true;
+            if (declaredInBody)
+                continue;
+
+            const Luau::AstClassPrimaryConstructorParamQualifiers* qualifiers =
+                i < ctor->argsQualifiers.size ? &ctor->argsQualifiers.data[i] : nullptr;
+            bool isPrivate = qualifiers && qualifiers->visibility == Luau::AstClassMemberVisibility::Private;
+            bool isConst = qualifiers && qualifiers->isConst;
+            fieldFn(arg, field(isPrivate, isConst, arg->name.value, arg->annotation));
+        }
+    }
+};
+
+// Moves the members `moves` marks out of `classStat` into a new trait above it, expecting `expectations`, and makes the
+// class implement (or the trait need) it
+RefactoringResult extractIntoTrait(
+    const lsp::DocumentUri& uri,
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const Luau::AstStatClass& classStat,
+    const std::vector<bool>& moves,
+    const std::string& expectations)
+{
+    std::string traitName = uniqueTopLevelName(sourceModule, std::string(classStat.name->name.value) + "Behavior");
+    TraitGenerics generics = traitGenerics(textDocument, classStat);
+
+    // Fields keep their grouping; functions are separated by a blank line
+    std::string fields;
+    std::string functions;
+    std::vector<lsp::TextEdit> edits;
+    bool keptMemberAbove = false;
+    for (size_t i = 0; i < classStat.members.size; i++)
+    {
+        const Luau::AstClassMember& member = classStat.members.data[i];
+        if (!moves[i])
+        {
+            keptMemberAbove = true;
+            continue;
+        }
+
+        Luau::Position start = classMemberStart(member);
+        Luau::Position end = classMemberEnd(member);
+        lsp::Range lines{{start.line, 0}, {end.line + 1, 0}};
+        if (member.get_if<Luau::AstClassMethod>())
+        {
+            if (!functions.empty())
+                functions += "\n";
+            functions += textDocument.getText(lines);
+        }
+        else
+        {
+            fields += textDocument.getText(lines);
+        }
+
+        // The blank line that separated the member from what came before it goes too, or the class body is left with a
+        // run of them. Above the first member the class keeps there is nothing to separate from, so the blank line
+        // below goes instead, or the class body would start with one.
+        lsp::Range removed = lines;
+        if (keptMemberAbove)
+        {
+            if (start.line > classStat.name->location.end.line + 1 && isBlankLine(textDocument, start.line - 1))
+                removed.start.line--;
+        }
+        else if (end.line + 1 < classStat.location.end.line && isBlankLine(textDocument, end.line + 1))
+        {
+            removed.end.line++;
+        }
+
+        edits.push_back(lsp::TextEdit{removed, ""});
+    }
+
+    // expectations, then fields, then functions, a blank line between each
+    std::string trait = "trait " + traitName + generics.parameters + "\n";
+    bool firstSection = true;
+    const std::string* sections[] = {&expectations, &fields, &functions};
+    for (const std::string* section : sections)
+    {
+        if (section->empty())
+            continue;
+        if (!firstSection)
+            trait += "\n";
+        trait += *section;
+        firstSection = false;
+    }
+    trait += "end\n\n";
+
+    lsp::Position classStart{classStat.location.begin.line, 0};
+    edits.insert(edits.begin(), lsp::TextEdit{{classStart, classStart}, trait});
+
+    // The header gains the trait, passing its generic parameters on: at the end of an existing `implements` (or `needs`)
+    // list, or after the header
+    std::string reference = traitName + generics.arguments;
+    const Luau::AstArray<Luau::AstClassTraitRef>& list = classStat.isTrait ? classStat.needs : classStat.implements;
+    if (list.size > 0)
+    {
+        lsp::Position at = textDocument.convertPosition(list.data[list.size - 1].location.end);
+        edits.push_back(lsp::TextEdit{{at, at}, ", " + reference});
+    }
+    else
+    {
+        Luau::Position headerEnd = genericListEnd(textDocument, classStat).value_or(classStat.name->location.end);
+        if (classStat.primaryConstructor)
+            headerEnd = classStat.primaryConstructor->argLocation.end;
+
+        lsp::Position at = textDocument.convertPosition(headerEnd);
+        edits.push_back(lsp::TextEdit{{at, at}, (classStat.isTrait ? " needs " : " implements ") + reference});
+    }
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::move(edits));
+
+    // the trait's name, on the first inserted line, which the edit puts where the class started
+    lsp::Position renamePosition{classStat.location.begin.line, 6};
+    return RefactoringResult{std::move(workspaceEdit), renamePosition};
+}
+
+// "Extract class into a trait" moves a member unless it's `__init`, since construction stays with the class, or a field
+// without a default, which the class keeps declaring and the trait expects instead
+bool movesWithClass(const Luau::AstClassMember& member)
+{
+    if (const auto* method = member.get_if<Luau::AstClassMethod>())
+        return method->functionName != "__init";
+    if (const auto* prop = member.get_if<Luau::AstClassProperty>())
+        return prop->defaultValue != nullptr;
+    return false;
+}
+
+// The class "Extract class into a trait" applies to, when `position` is on its `class` keyword or name. A class with
+// nothing to move (no functions besides `__init`, no fields with defaults) isn't worth a trait, so it isn't offered.
 Luau::AstStatClass* findExtractableClass(const Luau::SourceModule& sourceModule, const TextDocument& textDocument, const Luau::Position& position)
 {
     for (Luau::AstStat* stat : sourceModule.root->body)
@@ -585,42 +916,28 @@ Luau::AstStatClass* findExtractableClass(const Luau::SourceModule& sourceModule,
         if (!header.containsClosed(position))
             continue;
 
-        bool generic = classStat->generics.size > 0 || classStat->genericPacks.size > 0;
-        bool hasFunctionToMove = false;
+        bool hasMemberToMove = false;
         bool movesWholeLines = true;
-
-        // Functions move by whole lines, so each has to have its lines to itself, strictly inside the class body
         for (const auto& member : classStat->members)
         {
-            const auto* method = member.get_if<Luau::AstClassMethod>();
-            if (!method || method->functionName == "__init")
+            if (!movesWithClass(member))
                 continue;
 
-            hasFunctionToMove = true;
-
-            Luau::Position start = classMethodStart(*method);
-            Luau::Position end = method->function->location.end;
-            std::string firstLine = textDocument.getLine(start.line);
-            std::string lastLine = textDocument.getLine(end.line);
-
-            bool aloneAtStart = firstLine.find_first_not_of(" \t") >= start.column;
-            bool aloneAtEnd = lastLine.find_first_not_of(" \t;\r\n", end.column) == std::string::npos;
-            bool insideBody = start.line > classStat->name->location.end.line && end.line < classStat->location.end.line;
-
-            if (!aloneAtStart || !aloneAtEnd || !insideBody)
+            hasMemberToMove = true;
+            if (!memberHasItsOwnLines(textDocument, *classStat, member))
                 movesWholeLines = false;
         }
 
-        bool extractable = !generic && hasFunctionToMove && movesWholeLines;
+        bool extractable = hasMemberToMove && movesWholeLines;
         return extractable ? classStat : nullptr;
     }
 
     return nullptr;
 }
 
-// Luwu Traits (rfcs/classes/traits.md): "Extract class into a trait". The class's functions, except `__init`, move into a new trait
-// `<Class>Behavior` written above the class, which expects every field of the class (so the moved code still has them),
-// and the class implements the trait. Construction stays with the class. The new trait's name is offered for renaming.
+// "Extract class into a trait": the new trait takes the class's functions and its fields with defaults, which a trait
+// provides as they are. Fields without defaults, primary constructor parameters included, stay with the class and the
+// trait expects them, so the moved code still has them.
 std::optional<RefactoringResult> computeExtractTraitEdit(
     const lsp::DocumentUri& uri,
     const Luau::SourceModule& sourceModule,
@@ -632,122 +949,131 @@ std::optional<RefactoringResult> computeExtractTraitEdit(
     if (!classStat)
         return std::nullopt;
 
-    std::string className = classStat->name->name.value;
-    std::string traitName = className + "Behavior";
-
-    // The all-or-nothing access specifier rule carries over: if the class writes them, the trait's expectations must too
-    bool qualified = false;
-    for (const auto& member : classStat->members)
-        if (Luau::visit([](auto&& m) { return m.qualifierLocation.has_value(); }, member))
-            qualified = true;
-    if (classStat->primaryConstructor)
-        for (const auto& qualifiers : classStat->primaryConstructor->argsQualifiers)
-            if (qualifiers.qualifierLocation)
-                qualified = true;
-
-    auto sourceText = [&](const Luau::Location& location)
-    {
-        return textDocument.getText(textDocument.convertLocation(location));
-    };
-
-    auto expectLine = [&](bool isPrivate, bool isConst, const std::string& name, const Luau::AstType* annotation)
-    {
-        std::string line = "    expect ";
-        if (qualified)
-            line += isPrivate ? "private " : "public ";
-        if (isConst)
-            line += "const ";
-        line += name;
-        if (annotation)
-            line += ": " + sourceText(annotation->location);
-        return line + "\n";
-    };
-
+    ExpectationWriter writer{textDocument, *classStat};
     std::string expectations;
-    std::vector<std::string> bodyFields;
+    std::vector<bool> moves;
     for (const auto& member : classStat->members)
     {
-        if (const auto* prop = member.get_if<Luau::AstClassProperty>())
-        {
-            bodyFields.push_back(prop->name.value);
-            expectations +=
-                expectLine(prop->visibility == Luau::AstClassMemberVisibility::Private, prop->isConst, prop->name.value, prop->ty);
-        }
+        moves.push_back(movesWithClass(member));
+        if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && !prop->defaultValue)
+            expectations += writer.field(*prop);
     }
-
-    if (const auto* ctor = classStat->primaryConstructor)
-    {
-        for (size_t i = 0; i < ctor->args.size; i++)
+    writer.forEachParameterField(
+        *classStat,
+        [&](const Luau::AstLocal*, const std::string& line)
         {
-            const Luau::AstLocal* arg = ctor->args.data[i];
-            if (std::find(bodyFields.begin(), bodyFields.end(), arg->name.value) != bodyFields.end())
-                continue;
-
-            const Luau::AstClassPrimaryConstructorParamQualifiers* qualifiers =
-                i < ctor->argsQualifiers.size ? &ctor->argsQualifiers.data[i] : nullptr;
-            bool isPrivate = qualifiers && qualifiers->visibility == Luau::AstClassMemberVisibility::Private;
-            bool isConst = qualifiers && qualifiers->isConst;
-            expectations += expectLine(isPrivate, isConst, arg->name.value, arg->annotation);
+            expectations += line;
         }
-    }
+    );
 
-    // Each moved function takes its whole lines along, indentation included: a class body and a trait body indent alike
-    std::string functions;
-    std::vector<lsp::TextEdit> edits;
-    for (const auto& member : classStat->members)
+    return extractIntoTrait(uri, sourceModule, textDocument, *classStat, moves, expectations);
+}
+
+// The functions a selection picks out of a class or trait body for "Extract into a trait": every function (other than
+// `__init` or an expected one) whose header the selection touches. A selection inside a single function's body picks
+// nothing, so it stays with the statement refactorings.
+struct SelectedFunctions
+{
+    Luau::AstStatClass* classStat = nullptr;
+    std::vector<bool> moves;
+    std::vector<const Luau::AstClassMethod*> functions;
+};
+
+std::optional<SelectedFunctions> findSelectedFunctions(
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const Luau::Location& range)
+{
+    for (Luau::AstStat* stat : sourceModule.root->body)
     {
-        const auto* method = member.get_if<Luau::AstClassMethod>();
-        if (!method || method->functionName == "__init")
+        auto* classStat = stat->as<Luau::AstStatClass>();
+        if (!classStat || !classStat->location.containsClosed(range.begin))
             continue;
 
-        Luau::Position start = classMethodStart(*method);
-        lsp::Range lines{{start.line, 0}, {method->function->location.end.line + 1, 0}};
-        if (!functions.empty())
-            functions += "\n";
-        functions += textDocument.getText(lines);
+        SelectedFunctions selected;
+        selected.classStat = classStat;
+        for (const auto& member : classStat->members)
+        {
+            const auto* method = member.get_if<Luau::AstClassMethod>();
+            bool picked = false;
+            if (method && method->functionName != "__init" && !method->expectLocation)
+            {
+                Luau::Location header{classMemberStart(member), functionSignatureEnd(*method)};
+                picked = !(range.end < header.begin) && !(header.end < range.begin);
+            }
 
-        // the blank line that separated the function from what came before it goes too, or the class body is left
-        // with a run of them
-        lsp::Range removed = lines;
-        bool blankAbove = start.line > classStat->name->location.end.line + 1 &&
-                          textDocument.getLine(start.line - 1).find_first_not_of(" \t\r\n") == std::string::npos;
-        if (blankAbove)
-            removed.start.line--;
+            if (picked)
+            {
+                if (!memberHasItsOwnLines(textDocument, *classStat, member))
+                    return std::nullopt;
+                selected.functions.push_back(method);
+            }
+            selected.moves.push_back(picked);
+        }
 
-        edits.push_back(lsp::TextEdit{removed, ""});
+        if (selected.functions.empty())
+            return std::nullopt;
+        return selected;
     }
 
-    std::string trait = "trait " + traitName + "\n" + expectations;
-    if (!expectations.empty())
-        trait += "\n";
-    trait += functions + "end\n\n";
+    return std::nullopt;
+}
 
-    lsp::Position classStart{classStat->location.begin.line, 0};
-    edits.insert(edits.begin(), lsp::TextEdit{{classStart, classStart}, trait});
+// The members `self.name` and `self:name()` reach for in the functions it visits
+struct SelfMemberReferences : Luau::AstVisitor
+{
+    std::unordered_set<std::string> names;
 
-    // The class's header gains the trait: at the end of an existing `implements` list, or after the header
-    Luau::Position headerEnd = classStat->name->location.end;
-    if (classStat->primaryConstructor)
-        headerEnd = classStat->primaryConstructor->argLocation.end;
-
-    if (classStat->implements.size > 0)
+    bool visit(Luau::AstExprIndexName* node) override
     {
-        Luau::Position listEnd = classStat->implements.data[classStat->implements.size - 1].location.end;
-        lsp::Position at = textDocument.convertPosition(listEnd);
-        edits.push_back(lsp::TextEdit{{at, at}, ", " + traitName});
+        if (auto* local = node->expr->as<Luau::AstExprLocal>(); local && local->local->name == "self")
+            names.insert(node->index.value);
+        return true;
     }
-    else
+};
+
+// "Extract into a trait": the selected functions move into the new trait. What they use of the members left behind
+// (fields, constructor or trait parameters, other functions) the trait expects, so the moved code still has them.
+std::optional<RefactoringResult> computeExtractFunctionsIntoTraitEdit(
+    const lsp::DocumentUri& uri,
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const lsp::Range& range)
+{
+    std::optional<SelectedFunctions> selected = findSelectedFunctions(sourceModule, textDocument, textDocument.convertRange(range));
+    if (!selected)
+        return std::nullopt;
+
+    const Luau::AstStatClass& classStat = *selected->classStat;
+
+    SelfMemberReferences references;
+    for (const Luau::AstClassMethod* method : selected->functions)
+        method->function->visit(&references);
+
+    ExpectationWriter writer{textDocument, classStat};
+    std::string expectations;
+    for (size_t i = 0; i < classStat.members.size; i++)
     {
-        lsp::Position at = textDocument.convertPosition(headerEnd);
-        edits.push_back(lsp::TextEdit{{at, at}, " implements " + traitName});
+        const Luau::AstClassMember& member = classStat.members.data[i];
+        if (selected->moves[i])
+            continue;
+
+        if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && references.names.count(prop->name.value))
+            expectations += writer.field(*prop);
+        else if (const auto* method = member.get_if<Luau::AstClassMethod>();
+                 method && method->functionName != "__init" && references.names.count(method->functionName.value))
+            expectations += writer.function(*method);
     }
+    writer.forEachParameterField(
+        classStat,
+        [&](const Luau::AstLocal* param, const std::string& line)
+        {
+            if (references.names.count(param->name.value))
+                expectations += line;
+        }
+    );
 
-    lsp::WorkspaceEdit workspaceEdit;
-    workspaceEdit.changes.emplace(uri, std::move(edits));
-
-    // the trait's name, on the first inserted line, which the edit puts where the class started
-    lsp::Position renamePosition{classStat->location.begin.line, 6};
-    return RefactoringResult{std::move(workspaceEdit), renamePosition};
+    return extractIntoTrait(uri, sourceModule, textDocument, classStat, selected->moves, expectations);
 }
 
 } // anonymous namespace
@@ -808,23 +1134,6 @@ void computeRefactorings(
         }
     }
 
-    // Luwu Traits (rfcs/classes/traits.md): Extract a class's behavior into a trait it implements
-    if (params.context.wants(lsp::CodeActionKind::RefactorExtract))
-    {
-        if (Luau::AstStatClass* classStat = findExtractableClass(sourceModule, textDocument, requestRange.begin))
-        {
-            lsp::CodeAction action;
-            action.title = "Extract class '" + std::string(classStat->name->name.value) + "' into a trait";
-            action.kind = lsp::CodeActionKind::RefactorExtract;
-            action.data = nlohmann::json{
-                {"uri", params.textDocument.uri.toString()},
-                {"type", "extractTrait"},
-                {"range", params.range},
-            };
-            result.push_back(std::move(action));
-        }
-    }
-
     // Inline Variable: lightweight check — just verify cursor is on a local.
     // Full validation (single-var decl, has initializer, not reassigned) is deferred to resolve.
     if (params.context.wants(lsp::CodeActionKind::RefactorInline))
@@ -850,6 +1159,45 @@ void computeRefactorings(
             };
             result.push_back(std::move(action));
         }
+    }
+}
+
+void computeClassRefactorings(
+    const lsp::CodeActionParams& params,
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const Luau::Location& requestRange,
+    std::vector<lsp::CodeAction>& result)
+{
+    // Luwu Traits (rfcs/classes/traits.md): Extract a class's behavior into a trait it implements
+    if (Luau::AstStatClass* classStat = findExtractableClass(sourceModule, textDocument, requestRange.begin))
+    {
+        lsp::CodeAction action;
+        action.title = "Extract class '" + std::string(classStat->name->name.value) + "' into a trait";
+        action.kind = lsp::CodeActionKind::RefactorExtract;
+        action.data = nlohmann::json{
+            {"uri", params.textDocument.uri.toString()},
+            {"type", "extractTrait"},
+            {"range", params.range},
+        };
+        result.push_back(std::move(action));
+    }
+
+    // Luwu Traits (rfcs/classes/traits.md): Extract the selected functions of a class or trait into a trait
+    if (std::optional<SelectedFunctions> selected = findSelectedFunctions(sourceModule, textDocument, requestRange))
+    {
+        lsp::CodeAction action;
+        if (selected->functions.size() == 1)
+            action.title = "Extract function '" + std::string(selected->functions[0]->functionName.value) + "' into a trait";
+        else
+            action.title = "Extract " + std::to_string(selected->functions.size()) + " functions into a trait";
+        action.kind = lsp::CodeActionKind::RefactorExtract;
+        action.data = nlohmann::json{
+            {"uri", params.textDocument.uri.toString()},
+            {"type", "extractFunctionsIntoTrait"},
+            {"range", params.range},
+        };
+        result.push_back(std::move(action));
     }
 }
 
@@ -889,6 +1237,8 @@ lsp::CodeAction resolveRefactoring(
         refactorResult = computeInlineVariableEdit(uri, *sourceModule, *textDocument, range);
     else if (type == "extractTrait")
         refactorResult = computeExtractTraitEdit(uri, *sourceModule, *textDocument, range);
+    else if (type == "extractFunctionsIntoTrait")
+        refactorResult = computeExtractFunctionsIntoTraitEdit(uri, *sourceModule, *textDocument, range);
 
     if (refactorResult)
     {

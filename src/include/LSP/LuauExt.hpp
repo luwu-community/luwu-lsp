@@ -68,11 +68,27 @@ Luau::AstStatClass* findClassStatContainingPosition(Luau::AstStatBlock* root, co
 // annotation usages (`local x: ClassName`).
 std::vector<Luau::Location> findClassNameReferences(const Luau::SourceModule& source, Luau::AstStatClass* classStat);
 
-// Finds every reference to a field, method, or static function declared on `classStat`: its
-// declaration, and every `.name`/`:name` access site whose base expression's type resolves
-// (directly, or via the class/object nominal relation) to `classStat`.
-std::vector<Luau::Location> findClassMemberReferences(
-    const Luau::SourceModule& source, const Luau::ModulePtr& module, Luau::AstStatClass* classStat, const Luau::AstName& memberName);
+// A field, method, or static function of a class or trait, identified by where it's declared: the
+// declaring module and the location of the member's name.
+struct ClassMemberOrigin
+{
+    Luau::ModuleName moduleName;
+    Luau::Location location;
+
+    bool operator==(const ClassMemberOrigin& other) const
+    {
+        return moduleName == other.moduleName && location == other.location;
+    }
+};
+
+// The declaration that a `.name`/`:name` access on a value of type `ty` resolves to, if `ty` is a
+// class, object, trait, or trait intersection type with that member. A member a class gets from a
+// trait it implements resolves to the trait's declaration.
+std::optional<ClassMemberOrigin> findClassMemberOrigin(Luau::TypeId ty, const Luau::Name& name);
+
+// The declarations of the members named `name` on the traits `ty` implements (directly, or through
+// `needs`): what a class's own member of that name overrides or fulfills.
+std::vector<ClassMemberOrigin> findImplementedTraitMemberOrigins(Luau::TypeId ty, const Luau::Name& name);
 
 // If `ty` is (or is nominally related to, via the class/object relation) the extern type produced
 // by some class statement in `root`, returns that class statement.

@@ -518,7 +518,37 @@ else
     print("Using the luwu inside luwu-lsp")
 end
 
-const cpus = math.min(thread.parallelism(), 16) -- prevent compiling w/ j24 which can freeze my desktop pc
+--- GB of memory available right now, from /proc/meminfo; nil when we can't tell (not Linux/Android)
+const function available_memory_gb(): number?
+    if env.os ~= "Linux" and env.os ~= "Android" then
+        return nil
+    end
+    const meminfo = fs.file.try_read("/proc/meminfo")
+    if not meminfo then
+        return nil
+    end
+    -- MemAvailable:   12345678 kB
+    const kb = tonumber(string.match(meminfo, "MemAvailable:%s*(%d+)"))
+    if not kb then
+        return nil
+    end
+    return kb / (1024 * 1024)
+end
+
+--- leave a core free so the machine stays usable; each clang on Luwu's Analysis sources can take
+--- up to ~2 GB, so running more jobs than that fits gets the build (or the whole terminal) OOM-killed;
+--- never more than 16, since -j24 has frozen the desktop pc
+const function job_count(): number
+    local jobs = math.min(thread.parallelism() - 1, 16)
+    const mem_gb = available_memory_gb()
+    if mem_gb then
+        jobs = math.min(jobs, mem_gb // 2)
+    end
+    return math.max(jobs, 1)
+end
+
+const cpus = job_count()
+print(`Building with -j{math.max(cpus // #targets, 1)} per target`)
 
 remove_existing_binaries()
 
@@ -531,7 +561,7 @@ for _, target in targets do
             "--build", build_dir_name,
             "--target", target,
             "--config", if is_release then "Release" else "Debug",
-            "-j", tostring(cpus // #targets),
+            "-j", tostring(math.max(cpus // #targets, 1)),
         }
     } :: process.PipedChild
     table.insert(children, spawned)
