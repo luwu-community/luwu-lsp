@@ -64,7 +64,9 @@ const parsed = args.parse(
         args.named("--targets", "Which of the CMake build targets should we build? Defaults to CLI (Luwu.LanguageServer.CLI). Specify multiple targets by separating them with commas.")
             :default("CLI")
     ),
-    args.command("submodule-update", "update ./luwu submodule with whatever path"),
+    args.command("submodule-update", "update ./luwu to the latest commit on the branch .gitmodules tracks (cloning it if missing)"):args(
+        args.named("--branch", "switch which luwu branch ./luwu tracks (written to .gitmodules) before updating, e.g. --branch=traits")
+    ),
     args.command("vsix", "package editors/code into an installable .vsix (does not build the server binary)"):args(
         args.flag("--install", "install the freshly packaged .vsix into VSCode with `code --install-extension`")
     )
@@ -232,20 +234,89 @@ const function clean_and_configure(luwu_path: string)
     print(`{if rebuilt then "Cleaned" else "Made"} and {if rebuilt then "re" else ""}configured ./{build_dir_name} directory with CMake.`)
 end
 
-const function update_submodules()
-    const subdate_result = process.run {
+--- Runs git from the luwu-lsp repo root (or `cwd`), not wherever the user happened to invoke this script
+const function git(git_args: { string }, cwd: string?): process.RunResult
+    return process.run {
         program = "git",
-        args = {
-            "submodule",
-            "update",
-            "--init",
-            "--recursive"
-        }
+        args = git_args,
+        cwd = cwd or luwu_lsp_dir.path,
     }
-    if not subdate_result.ok then
-        error(`Unable to update submodules due to error {subdate_result.err}`)
+end
+
+const function git_or_error(git_args: { string }, cwd: string?): string
+    const result = git(git_args, cwd)
+    if not result.ok then
+        error(`git {table.concat(git_args, " ")} failed:\n{result.err}`)
     end
-    print("Submodule updated or already up-to-date.")
+    return str.trim(result.out)
+end
+
+--- Makes sure ./luwu is an actual checkout, cloning it at the commit luwu-lsp pins if it's missing or empty.
+--- Leaves an existing checkout alone: `git submodule update` would reset it to the pinned commit,
+--- undoing a `submodule-update` that hasn't been committed yet.
+const function ensure_submodule()
+    const path_type = fs.is(luwu_submodule_path)
+    if path_type ~= "NotFound" and path_type ~= "Directory" then
+        error(`./luwu exists but isn't a directory (got: {path_type}); move it out of the way and rerun`)
+    end
+    -- a submodule checkout has a .git file (or dir, for ones cloned by old gits) at its root
+    if path_type == "Directory" and fs.path.exists(fs.path.join(luwu_submodule_path, ".git")) then
+        return
+    end
+    if path_type == "Directory" and #fs.listdir(luwu_submodule_path) > 0 then
+        error("./luwu has files in it but isn't a git checkout, so git can't clone the submodule into it; \z
+        move it out of the way and rerun")
+    end
+
+    print("./luwu is missing or empty (did you clone without --recurse-submodules?), checking it out...")
+    -- picks up a changed url in .gitmodules; a no-op if the submodule was never initialized
+    git_or_error({ "submodule", "sync", "--recursive", "--", "luwu" })
+    git_or_error({ "submodule", "update", "--init", "--recursive", "--", "luwu" })
+    print(`Checked out ./luwu at {git_or_error({ "rev-parse", "--short", "HEAD" }, luwu_submodule_path)}.`)
+end
+
+--- Moves ./luwu to the tip of the branch .gitmodules tracks, switching that branch to `new_branch` first if passed.
+--- Leaves the new pointer (and .gitmodules) for the user to commit
+const function update_submodule(new_branch: string?)
+    ensure_submodule()
+    if git_or_error({ "status", "--porcelain" }, luwu_submodule_path) ~= "" then
+        error("./luwu has uncommitted changes; commit, stash or discard them before updating it")
+    end
+
+    if new_branch then
+        -- check before touching .gitmodules so a typo doesn't leave it pointing at a branch that doesn't exist
+        const exists = git({ "ls-remote", "--exit-code", "--heads", "origin", new_branch }, luwu_submodule_path)
+        if not exists.ok then
+            error(`luwu has no branch '{new_branch}' on its origin remote`)
+        end
+        git_or_error { "submodule", "set-branch", "--branch", new_branch, "--", "luwu" }
+    end
+
+    const branch_result = git { "config", "-f", ".gitmodules", "--get", "submodule.luwu.branch" }
+    const branch = if branch_result.ok then str.trim(branch_result.out) else "the remote's default branch"
+
+    const old_commit = git_or_error({ "rev-parse", "HEAD" }, luwu_submodule_path)
+    git_or_error({ "submodule", "sync", "--recursive", "--", "luwu" })
+    git_or_error({ "submodule", "update", "--init", "--remote", "--recursive", "--", "luwu" })
+    const new_commit = git_or_error({ "rev-parse", "HEAD" }, luwu_submodule_path)
+
+    if old_commit == new_commit then
+        print(`./luwu is already at the latest {branch} ({string.sub(new_commit, 1, 8)}).`)
+        return
+    end
+    print(`Updated ./luwu to the latest {branch} ({string.sub(new_commit, 1, 8)}):`)
+    const added = git_or_error({ "log", "--oneline", `{old_commit}..{new_commit}` }, luwu_submodule_path)
+    if added ~= "" then
+        print(added)
+    end
+    -- switching to a branch that's behind (or diverged from) the old one drops commits
+    const dropped = git_or_error({ "rev-list", "--count", `{new_commit}..{old_commit}` }, luwu_submodule_path)
+    if dropped ~= "0" then
+        print(colors.yellow(`{dropped} commit(s) from the old ./luwu ({string.sub(old_commit, 1, 8)}) aren't on {branch}`))
+    end
+    print(`Commit the new pointer with {colors.blue(
+        if new_branch then "git add luwu .gitmodules && git commit" else "git add luwu && git commit"
+    )} to keep it.`)
 end
 
 const extension_dir_path = luwu_lsp_dir:join("editors", "code")
@@ -372,10 +443,7 @@ const function pick_luwu_path(): string
         )
     elseif is_submoduley then
         -- make sure user didnt forget to clone submodules before erroring out somewhere else
-        if not fs.path.exists(luwu_submodule_path) or #fs.listdir(luwu_submodule_path) < 4 then
-            print("./luwu dir is missing or empty; you probably forgot to clone with submodules... updating submodules")
-            update_submodules()
-        end
+        ensure_submodule()
         return luwu_submodule_path
     else
         const requested_dir = resp :: string
@@ -450,7 +518,7 @@ end
 ensure_dependencies()
 
 if parsed.command == "submodule-update" then
-    update_submodules()
+    update_submodule(parsed:get<<string>>("--branch"))
     process.exit(0)
 end
 
