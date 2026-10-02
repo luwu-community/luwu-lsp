@@ -522,7 +522,8 @@ TEST_CASE_FIXTURE(Fixture, "show_type_of_global_variable")
 
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
-    CHECK_EQ(result->contents.value, codeBlock("luwu", "type DocumentedGlobalVariable = number"));
+    // Luwu: a global reads as it was introduced, here by the loaded definitions
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "declare DocumentedGlobalVariable: number"));
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_global_type_table_from_definitions_file")
@@ -1702,6 +1703,112 @@ TEST_CASE_FIXTURE(ClassFixture, "hovering_over_the_class_type_doesnt_call_it_an_
     const std::string& hover = result->contents.value;
     CHECK(hover.find("extern type") == std::string::npos);
     CHECK(hover.find("class") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_and_trait_hovers_reference_their_traits")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("foo.luau", R"(
+trait Named
+    expect public name: string
+end
+trait Greets needs Named
+    function greet(self): string
+        return self.name
+    end
+end
+class Cat(public name: string) implements Greets end
+local c = Cat("a")
+)");
+
+    auto hoverAt = [&](lsp::Position position)
+    {
+        lsp::HoverParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = position;
+        auto result = workspace.hover(params, nullptr);
+        REQUIRE(result);
+        return result->contents.value;
+    };
+
+    std::string named = "[`Named`](" + uri.toString() + "#L2)";
+    std::string greets = "[`Greets`](" + uri.toString() + "#L5)";
+
+    // A trait references the traits it needs
+    CHECK_NE(hoverAt({4, 7}).find("*References* " + named), std::string::npos);
+    // A class references the traits it implements, including those implied through `needs`
+    CHECK_NE(hoverAt({9, 7}).find("*References* " + greets + " · " + named), std::string::npos);
+    CHECK_NE(hoverAt({10, 11}).find("*References* " + greets + " · " + named), std::string::npos);
+    // So does an object of it, whose class is summarized below
+    CHECK_NE(hoverAt({10, 6}).find("*References* " + greets + " · " + named), std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "hover_verbosity_controls_what_the_hover_expands")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ENABLE_NEW_SOLVER();
+
+    auto [source, marker] = sourceWithMarker(R"(
+type Point = { x: number, y: number }
+class Shapes
+    function a(self) end
+    function b(self) end
+    function c(self) end
+    function d(self) end
+    function e(self) end
+    function f(self) end
+    function g(self) end
+end
+local function origin(): Point
+    return { x = 0, y = 0 }
+end
+local p = orig|in()
+local s = Shapes()
+)");
+    auto uri = newDocument("foo.luau", source);
+
+    auto hoverAt = [&](lsp::Position position, std::optional<lsp::HoverVerbosity> verbosity)
+    {
+        lsp::HoverParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = position;
+        params.verbosity = verbosity;
+        auto result = workspace.hover(params, nullptr);
+        REQUIRE(result);
+        return *result;
+    };
+
+    // Low links the alias without expanding it; medium expands it too
+    auto low = hoverAt(marker, lsp::HoverVerbosity::Low);
+    CHECK_NE(low.contents.value.find("*References* [`Point`]"), std::string::npos);
+    CHECK_EQ(low.contents.value.find("type Point ="), std::string::npos);
+    CHECK_EQ(low.canIncreaseVerbosity, true);
+    CHECK_EQ(low.canDecreaseVerbosity, false);
+
+    auto medium = hoverAt(marker, lsp::HoverVerbosity::Medium);
+    CHECK_NE(medium.contents.value.find("type Point ="), std::string::npos);
+    CHECK_EQ(medium.canDecreaseVerbosity, true);
+    // Nothing more to show for so small a type
+    CHECK_EQ(medium.canIncreaseVerbosity, false);
+
+    // A class value's own summary is cut short below high
+    lsp::Position shapes{15, 11};
+    auto shortSummary = hoverAt(shapes, lsp::HoverVerbosity::Medium);
+    CHECK_EQ(shortSummary.contents.value.find("function g("), std::string::npos);
+    CHECK_EQ(shortSummary.canIncreaseVerbosity, true);
+    auto fullSummary = hoverAt(shapes, lsp::HoverVerbosity::High);
+    CHECK_NE(fullSummary.contents.value.find("function g("), std::string::npos);
+    CHECK_EQ(fullSummary.canIncreaseVerbosity, false);
+    CHECK_EQ(fullSummary.canDecreaseVerbosity, true);
+
+    // Without a requested verbosity, `hover.verbosity` applies and nothing is said about the others
+    auto unspecified = hoverAt(marker, std::nullopt);
+    CHECK_EQ(unspecified.contents.value, medium.contents.value);
+    CHECK_FALSE(unspecified.canIncreaseVerbosity);
+    CHECK_FALSE(unspecified.canDecreaseVerbosity);
 }
 
 TEST_SUITE_END();

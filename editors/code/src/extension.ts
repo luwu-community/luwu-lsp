@@ -44,6 +44,7 @@ import { registerLegacySettingsNotice } from "./legacySettingsNotice";
 
 import { registerRequireGraph } from "./requireGraph";
 import { registerMatchingKeyword } from "./matchingKeyword";
+import { hoverMiddleware, registerHoverVerbosity } from "./hoverVerbosity";
 
 import { registerViewInternalSource } from "./internalSource";
 
@@ -462,6 +463,12 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     fflags["LuauSolverV2"] = "true";
   }
 
+  // `--!trust` only means something when the runtime enables it, so it's
+  // opt-in: without the flag, Luwu warns that the directive has no effect
+  if (getSetting<boolean>("allowTrustDirective")) {
+    fflags["DebugLuwuCompilerTrustsTypeAnnotations"] = "true";
+  }
+
   // Handle overrides
   const overridenFFlags = getSetting<FFlags>("fflags.override");
   if (overridenFFlags) {
@@ -614,6 +621,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     errorHandler: new ClientErrorHandler(context, 4),
     middleware: {
       provideOnTypeFormattingEdits: onTypeFormattingMiddleware,
+      provideHover: hoverMiddleware(() => client),
       workspace: {
         // The server asks for the `luau-lsp` section, which is the wire
         // name every client uses -- including the nvim and zed ones, which
@@ -685,6 +693,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   clientDisposables.push(...registerComputeCodeGen(context, client));
   clientDisposables.push(...registerRequireGraph(context, client));
   clientDisposables.push(...registerMatchingKeyword(context, client));
+  clientDisposables.push(...registerHoverVerbosity());
   clientDisposables.push(...registerViewInternalSource(context, client));
   clientDisposables.push(
     vscode.commands.registerCommand("luwu.openWalkthrough", () => {
@@ -755,6 +764,7 @@ export async function activate(context: vscode.ExtensionContext) {
           });
       } else if (
         settingChanged(e, "fflags") ||
+        settingChanged(e, "allowTrustDirective") ||
         settingChanged(e, "completion.enableFragmentAutocomplete")
       ) {
         vscode.window

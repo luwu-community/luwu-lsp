@@ -720,7 +720,8 @@ static bool isNameChar(char c)
 
 // `const .|` or `const cat.|` (or `const |` on an explicit invoke) with nothing after the cursor: offer the
 // destructuring pattern with its value written first. Keys inside `.{}` complete from the value's type, so the
-// first tab stop is the value and the second goes back inside the braces.
+// first tab stop is the value and the second goes back inside the braces. `const .{|}` (the brace typed by hand,
+// usually auto-closed) gets the same snippet, replacing the closing brace.
 static void suggestDestructuring(const lsp::CompletionParams& params, const TextDocument& textDocument, const Luau::SourceModule* sourceModule,
     const Luau::Position& position, std::vector<lsp::CompletionItem>& items)
 {
@@ -734,11 +735,20 @@ static void suggestDestructuring(const lsp::CompletionParams& params, const Text
     if (position.column > line.size())
         return;
 
-    for (size_t i = position.column; i < line.size(); ++i)
-        if (!isspace(static_cast<unsigned char>(line[i])))
-            return;
-
     std::string_view prefix(line.data(), position.column);
+    bool braced = !prefix.empty() && prefix.back() == '{';
+
+    // Nothing may follow the cursor, except the brace auto-closed after `.{`
+    size_t replaceEnd = position.column;
+    for (size_t i = position.column; i < line.size(); ++i)
+    {
+        if (isspace(static_cast<unsigned char>(line[i])))
+            continue;
+        if (braced && line[i] == '}' && replaceEnd == position.column)
+            replaceEnd = i + 1;
+        else
+            return;
+    }
     size_t start = prefix.find_first_not_of(" \t");
     if (start == std::string_view::npos)
         return;
@@ -758,8 +768,11 @@ static void suggestDestructuring(const lsp::CompletionParams& params, const Text
         nameStart = prefix.size();
     std::string_view pattern = prefix.substr(nameStart);
 
-    bool dotted = !pattern.empty() && pattern.back() == '.';
-    std::string_view name = dotted ? pattern.substr(0, pattern.size() - 1) : pattern;
+    std::string_view head = braced ? pattern.substr(0, pattern.size() - 1) : pattern;
+    bool dotted = !head.empty() && head.back() == '.';
+    if (braced && !dotted)
+        return;
+    std::string_view name = dotted ? head.substr(0, head.size() - 1) : head;
     // A name being typed gets no suggestion: Enter or Tab would accept it and turn `local x` into a pattern
     if (!dotted && !name.empty())
         return;
@@ -778,7 +791,8 @@ static void suggestDestructuring(const lsp::CompletionParams& params, const Text
                                                          ".{fields} = value\n```"};
     item.filterText = std::string(pattern);
     item.sortText = "0";
-    item.textEdit = lsp::TextEdit{{replaceStart, params.position}, std::string(name) + ".{$2} = $1"};
+    lsp::Position replaceEndPosition = textDocument.convertPosition(Luau::Position{position.line, unsigned(replaceEnd)});
+    item.textEdit = lsp::TextEdit{{replaceStart, replaceEndPosition}, std::string(name) + ".{$2} = $1"};
     item.insertTextFormat = lsp::InsertTextFormat::Snippet;
     // Suggest the value right away; the braces complete once the value is written
     item.command = lsp::Command{"Trigger Suggest", "editor.action.triggerSuggest"};
@@ -804,6 +818,15 @@ std::vector<lsp::CompletionItem> WorkspaceFolder::completion(const lsp::Completi
     auto textDocument = fileResolver.getTextDocument(params.textDocument.uri);
     if (!textDocument)
         throw JsonRpcException(lsp::ErrorCode::RequestFailed, "No managed text document for " + params.textDocument.uri.toString());
+
+    // `{` only triggers completion for the destructuring snippet (`const .{|}`), not for every table
+    if (params.context && params.context->triggerCharacter == "{")
+    {
+        std::vector<lsp::CompletionItem> items;
+        if (canUseSnippets(client->capabilities))
+            suggestDestructuring(params, *textDocument, frontend.getSourceModule(moduleName), textDocument->convertPosition(params.position), items);
+        return items;
+    }
 
     std::unordered_set<std::string> tags;
 

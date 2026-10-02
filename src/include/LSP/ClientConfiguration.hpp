@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include "nlohmann/json.hpp"
+#include "Protocol/LanguageFeatures.hpp"
 
 struct ClientDiagnosticsConfiguration
 {
@@ -122,9 +123,10 @@ struct ClientHoverConfiguration
     bool multilineFunctionDefinitions = false;
     bool strictDatamodelTypes = true;
     bool includeStringLength = true;
+    lsp::HoverVerbosity verbosity = lsp::HoverVerbosity::Medium;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
-    ClientHoverConfiguration, enabled, showTableKinds, multilineFunctionDefinitions, strictDatamodelTypes, includeStringLength);
+    ClientHoverConfiguration, enabled, showTableKinds, multilineFunctionDefinitions, strictDatamodelTypes, includeStringLength, verbosity);
 
 enum struct ImportRequireStyle
 {

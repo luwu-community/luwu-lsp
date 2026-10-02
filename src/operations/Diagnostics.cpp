@@ -71,6 +71,15 @@ static void reportLuwuOnlyDirectives(const Luau::SourceModule& module, const Tex
         diagnostic.message = "'--!trust' is a Luwu directive and isn't supported in Luau files; rename this file to .luwu to use it";
         diagnostic.severity = lsp::DiagnosticSeverity::Error;
         diagnostic.range = {toUTF16(textDocument, hotcomment.location.begin), toUTF16(textDocument, hotcomment.location.end)};
+
+        // This supersedes whatever the linter said about the directive (e.g. that the embedder doesn't enable it)
+        items.erase(std::remove_if(items.begin(), items.end(),
+                        [&](const lsp::Diagnostic& lint)
+                        {
+                            return lint.code == std::variant<std::string, int>{int(Luau::LintWarning::Code_CommentDirective)} &&
+                                   lint.range == diagnostic.range;
+                        }),
+            items.end());
         items.emplace_back(diagnostic);
     }
 }

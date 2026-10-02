@@ -7,16 +7,36 @@
 
 namespace lsp
 {
+// Luwu extension: how much a hover shows. `low` keeps the hovered type compact and only links the types it refers to,
+// `medium` also expands a few of them below it, `high` expands everything.
+enum struct HoverVerbosity
+{
+    Low,
+    Medium,
+    High,
+};
+NLOHMANN_JSON_SERIALIZE_ENUM(HoverVerbosity, {
+                                                 {HoverVerbosity::Low, "low"},
+                                                 {HoverVerbosity::Medium, "medium"},
+                                                 {HoverVerbosity::High, "high"},
+                                             })
+
 struct HoverParams : TextDocumentPositionParams
 {
+    // Luwu extension: overrides `hover.verbosity` for this request, and asks for the `can*Verbosity` fields of the result
+    std::optional<HoverVerbosity> verbosity = std::nullopt;
 };
+NLOHMANN_DEFINE_OPTIONAL(HoverParams, textDocument, position, verbosity)
 
 struct Hover
 {
     MarkupContent contents;
     std::optional<Range> range = std::nullopt;
+    // Luwu extension, set when the request named a verbosity: whether a higher (lower) one would show more (less)
+    std::optional<bool> canIncreaseVerbosity = std::nullopt;
+    std::optional<bool> canDecreaseVerbosity = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(Hover, contents, range)
+NLOHMANN_DEFINE_OPTIONAL(Hover, contents, range, canIncreaseVerbosity, canDecreaseVerbosity)
 
 
 struct DefinitionParams : TextDocumentPositionParams

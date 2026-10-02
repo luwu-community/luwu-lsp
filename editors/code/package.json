@@ -210,6 +210,16 @@
         "command": "luwu.jumpToMatchingKeyword",
         "title": "Luwu: Jump to Matching Keyword",
         "enablement": "resourceLangId == luwu || resourceLangId == luau || resourceLangId == lua"
+      },
+      {
+        "command": "luwu.increaseHoverVerbosity",
+        "title": "Luwu: Increase Hover Verbosity",
+        "enablement": "resourceLangId == luwu || resourceLangId == luau || resourceLangId == lua"
+      },
+      {
+        "command": "luwu.decreaseHoverVerbosity",
+        "title": "Luwu: Decrease Hover Verbosity",
+        "enablement": "resourceLangId == luwu || resourceLangId == luau || resourceLangId == lua"
       }
     ],
     "keybindings": [
@@ -217,6 +227,16 @@
         "command": "luwu.jumpToMatchingKeyword",
         "key": "ctrl+shift+\\",
         "mac": "cmd+shift+\\",
+        "when": "editorTextFocus && (editorLangId == luwu || editorLangId == luau || editorLangId == lua)"
+      },
+      {
+        "command": "luwu.increaseHoverVerbosity",
+        "key": "alt+=",
+        "when": "editorTextFocus && (editorLangId == luwu || editorLangId == luau || editorLangId == lua)"
+      },
+      {
+        "command": "luwu.decreaseHoverVerbosity",
+        "key": "alt+-",
         "when": "editorTextFocus && (editorLangId == luwu || editorLangId == luau || editorLangId == lua)"
       }
     ],
@@ -400,6 +420,12 @@
           },
           "luwu.luauCompatibilityMode": {
             "markdownDescription": "Luau compatibility mode: disable Luwu's own language features (classes, default arguments, ...)",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
+          "luwu.allowTrustDirective": {
+            "markdownDescription": "Allow the `--!trust` directive. This is an experimental Luwu feature that inlines functions based on type annotations. Only turn this on if the runtime you use also enables it.\n\nEnables FFlag `DebugLuwuCompilerTrustsTypeAnnotations`; `#luwu.fflags.override#` takes precedence.",
             "type": "boolean",
             "default": false,
             "scope": "window"
@@ -597,6 +623,17 @@
             "markdownDescription": "Show string length when hovering over a string literal",
             "type": "boolean",
             "default": true,
+            "scope": "resource"
+          },
+          "luwu.hover.verbosity": {
+            "markdownDescription": "How much a hover shows. `low` keeps the hovered type short and only links the types it refers to, `medium` also expands a few of them, and `high` shows everything. The **More** and **Less** links in a hover (or `alt+=` and `alt+-`) change it for the rest of the session.",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": "medium",
             "scope": "resource"
           },
           "luwu.completion.enabled": {
@@ -1092,6 +1129,12 @@
             "default": false,
             "scope": "window"
           },
+          "luau-lsp.allowTrustDirective": {
+            "markdownDescription": "Allow the `--!trust` directive. This is an experimental Luwu feature that inlines functions based on type annotations. Only turn this on if the runtime you use also enables it.\n\nEnables FFlag `DebugLuwuCompilerTrustsTypeAnnotations`; `#luwu.fflags.override#` takes precedence.",
+            "type": "boolean",
+            "default": false,
+            "scope": "window"
+          },
           "luau-lsp.fflags.sync": {
             "markdownDescription": "Sync currently enabled FFlags with Roblox's published FFlags.\nThis currently only syncs FFlags which begin with 'Luau'",
             "type": "boolean",
@@ -1283,6 +1326,17 @@
             "markdownDescription": "Show string length when hovering over a string literal",
             "type": "boolean",
             "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.hover.verbosity": {
+            "markdownDescription": "How much a hover shows. `low` keeps the hovered type short and only links the types it refers to, `medium` also expands a few of them, and `high` shows everything. The **More** and **Less** links in a hover (or `alt+=` and `alt+-`) change it for the rest of the session.",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": "medium",
             "scope": "resource"
           },
           "luau-lsp.completion.enabled": {

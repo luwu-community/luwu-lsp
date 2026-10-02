@@ -1,6 +1,7 @@
 #include "LSP/Workspace.hpp"
 
 #include <algorithm>
+#include <limits>
 
 #include "Luau/AstQuery.h"
 #include "Luau/Module.h"
@@ -199,6 +200,37 @@ std::string truncateWhereClauses(const std::string& whereClauses, size_t limit)
 }
 
 static constexpr size_t kMaxReferencedSummaryMembers = 3;
+
+// What each hover verbosity shows. The hovered type comes first and the documentation follows it, so a type that
+// takes a screen of its own pushes the docs out of view: below `high`, it gets cut short.
+struct HoverLimits
+{
+    // Characters of a table type before its remaining properties are elided (`maxTableLength`)
+    size_t tableLength;
+    // Fields/functions per section of the hovered class or extern type's own summary
+    size_t summaryMembers;
+    // Whether the types the hover refers to are expanded below it, rather than only linked
+    bool expandReferencedTypes;
+    size_t expandedReferencedTypes;
+    size_t referencedSummaryMembers;
+    size_t referencedTypeLinks;
+};
+
+static HoverLimits hoverLimits(lsp::HoverVerbosity verbosity)
+{
+    constexpr size_t unlimited = std::numeric_limits<size_t>::max();
+
+    switch (verbosity)
+    {
+    case lsp::HoverVerbosity::Low:
+        return {150, 3, false, 0, 0, 6};
+    case lsp::HoverVerbosity::High:
+        return {4000, unlimited, true, unlimited, kMaxSummaryMembers, unlimited};
+    case lsp::HoverVerbosity::Medium:
+    default:
+        return {300, kMaxSummaryMembers, true, kMaxExpandedReferencedTypes, kMaxReferencedSummaryMembers, 12};
+    }
+}
 
 static bool isDunderName(std::string_view name)
 {
@@ -1027,6 +1059,31 @@ static std::optional<Primitive> builtinPrimitive(const Luau::Frontend& frontend,
 
 std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params, const LSPCancellationToken& cancellationToken)
 {
+    lsp::HoverVerbosity verbosity = params.verbosity.value_or(client->getConfiguration(rootUri).hover.verbosity);
+    std::optional<lsp::Hover> result = hoverAtVerbosity(params, verbosity, cancellationToken);
+
+    // A client that names a verbosity offers to change it, so tell it whether that would change anything: the hover
+    // at the next level either way, compared with this one
+    if (result && params.verbosity)
+    {
+        auto differsAt = [&](lsp::HoverVerbosity other)
+        {
+            std::optional<lsp::Hover> hover = hoverAtVerbosity(params, other, cancellationToken);
+            return hover && hover->contents.value != result->contents.value;
+        };
+
+        result->canIncreaseVerbosity = verbosity != lsp::HoverVerbosity::High && differsAt(lsp::HoverVerbosity(int(verbosity) + 1));
+        result->canDecreaseVerbosity = verbosity != lsp::HoverVerbosity::Low && differsAt(lsp::HoverVerbosity(int(verbosity) - 1));
+    }
+
+    return result;
+}
+
+std::optional<lsp::Hover> WorkspaceFolder::hoverAtVerbosity(
+    const lsp::HoverParams& params, lsp::HoverVerbosity verbosity, const LSPCancellationToken& cancellationToken)
+{
+    const HoverLimits limits = hoverLimits(verbosity);
+
     auto config = client->getConfiguration(rootUri);
 
     if (!config.hover.enabled)
@@ -1070,6 +1127,14 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         return std::nullopt;
 
     auto ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position);
+
+    // A method's function spans its name (it starts at `function`), so the name finds the function rather than the
+    // class it belongs to; the class's members are what know a method's name, visibility and `?`
+    if (node->is<Luau::AstExprFunction>() && ancestry.size() >= 2)
+        if (auto parentClass = ancestry[ancestry.size() - 2]->as<Luau::AstStatClass>())
+            for (const auto& member : parentClass->members)
+                if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->nameLocation.containsClosed(position))
+                    node = parentClass;
     if (auto keywordMatch = findKeywordDocKeyAtPosition(ancestry, position))
     {
         if (auto docs = getKeywordHoverDocs(keywordMatch->docKey))
@@ -1475,8 +1540,8 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     // table of functions, say) is enough. `maxTableLength` instead stops between properties with a
     // `... N more ...` entry and still closes the table -- make that the limit a hover normally hits,
     // and keep `maxTypeLength` well above it as a backstop for types that aren't tables.
-    opts.maxTableLength = 500;
-    opts.maxTypeLength = 2000;
+    opts.maxTableLength = limits.tableLength;
+    opts.maxTypeLength = std::max<size_t>(2000, 2 * limits.tableLength);
     // show type aliases referred to by this hover
     opts.includeWhereClauses = true;
     // hovering over the top level of alias itself shouldn't show just the alias name, 
@@ -1549,10 +1614,10 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             bool isClassValue = et->parent == builtins->classType || et->parent == builtins->traitType;
             if (isClassValue || et->parent == builtins->objectType)
                 summary = buildClassFieldSummary(
-                    frontend, module, moduleName, spanTy, et, scope, config.hover.showTableKinds, isClassValue, kMaxReferencedSummaryMembers
+                    frontend, module, moduleName, spanTy, et, scope, config.hover.showTableKinds, isClassValue, limits.referencedSummaryMembers
                 );
             else if (!et->props.empty())
-                summary = buildExternTypeSummary(module, spanTy, et, scope, config.hover.showTableKinds, kMaxReferencedSummaryMembers);
+                summary = buildExternTypeSummary(module, spanTy, et, scope, config.hover.showTableKinds, limits.referencedSummaryMembers);
 
             if (!summary)
                 continue;
@@ -1732,10 +1797,23 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
             objectOfType = Luau::follow(*type);
     }
 
-    std::string referencedTypeLinks;
+    // Luwu Traits (rfcs/classes/traits.md): the traits a class implements (listed, and implied through `needs`), or the
+    // traits a trait needs. Its summary names them, but only as text.
+    auto traitsOf = [&](Luau::TypeId ty) -> std::vector<Luau::TypeId>
+    {
+        const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
+        // A class or trait value: its traits are on its object type
+        if (et && et->relation)
+            if (const Luau::Obj* obj = Luau::get_if<Luau::Obj>(&*et->relation))
+                et = Luau::get<Luau::ExternType>(Luau::follow(obj->ty));
+        return et ? et->implementedTraits : std::vector<Luau::TypeId>{};
+    };
+
+    // Links to where each of `referenced` is defined, grouped by module: `*References* [`A`](...) · [`B`](...)`
+    auto buildReferencedTypeLinks = [&](const std::vector<Luau::TypeId>& referenced) -> std::string
     {
         // A wide type can reference dozens of others; past a handful the links stop being useful
-        static constexpr size_t kMaxReferencedTypeLinks = 12;
+        const size_t kMaxReferencedTypeLinks = limits.referencedTypeLinks;
 
         struct ReferencedModule
         {
@@ -1749,25 +1827,16 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
         std::vector<ReferencedModule> modules;
         size_t total = 0;
 
-        for (const auto& span : typeResult.typeSpans)
+        for (Luau::TypeId ty : referenced)
         {
-            auto name = types::getTypeName(span.type);
+            auto name = types::getTypeName(ty);
             if (!name || name->empty())
                 continue;
 
-            auto source = resolveTypeSource(span.type);
+            auto source = resolveTypeSource(ty);
             if (!source)
                 continue;
             const lsp::Location* location = &source->location;
-
-            // A footer below the type already links its owner (or the class it's an object of);
-            // repeating that as a reference says nothing new
-            if (memberOwnerType && types::getTypeName(*memberOwnerType) == name)
-                continue;
-            if (objectOfType && types::getTypeName(*objectOfType) == name)
-                continue;
-            if (isEnclosingClass(Luau::follow(span.type)))
-                continue;
 
             if (!seenNames.insert(*name).second)
                 continue;
@@ -1813,6 +1882,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
                 break;
         }
 
+        std::string referencedTypeLinks;
         if (!modules.empty())
         {
             // A bullet per module is only worth the vertical space once there's more than one of
@@ -1842,16 +1912,47 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
                     referencedTypeLinks += " *from* " + moduleLink;
             }
         }
+
+        return referencedTypeLinks;
+    };
+
+    std::string referencedTypeLinks;
+    {
+        std::vector<Luau::TypeId> referenced;
+        for (const auto& span : typeResult.typeSpans)
+        {
+            // A footer below the type already links its owner (or the class it's an object of);
+            // repeating that as a reference says nothing new
+            auto name = types::getTypeName(span.type);
+            if (memberOwnerType && types::getTypeName(*memberOwnerType) == name)
+                continue;
+            if (objectOfType && types::getTypeName(*objectOfType) == name)
+                continue;
+            if (isEnclosingClass(Luau::follow(span.type)))
+                continue;
+
+            referenced.push_back(span.type);
+        }
+
+        // The class an object belongs to is summarized below, `implements` list and all
+        if (objectOfType)
+            for (Luau::TypeId trait : traitsOf(*objectOfType))
+                referenced.push_back(trait);
+
+        referencedTypeLinks = buildReferencedTypeLinks(referenced);
     }
 
     // The type aliases referred to within this hover (such as type Pathlike = string | Path |
     // FilePath... for (path: Pathlike) -> string | error<info>) and the summaries of the classes and
     // extern types it refers to, in a code block of their own below the hovered type itself
     std::string referencedTypes;
-    if (!typeResult.whereClauses.empty())
-        referencedTypes = truncateWhereClauses(typeResult.whereClauses, kMaxExpandedReferencedTypes);
-    if (!externTypeSummaries.empty())
-        referencedTypes += (referencedTypes.empty() ? "" : "\n\n") + externTypeSummaries;
+    if (limits.expandReferencedTypes)
+    {
+        if (!typeResult.whereClauses.empty())
+            referencedTypes = truncateWhereClauses(typeResult.whereClauses, limits.expandedReferencedTypes);
+        if (!externTypeSummaries.empty())
+            referencedTypes += (referencedTypes.empty() ? "" : "\n\n") + externTypeSummaries;
+    }
 
     // Rendered for the hovered type itself; types it referred to follow in their own block. Summaries
     // that stand on their own (a class, an extern type) don't go through this.
@@ -1883,8 +1984,15 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     {
         // The class value itself: the summary *is* the answer here, rather than something the
         // hovered expression merely has the type of
-        if (auto summary = buildClassFieldSummary(frontend, module, moduleName, *type, et, scope, config.hover.showTableKinds, true))
+        if (auto summary =
+                buildClassFieldSummary(frontend, module, moduleName, *type, et, scope, config.hover.showTableKinds, true, limits.summaryMembers))
+        {
             typeString = codeBlock(codeLanguage, types::formatLongFunctionTypeLines(*summary)) + typeIdentityLine(*type, "");
+
+            // Two trailing spaces, so the links don't run on from the line above as one paragraph
+            if (std::string traitLinks = buildReferencedTypeLinks(traitsOf(*type)); !traitLinks.empty())
+                typeString += "  \n" + traitLinks;
+        }
         else
             typeString = typeCodeBlock(typeString);
     }
@@ -1899,7 +2007,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params,
     {
         // A "declare extern type"-style extern type (e.g. a host-provided type like Instance), as
         // opposed to one of our user-defined `class`/`object` types handled above.
-        typeString = codeBlock(codeLanguage, types::formatLongFunctionTypeLines(buildExternTypeSummary(module, *type, et, scope, config.hover.showTableKinds))) +
+        typeString = codeBlock(codeLanguage, types::formatLongFunctionTypeLines(buildExternTypeSummary(module, *type, et, scope, config.hover.showTableKinds, limits.summaryMembers))) +
                      typeIdentityLine(*type, "");
     }
     else if (typeAliasInformation)

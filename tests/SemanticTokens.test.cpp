@@ -4,6 +4,7 @@
 #include "Flags.hpp"
 
 LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(LuwuTraits)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -195,6 +196,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "object_typed_as_a_trait_is_not_coloured_as_the_trait")
 {
     ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
     ENABLE_NEW_SOLVER();
 
     check(R"(
@@ -211,9 +213,9 @@ print(ent, Entry)
 
     auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
 
+    // A plain variable gets no token of its own (the grammar colours it), and certainly not the trait's
     auto object = getSemanticToken(tokens, Luau::Position{9, 6});
-    REQUIRE(object);
-    CHECK_EQ(object->tokenType, lsp::SemanticTokenTypes::Variable);
+    CHECK((!object || object->tokenType != lsp::SemanticTokenTypes::Interface));
 
     auto trait = getSemanticToken(tokens, Luau::Position{9, 11});
     REQUIRE(trait);

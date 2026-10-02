@@ -35,7 +35,8 @@ struct FragmentAutocompleteFixture : Fixture
     std::vector<lsp::CompletionItem> fragmentAutocomplete(const std::string& oldSource, const std::string& newSource, const lsp::Position& position)
     {
         // Enable pull-based diagnostics, otherwise updateTextDocument will trigger a diagnostic check
-        client->capabilities.textDocument = lsp::TextDocumentClientCapabilities{};
+        if (!client->capabilities.textDocument)
+            client->capabilities.textDocument = lsp::TextDocumentClientCapabilities{};
         client->capabilities.textDocument->diagnostic = lsp::DiagnosticClientCapabilities{};
 
         auto uri = newDocument("foo.luau", oldSource);
@@ -2631,8 +2632,10 @@ TEST_CASE_FIXTURE(RobloxFragmentAutocompleteFixture, "fragment_autocomplete_is_n
 
 static std::vector<lsp::CompletionItem> completeDestructuring(Fixture& fixture, const std::string& text)
 {
+    // A fresh file each call: reopening an open document keeps its old text
+    static size_t count = 0;
     auto [source, marker] = sourceWithMarker(text);
-    auto uri = fixture.newDocument("foo.luau", source);
+    auto uri = fixture.newDocument("destructure" + std::to_string(count++) + ".luau", source);
 
     lsp::CompletionParams params;
     params.textDocument = lsp::TextDocumentIdentifier{uri};
@@ -2685,6 +2688,68 @@ TEST_CASE_FIXTURE(Fixture, "destructuring_snippet_needs_the_flag")
     enableSnippetSupport(client->capabilities);
 
     CHECK_FALSE(getItem(completeDestructuring(*this, "const .|"), ".{}"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructuring_snippet_after_a_typed_brace")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    enableSnippetSupport(client->capabilities);
+
+    // The brace was auto-closed: the snippet replaces it
+    auto item = requireItem(completeDestructuring(*this, "local cat = {name = \"a\"}\nconst .{|}"), ".{}");
+    REQUIRE(item.textEdit);
+    CHECK_EQ(item.textEdit->newText, ".{$2} = $1");
+    CHECK_EQ(item.textEdit->range.start, lsp::Position{1, 6});
+    CHECK_EQ(item.textEdit->range.end, lsp::Position{1, 9});
+    CHECK_EQ(item.filterText, ".{");
+
+    item = requireItem(completeDestructuring(*this, "local fs.{|"), ".{}");
+    REQUIRE(item.textEdit);
+    CHECK_EQ(item.textEdit->newText, "fs.{$2} = $1");
+    CHECK_EQ(item.textEdit->range.end, lsp::Position{0, 10});
+
+    // Keys being typed, a value already written, or a table rather than a pattern
+    CHECK_FALSE(getItem(completeDestructuring(*this, "const .{a|}"), ".{}"));
+    CHECK_FALSE(getItem(completeDestructuring(*this, "local cat = {}\nconst .{|} = cat"), ".{}"));
+    CHECK_FALSE(getItem(completeDestructuring(*this, "local t = {|}"), ".{}"));
+    CHECK_FALSE(getItem(completeDestructuring(*this, "const {|}"), ".{}"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "brace_trigger_only_offers_the_destructuring_snippet")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    enableSnippetSupport(client->capabilities);
+
+    auto complete = [&](const std::string& text)
+    {
+        static size_t count = 0;
+        auto [source, marker] = sourceWithMarker(text);
+        auto uri = newDocument("brace" + std::to_string(count++) + ".luau", source);
+        lsp::CompletionParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = marker;
+        params.context = lsp::CompletionContext{lsp::CompletionTriggerKind::TriggerCharacter, "{"};
+        return workspace.completion(params, nullptr);
+    };
+
+    auto items = complete("local cat = {name = \"a\"}\nconst .{|}");
+    REQUIRE_EQ(items.size(), 1);
+    CHECK_EQ(items[0].label, ".{}");
+
+    CHECK(complete("local cat = 1\nlocal t = {|}").empty());
+}
+
+TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "destructuring_snippet_with_fragment_autocomplete")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    enableSnippetSupport(client->capabilities);
+
+    auto items = fragmentAutocomplete("local cat = {name = \"a\"}\n", "local cat = {name = \"a\"}\nconst .", lsp::Position{1, 7});
+    auto item = requireItem(items, ".{}");
+    REQUIRE(item.textEdit);
+    CHECK_EQ(item.textEdit->newText, ".{$2} = $1");
+
+    CHECK_FALSE(getItem(fragmentAutocomplete("local cat = {}\n", "local cat = {}\n-- const .", lsp::Position{1, 10}), ".{}"));
 }
 
 TEST_SUITE_END();

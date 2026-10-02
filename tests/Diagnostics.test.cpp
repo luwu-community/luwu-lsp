@@ -2,6 +2,8 @@
 #include "Fixture.h"
 #include "Platform/RobloxPlatform.hpp"
 
+LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
+
 TEST_SUITE_BEGIN("Diagnostics");
 
 TEST_CASE_FIXTURE(Fixture, "trust_directive_is_an_error_outside_luwu_files")
@@ -16,8 +18,17 @@ TEST_CASE_FIXTURE(Fixture, "trust_directive_is_an_error_outside_luwu_files")
     CHECK_EQ(diagnostics.items[0].severity, lsp::DiagnosticSeverity::Error);
     CHECK_EQ(diagnostics.items[0].range, lsp::Range{{0, 0}, {0, 8}});
 
+    // In a .luwu file it is only a warning that the embedder may not enable it, unless the user says theirs does
+    // (`luwu.allowTrustDirective`)
     auto luwuDocument = newDocument("main.luwu", source);
     diagnostics = workspace.documentDiagnostics(lsp::DocumentDiagnosticParams{{luwuDocument}}, nullptr);
+    REQUIRE_EQ(diagnostics.items.size(), 1);
+    CHECK_EQ(diagnostics.items[0].severity, lsp::DiagnosticSeverity::Warning);
+    CHECK_EQ(diagnostics.items[0].code, std::variant<std::string, int>{int(Luau::LintWarning::Code_CommentDirective)});
+
+    ScopedFastFlag trust{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
+    auto trustedDocument = newDocument("trusted.luwu", source);
+    diagnostics = workspace.documentDiagnostics(lsp::DocumentDiagnosticParams{{trustedDocument}}, nullptr);
     CHECK_EQ(diagnostics.items.size(), 0);
 }
 
