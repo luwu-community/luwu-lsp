@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "Luau/AstQuery.h"
+#include "Luau/BuiltinDefinitions.h"
 #include "Luau/Module.h"
 #include "Luau/ToString.h"
 #include "LSP/LuauExt.hpp"
@@ -163,6 +164,45 @@ static constexpr size_t kMaxSummaryMembers = 5;
 // whole, and let the `References` links above stand in for the rest.
 static constexpr size_t kMaxExpandedReferencedTypes = 5;
 
+// Luwu: what calling a function refines, which is nothing its signature says. A user-defined refinement
+// (`@[truthy(param, Type)] function f(param: T)`) names the parameter it narrows and the type it narrows it to;
+// `class.isinstance` and `class.implements` narrow their first argument to an object of their second, and do it by
+// the callee's type rather than by how the call is spelled, so a binding of one (`const is = class.isinstance`)
+// refines just as it does.
+std::string refinementText(Luau::TypeId ty)
+{
+    ty = Luau::follow(ty);
+
+    // An overloaded function is an intersection of signatures; whichever of them refines says what the function does
+    if (const auto* itv = Luau::get<Luau::IntersectionType>(ty))
+    {
+        for (Luau::TypeId part : itv->parts)
+            if (std::string text = refinementText(part); !text.empty())
+                return text;
+        return "";
+    }
+
+    const auto* ftv = Luau::get<Luau::FunctionType>(ty);
+    if (!ftv)
+        return "";
+
+    auto argument = [&](size_t index) -> std::string
+    {
+        if (index < ftv->argNames.size() && ftv->argNames[index])
+            return "`" + ftv->argNames[index]->name + "`";
+        return "argument " + std::to_string(index + 1);
+    };
+
+    if (ftv->truthyRefinement)
+        return "*Refines* " + argument(ftv->truthyRefinement->argIndex) + " into `" +
+               Luau::toString(Luau::follow(ftv->truthyRefinement->type)) + "`";
+
+    if (dynamic_cast<const Luau::MagicClassInstanceCheck*>(ftv->magic.get()))
+        return "*Refines* " + argument(0) + " into an object of " + argument(1);
+
+    return "";
+}
+
 // Keeps the first `limit` `type X = ...` clauses of a `where` section, each of which may span
 // several lines, and replaces the rest with a count.
 std::string truncateWhereClauses(const std::string& whereClauses, size_t limit)
@@ -225,7 +265,8 @@ static HoverLimits hoverLimits(lsp::HoverVerbosity verbosity)
     case lsp::HoverVerbosity::Low:
         return {150, 3, false, 0, 0, 6};
     case lsp::HoverVerbosity::High:
-        return {4000, unlimited, true, unlimited, kMaxSummaryMembers, unlimited};
+        // Nothing is held back: a type summarized below the hover is as complete as it would be hovered directly
+        return {4000, unlimited, true, unlimited, unlimited, unlimited};
     case lsp::HoverVerbosity::Medium:
     default:
         return {300, kMaxSummaryMembers, true, kMaxExpandedReferencedTypes, kMaxReferencedSummaryMembers, 12};
@@ -817,9 +858,8 @@ static std::optional<std::string> buildClassFieldSummary(
         functionEntries.emplace_back(std::move(line), isStatic);
     }
 
-    // Luwu Traits (rfcs/classes/traits.md): the members a class gets from the traits it implements aren't in its declaration, so they're listed
-    // after its own, each saying which trait it came from
-    if (!isTrait)
+    // Luwu Traits (rfcs/classes/traits.md): the members a class gets from the traits it implements -- or a trait from the traits it
+    // needs -- aren't in its declaration, so they're listed after its own, each saying which trait it came from
     {
         // a trait reached twice (listed, and implied through `needs`) lists its members once
         std::set<std::string> listed;
@@ -850,8 +890,11 @@ static std::optional<std::string> buildClassFieldSummary(
 
             for (const auto& [name, traitProp] : traitEt->props)
             {
+                // what the trait expects is provided by whoever implements it -- a class's own declaration, already listed
+                // above, but for a trait needing it only a requirement it passes on to its own implementors
+                bool isExpectation = traitEt->traitInfo->expectations.count(name) > 0;
                 // a member the trait has from a trait it needs is listed under that trait
-                bool ownedElsewhere = traitEt->traitInfo->expectations.count(name) || traitEt->traitInfo->fromNeeds.count(name);
+                bool ownedElsewhere = (isExpectation && !isTrait) || traitEt->traitInfo->fromNeeds.count(name);
                 if (isDunderName(name) || ownedElsewhere || declaresMember(name) || !listed.insert(name).second)
                     continue;
 
@@ -860,6 +903,7 @@ static std::optional<std::string> buildClassFieldSummary(
                     continue;
 
                 std::string origin = "  -- from " + traitEt->name;
+                std::string expectPrefix = isExpectation ? "expect " : "";
                 Luau::TypeId ty = Luau::follow(*own->second.readTy);
 
                 if (auto ftv = Luau::get<Luau::FunctionType>(ty))
@@ -868,15 +912,15 @@ static std::optional<std::string> buildClassFieldSummary(
                     funcOpts.hideTableKind = !showTableKinds;
                     funcOpts.hideFirstParameterType = !ftv->argNames.empty() && ftv->argNames[0] && ftv->argNames[0]->name == "self";
                     funcOpts.baseIndent = "    ";
-                    std::string line =
-                        "    " + visibilityPrefix(own->second.isPrivate) + types::toStringNamedFunction(module, ftv, name, scope, funcOpts) + origin;
+                    std::string line = "    " + expectPrefix + visibilityPrefix(own->second.isPrivate) +
+                                       types::toStringNamedFunction(module, ftv, name, scope, funcOpts) + origin;
                     totalFunctions++;
                     functionEntries.emplace_back(std::move(line), false);
                 }
                 else
                 {
                     std::string modifier = own->second.isFinal ? "final " : (own->second.isConst ? "const " : "");
-                    pushField("    " + visibilityPrefix(own->second.isPrivate) + modifier + name + ": " + Luau::toString(ty) + origin);
+                    pushField("    " + expectPrefix + visibilityPrefix(own->second.isPrivate) + modifier + name + ": " + Luau::toString(ty) + origin);
                 }
             }
         }
@@ -1059,28 +1103,42 @@ static std::optional<Primitive> builtinPrimitive(const Luau::Frontend& frontend,
 
 std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params, const LSPCancellationToken& cancellationToken)
 {
-    lsp::HoverVerbosity verbosity = params.verbosity.value_or(client->getConfiguration(rootUri).hover.verbosity);
-    std::optional<lsp::Hover> result = hoverAtVerbosity(params, verbosity, cancellationToken);
+    const auto& hoverConfig = client->getConfiguration(rootUri).hover;
+    lsp::HoverVerbosity verbosity = params.verbosity.value_or(hoverConfig.verbosity);
+    bool showTraits = params.showTraits.value_or(hoverConfig.showTraits);
+    std::optional<lsp::Hover> result = hoverWithOptions(params, verbosity, showTraits, cancellationToken);
+    if (!result)
+        return result;
+
+    auto differs = [&](lsp::HoverVerbosity otherVerbosity, bool otherShowTraits)
+    {
+        std::optional<lsp::Hover> hover = hoverWithOptions(params, otherVerbosity, otherShowTraits, cancellationToken);
+        return hover && hover->contents.value != result->contents.value;
+    };
 
     // A client that names a verbosity offers to change it, so tell it whether that would change anything: the hover
     // at the next level either way, compared with this one
-    if (result && params.verbosity)
+    if (params.verbosity)
     {
-        auto differsAt = [&](lsp::HoverVerbosity other)
-        {
-            std::optional<lsp::Hover> hover = hoverAtVerbosity(params, other, cancellationToken);
-            return hover && hover->contents.value != result->contents.value;
-        };
+        result->canIncreaseVerbosity =
+            verbosity != lsp::HoverVerbosity::High && differs(lsp::HoverVerbosity(int(verbosity) + 1), showTraits);
+        result->canDecreaseVerbosity = verbosity != lsp::HoverVerbosity::Low && differs(lsp::HoverVerbosity(int(verbosity) - 1), showTraits);
+    }
 
-        result->canIncreaseVerbosity = verbosity != lsp::HoverVerbosity::High && differsAt(lsp::HoverVerbosity(int(verbosity) + 1));
-        result->canDecreaseVerbosity = verbosity != lsp::HoverVerbosity::Low && differsAt(lsp::HoverVerbosity(int(verbosity) - 1));
+    // Luwu Traits (rfcs/classes/traits.md): likewise for a client offering to show or hide them -- only what has traits
+    // to expand reads differently with them shown
+    if (params.showTraits)
+    {
+        bool traitsMatter = differs(verbosity, !showTraits);
+        result->canShowTraits = !showTraits && traitsMatter;
+        result->canHideTraits = showTraits && traitsMatter;
     }
 
     return result;
 }
 
-std::optional<lsp::Hover> WorkspaceFolder::hoverAtVerbosity(
-    const lsp::HoverParams& params, lsp::HoverVerbosity verbosity, const LSPCancellationToken& cancellationToken)
+std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
+    const lsp::HoverParams& params, lsp::HoverVerbosity verbosity, bool showTraits, const LSPCancellationToken& cancellationToken)
 {
     const HoverLimits limits = hoverLimits(verbosity);
 
@@ -1566,8 +1624,9 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverAtVerbosity(
     // included), so it's the set of extern types actually visible in the hover, in print order.
     // Like alias clauses this is one level deep: a class mentioned inside a summary isn't expanded.
     std::string externTypeSummaries;
+    // Shared with the trait expansion below, so a trait already summarized here isn't summarized a second time
+    Luau::DenseHashSet<Luau::TypeId> seen{nullptr};
     {
-        Luau::DenseHashSet<Luau::TypeId> seen{nullptr};
         const auto& builtins = frontend.builtinTypes;
 
         // A method's `self` is the class/extern type it's being called on (`x:function1()`) --
@@ -1808,6 +1867,43 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverAtVerbosity(
                 et = Luau::get<Luau::ExternType>(Luau::follow(obj->ty));
         return et ? et->implementedTraits : std::vector<Luau::TypeId>{};
     };
+
+    // Luwu Traits (rfcs/classes/traits.md): with traits shown, each of them is expanded below the hover, as the summary
+    // hovering it directly would give. Otherwise a hover only names them -- in the header, and on the members a class
+    // gets from them -- which says nothing about what the trait itself expects or provides.
+    std::string traitSummaries;
+    if (showTraits)
+    {
+        const auto& builtins = frontend.builtinTypes;
+
+        std::vector<Luau::TypeId> traits;
+        if (auto et = Luau::get<Luau::ExternType>(Luau::follow(*type));
+            et && (et->parent == builtins->classType || et->parent == builtins->traitType))
+            traits = traitsOf(*type);
+        else if (objectOfType)
+            traits = traitsOf(*objectOfType);
+
+        for (Luau::TypeId trait : traits)
+        {
+            Luau::TypeId traitTy = Luau::follow(trait);
+            const auto* traitEt = Luau::get<Luau::ExternType>(traitTy);
+            if (!traitEt || seen.contains(traitTy))
+                continue;
+            seen.insert(traitTy);
+
+            // A trait asked for by name is as much the subject of the hover as the hovered type itself, so it's given
+            // the same member budget rather than a referenced type's smaller one
+            bool isTraitValue = traitEt->parent == builtins->traitType;
+            auto summary = buildClassFieldSummary(
+                frontend, module, moduleName, traitTy, traitEt, scope, config.hover.showTableKinds, isTraitValue, limits.summaryMembers);
+            if (!summary)
+                continue;
+
+            if (!traitSummaries.empty())
+                traitSummaries += "\n\n";
+            traitSummaries += *summary;
+        }
+    }
 
     // Links to where each of `referenced` is defined, grouped by module: `*References* [`A`](...) · [`B`](...)`
     auto buildReferencedTypeLinks = [&](const std::vector<Luau::TypeId>& referenced) -> std::string
@@ -2085,6 +2181,22 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverAtVerbosity(
 
     typeString = importedModuleLine + typeString + objectOfLine + memberOwnerLine;
 
+    // Luwu: `type` and `typeof` refine too, but by name: the solver matches the call as it's written, so a binding of
+    // one doesn't refine the way a binding of `class.isinstance` does
+    std::string refinement;
+    if (auto global = node->as<Luau::AstExprGlobal>(); global && (global->name == "type" || global->name == "typeof"))
+    {
+        if (const auto* ftv = Luau::get<Luau::FunctionType>(Luau::follow(*type)))
+            refinement = std::string("*Refines* ") + (ftv->argNames.empty() || !ftv->argNames[0] ? "its argument" : "`" + ftv->argNames[0]->name + "`") +
+                         " into the type its result is compared with";
+    }
+    else
+        refinement = refinementText(*type);
+
+    // Two trailing spaces, so the line doesn't run on from the one above it as one paragraph
+    if (!refinement.empty())
+        typeString += "  \n" + refinement;
+
     // Documentation comes before the types this one referred to: it's what the reader is actually
     // here to read, and a wide type's expansion would otherwise push it off the bottom
     if (std::optional<std::string> docs;
@@ -2110,6 +2222,13 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverAtVerbosity(
             typeString += "\n" + kDocumentationBreaker;
             typeString += text;
         }
+    }
+
+    // The traits go below what the hover is about -- which, for an object, is the summary of its own class
+    if (!traitSummaries.empty())
+    {
+        referencedTypes += (referencedTypes.empty() ? "" : "\n\n") + traitSummaries;
+        showReferencedTypes = true;
     }
 
     if (showReferencedTypes && (!referencedTypeLinks.empty() || !referencedTypes.empty()))

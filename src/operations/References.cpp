@@ -122,11 +122,16 @@ std::vector<Luau::ModuleName> WorkspaceFolder::findReverseDependencies(const Lua
         if (contains(dependents, next))
             continue;
 
-        Luau::SourceNode& sourceNode = *frontend.sourceNodes[next];
+        // Modules that come from definition files (e.g. `@luau` for the builtin globals) have no source node,
+        // and nothing in the project can depend on them. `sourceNodes` is a map of shared_ptr, so indexing it
+        // with a missing name would insert a null entry and dereferencing that would crash the server.
+        auto sourceNode = frontend.sourceNodes.find(next);
+        if (sourceNode == frontend.sourceNodes.end() || !sourceNode->second)
+            continue;
 
         dependents.push_back(next);
 
-        const Luau::Set<Luau::ModuleName>& localDependents = sourceNode.dependents;
+        const Luau::Set<Luau::ModuleName>& localDependents = sourceNode->second->dependents;
         queue.insert(queue.end(), localDependents.begin(), localDependents.end());
     }
 

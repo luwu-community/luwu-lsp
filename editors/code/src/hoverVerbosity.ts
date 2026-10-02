@@ -15,10 +15,13 @@ const LEVELS: HoverVerbosity[] = ["low", "medium", "high"];
 
 const INCREASE_COMMAND = "luwu.increaseHoverVerbosity";
 const DECREASE_COMMAND = "luwu.decreaseHoverVerbosity";
+const TOGGLE_TRAITS_COMMAND = "luwu.toggleHoverTraits";
 
 type VerbosityHover = LspHover & {
   canIncreaseVerbosity?: boolean;
   canDecreaseVerbosity?: boolean;
+  canShowTraits?: boolean;
+  canHideTraits?: boolean;
 };
 
 /// Set by the hover's + and -, for the rest of the session, like TypeScript's.
@@ -26,12 +29,18 @@ type VerbosityHover = LspHover & {
 /// it again.
 let sessionVerbosity: HoverVerbosity | undefined;
 
+/// The same, for the hover's traits toggle and `luwu.hover.showTraits`.
+let sessionShowTraits: boolean | undefined;
+
 const currentVerbosity = (scope?: vscode.Uri): HoverVerbosity =>
   sessionVerbosity ??
   getSettingOr<HoverVerbosity>("hover.verbosity", "medium", scope);
 
-/// The `- Less · + More` row under a hover. Each link carries the hovered
-/// position, so the hover can be shown again where it was.
+const currentShowTraits = (scope?: vscode.Uri): boolean =>
+  sessionShowTraits ?? getSettingOr<boolean>("hover.showTraits", false, scope);
+
+/// The `- Less · + More · Traits` row under a hover. Each link carries the
+/// hovered position, so the hover can be shown again where it was.
 const verbosityControls = (
   hover: VerbosityHover,
   document: vscode.TextDocument,
@@ -59,13 +68,32 @@ const verbosityControls = (
     );
   }
 
+  // Luwu Traits: what a class implements, or what a trait needs, expanded
+  // below the hover rather than only named in its header
+  if (hover.canShowTraits) {
+    links.push(
+      `[$(symbol-interface) Traits](command:${TOGGLE_TRAITS_COMMAND}?${args} ` +
+        `"Show the traits this implements or needs")`,
+    );
+  }
+  if (hover.canHideTraits) {
+    links.push(
+      `[$(symbol-interface) Hide traits](command:${TOGGLE_TRAITS_COMMAND}` +
+        `?${args} "Stop expanding traits in hovers")`,
+    );
+  }
+
   if (links.length === 0) {
     return undefined;
   }
 
   const markdown = new vscode.MarkdownString(links.join(" · "), true);
   markdown.isTrusted = {
-    enabledCommands: [INCREASE_COMMAND, DECREASE_COMMAND],
+    enabledCommands: [
+      INCREASE_COMMAND,
+      DECREASE_COMMAND,
+      TOGGLE_TRAITS_COMMAND,
+    ],
   };
   return markdown;
 };
@@ -85,12 +113,16 @@ export const hoverMiddleware =
       return next(document, position, token);
     }
 
-    const params: HoverParams & { verbosity: HoverVerbosity } = {
+    const params: HoverParams & {
+      verbosity: HoverVerbosity;
+      showTraits: boolean;
+    } = {
       ...client.code2ProtocolConverter.asTextDocumentPositionParams(
         document,
         position,
       ),
       verbosity: currentVerbosity(document.uri),
+      showTraits: currentShowTraits(document.uri),
     };
 
     let result: VerbosityHover | null;
@@ -112,16 +144,16 @@ export const hoverMiddleware =
     return hover;
   };
 
-const changeVerbosity = async (
-  step: number,
+/// Re-shows the hover whose link was clicked, now that what it shows has
+/// changed. `change` is handed the document it was shown in, if there is one.
+const showAgain = async (
+  change: (scope?: vscode.Uri) => void,
   uri?: string,
   line?: number,
   character?: number,
 ) => {
   const editor = vscode.window.activeTextEditor;
-  const index = LEVELS.indexOf(currentVerbosity(editor?.document.uri));
-  sessionVerbosity =
-    LEVELS[Math.min(Math.max(index + step, 0), LEVELS.length - 1)];
+  change(editor?.document.uri);
 
   if (!editor) {
     return;
@@ -143,19 +175,38 @@ const changeVerbosity = async (
     }
   }
 
+  // The hover that was clicked is still up, and `showHover` would only focus
+  // it instead of asking for the hover again with what it now shows
+  await vscode.commands.executeCommand("editor.action.hideHover");
   await vscode.commands.executeCommand("editor.action.showHover");
+};
+
+const changeVerbosity = (step: number) => (scope?: vscode.Uri) => {
+  const index = LEVELS.indexOf(currentVerbosity(scope));
+  sessionVerbosity =
+    LEVELS[Math.min(Math.max(index + step, 0), LEVELS.length - 1)];
+};
+
+const toggleTraits = (scope?: vscode.Uri) => {
+  sessionShowTraits = !currentShowTraits(scope);
 };
 
 export const registerHoverVerbosity = (): vscode.Disposable[] => [
   vscode.commands.registerCommand(INCREASE_COMMAND, (...args) =>
-    changeVerbosity(1, ...args),
+    showAgain(changeVerbosity(1), ...args),
   ),
   vscode.commands.registerCommand(DECREASE_COMMAND, (...args) =>
-    changeVerbosity(-1, ...args),
+    showAgain(changeVerbosity(-1), ...args),
+  ),
+  vscode.commands.registerCommand(TOGGLE_TRAITS_COMMAND, (...args) =>
+    showAgain(toggleTraits, ...args),
   ),
   vscode.workspace.onDidChangeConfiguration((e) => {
     if (settingChanged(e, "hover.verbosity")) {
       sessionVerbosity = undefined;
+    }
+    if (settingChanged(e, "hover.showTraits")) {
+      sessionShowTraits = undefined;
     }
   }),
 ];

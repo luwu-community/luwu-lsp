@@ -169,8 +169,8 @@ public:
     lsp::CodeAction codeActionResolve(const lsp::CodeAction& action, const LSPCancellationToken& cancellationToken);
 
     std::optional<lsp::Hover> hover(const lsp::HoverParams& params, const LSPCancellationToken& cancellationToken);
-    std::optional<lsp::Hover> hoverAtVerbosity(
-        const lsp::HoverParams& params, lsp::HoverVerbosity verbosity, const LSPCancellationToken& cancellationToken);
+    std::optional<lsp::Hover> hoverWithOptions(
+        const lsp::HoverParams& params, lsp::HoverVerbosity verbosity, bool showTraits, const LSPCancellationToken& cancellationToken);
     std::optional<lsp::Hover> hoverAttribute(
         const AttributeAtPosition& attribute,
         const lsp::HoverParams& params,

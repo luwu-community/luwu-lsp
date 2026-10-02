@@ -232,6 +232,69 @@ std::optional<std::pair<size_t, size_t>> findWrappableGroup(const std::string& s
     return std::nullopt;
 }
 
+// Luwu Traits (rfcs/classes/traits.md): a class or trait header ends in the traits it `implements`
+// or `needs` -- a comma list no brackets enclose, which `findWrappableGroup` therefore can't see.
+// Break it the way a parameter list breaks: the keyword stays on the line that introduced the list,
+// one trait per line below it.
+std::optional<std::string> breakTraitClauses(const std::string& line, const std::string& indent)
+{
+    static const std::vector<std::string> keywords{" implements ", " needs "};
+
+    // Where each clause's keyword starts, in the order they're written
+    std::vector<std::pair<size_t, size_t>> clauses;
+    int depth = 0;
+    char stringDelimiter = '\0';
+    for (size_t i = 0; i < line.size(); ++i)
+    {
+        char c = line[i];
+        // A string singleton can hold anything, `implements` included
+        if (stringDelimiter != '\0')
+        {
+            if (c == '\\')
+                ++i;
+            else if (c == stringDelimiter)
+                stringDelimiter = '\0';
+        }
+        else if (c == '"' || c == '\'')
+            stringDelimiter = c;
+        else if (c == '(' || c == '{' || c == '[' || c == '<')
+            depth++;
+        else if (c == ')' || c == '}' || c == ']' || c == '>')
+            depth--;
+        else if (depth == 0)
+        {
+            for (const std::string& keyword : keywords)
+                if (line.compare(i, keyword.size(), keyword) == 0)
+                    clauses.emplace_back(i, keyword.size());
+        }
+    }
+
+    if (clauses.empty())
+        return std::nullopt;
+
+    std::string result = line.substr(0, clauses.front().first);
+    for (size_t i = 0; i < clauses.size(); ++i)
+    {
+        auto [start, length] = clauses[i];
+        size_t end = i + 1 == clauses.size() ? line.size() : clauses[i + 1].first;
+
+        std::string keyword = line.substr(start, length);
+        trim(keyword);
+        // The first clause follows the header it belongs to; a second one starts a line of its own
+        result += (i == 0 ? " " : "\n" + indent) + keyword;
+
+        auto traits = splitTopLevelParams(line.substr(start + length, end - start - length));
+        for (size_t j = 0; j < traits.size(); ++j)
+        {
+            std::string trait = traits[j];
+            trim(trait);
+            result += "\n" + indent + "    " + trait + (j + 1 == traits.size() ? "" : ",");
+        }
+    }
+
+    return result;
+}
+
 // Breaks one over-long line at `group`, putting each of the group's elements on its own line and
 // bringing the closing bracket back to the line's own indentation.
 std::string breakGroupAcrossLines(const std::string& line, const std::string& indent, std::pair<size_t, size_t> group)
@@ -284,6 +347,8 @@ std::string wrapLongLine(const std::string& line, size_t depth = 0)
     std::string wrapped;
     if (auto parens = findWrappableGroup(line, '(', ')'))
         wrapped = breakGroupAcrossLines(line, indent, *parens);
+    else if (auto traitClauses = breakTraitClauses(line, indent))
+        wrapped = *traitClauses;
     else if (auto table = findWrappableGroup(line, '{', '}'))
         wrapped = breakGroupAcrossLines(line, indent, *table);
     else

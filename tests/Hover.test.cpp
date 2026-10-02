@@ -7,6 +7,8 @@
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FASTFLAG(LuwuTraits)
+LUAU_FASTFLAG(DebugLuwuUserDefinedRefinements)
+LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
 
 TEST_SUITE_BEGIN("Hover");
 
@@ -1744,6 +1746,172 @@ local c = Cat("a")
     CHECK_NE(hoverAt({10, 11}).find("*References* " + greets + " · " + named), std::string::npos);
     // So does an object of it, whose class is summarized below
     CHECK_NE(hoverAt({10, 6}).find("*References* " + greets + " · " + named), std::string::npos);
+}
+
+/// `class.implements` only exists, and only carries its refinement, when the trait flags are on as the globals are
+/// registered -- which Fixture does in its constructor, before a ScopedFastFlag in the test body would have run.
+struct RefinementFlags : ClassFlags
+{
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ScopedFastFlag classLibrary{FFlag::LuauAllowGlobalDeclarationToBeCalledClass, true};
+    ScopedFastFlag userDefinedRefinements{FFlag::DebugLuwuUserDefinedRefinements, true};
+};
+
+struct RefinementFixture
+    : RefinementFlags
+    , Fixture
+{
+};
+
+TEST_CASE_FIXTURE(RefinementFixture, "hover_says_what_a_function_refines")
+{
+    auto uri = newDocument("foo.luau", R"(
+trait FilesystemPath end
+class Path implements FilesystemPath
+    @[truthy(self, FilesystemPath)]
+    function is_filesystem_path(self)
+        return class.implements(self, FilesystemPath)
+    end
+end
+local is = class.implements
+local which = typeof
+local plain = Path
+)");
+
+    auto hoverAt = [&](lsp::Position position)
+    {
+        lsp::HoverParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = position;
+        auto result = workspace.hover(params, nullptr);
+        REQUIRE(result);
+        return result->contents.value;
+    };
+
+    // A user-defined refinement names the parameter it narrows and what it narrows it to
+    CHECK_NE(hoverAt({4, 16}).find("*Refines* `self` into `FilesystemPath`"), std::string::npos);
+
+    // `class.implements` refines by the callee's type, so a binding of it says the same thing
+    CHECK_NE(hoverAt({5, 22}).find("*Refines* `o` into an object of `t`"), std::string::npos);
+    CHECK_NE(hoverAt({8, 7}).find("*Refines* `o` into an object of `t`"), std::string::npos);
+
+    // `typeof` refines by how the call is written, against the string its result is compared with
+    CHECK_NE(hoverAt({9, 14}).find("*Refines* `value` into the type its result is compared with"), std::string::npos);
+
+    // Nothing is said about a function that refines nothing, or about something that isn't one
+    CHECK_EQ(hoverAt({10, 7}).find("*Refines*"), std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "hover_breaks_a_long_implements_list_across_lines")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto [source, marker] = sourceWithMarker(R"(
+trait FilesystemPath end
+trait DefaultPathComponents end
+trait PathJoining end
+trait PathCloning end
+class Directory|Path(components: { string }) implements FilesystemPath, DefaultPathComponents, PathJoining, PathCloning
+end
+)");
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+
+    // The list runs past the hover's width on one line, so it's laid out under the clause that introduced it
+    CHECK_NE(hover.find("class DirectoryPath(components: { string }) implements\n"
+                        "    FilesystemPath,\n"
+                        "    DefaultPathComponents,\n"
+                        "    PathJoining,\n"
+                        "    PathCloning\n"),
+        std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "hover_can_expand_the_traits_of_what_it_is_about")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("foo.luau", R"(
+trait Named
+    expect public name: string
+    function describe(self): string
+        return self.name
+    end
+end
+trait Greets needs Named
+    function greet(self): string
+        return self.name
+    end
+end
+class Cat(public name: string) implements Greets end
+local c = Cat("a")
+local g: Greets = c
+local plain = 1
+)");
+
+    auto hoverAt = [&](lsp::Position position, std::optional<bool> showTraits)
+    {
+        lsp::HoverParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = position;
+        params.showTraits = showTraits;
+        auto result = workspace.hover(params, nullptr);
+        REQUIRE(result);
+        return *result;
+    };
+
+    const lsp::Position cat{12, 7};
+    const lsp::Position catObject{13, 6};
+    const lsp::Position greets{7, 7};
+    const lsp::Position greetsObject{14, 6};
+
+    // The class names its traits either way, but only shows what they hold when asked
+    auto hidden = hoverAt(cat, false);
+    CHECK_NE(hidden.contents.value.find("class Cat(name: string) implements Greets"), std::string::npos);
+    CHECK_EQ(hidden.contents.value.find("trait Greets"), std::string::npos);
+    CHECK_EQ(hidden.canShowTraits, true);
+    CHECK_EQ(hidden.canHideTraits, false);
+
+    auto shown = hoverAt(cat, true);
+    CHECK_NE(shown.contents.value.find("trait Greets needs Named"), std::string::npos);
+    CHECK_NE(shown.contents.value.find("trait Named"), std::string::npos);
+    CHECK_EQ(shown.canShowTraits, false);
+    CHECK_EQ(shown.canHideTraits, true);
+
+    // An object of the class, and the trait itself: a trait's traits are the ones it needs
+    CHECK_NE(hoverAt(catObject, true).contents.value.find("trait Named"), std::string::npos);
+    CHECK_NE(hoverAt(greets, true).contents.value.find("trait Named"), std::string::npos);
+    CHECK_EQ(hoverAt(greets, true).canHideTraits, true);
+    CHECK_EQ(hoverAt(greets, false).canShowTraits, true);
+    // ...and so are an object of it: what it's known to implement
+    CHECK_NE(hoverAt(greetsObject, true).contents.value.find("trait Named"), std::string::npos);
+    CHECK_EQ(hoverAt(greetsObject, false).canShowTraits, true);
+
+    // A trait's summary lists what it gets from the traits it needs, the way a class's lists what it implements:
+    // what they provide, and what they expect of whoever implements it
+    const std::string& greetsSummary = hoverAt(greets, false).contents.value;
+    CHECK_NE(greetsSummary.find("function describe(self): string  -- from Named"), std::string::npos);
+    CHECK_NE(greetsSummary.find("expect name: string  -- from Named"), std::string::npos);
+
+    // Nothing to show for something with no traits at all, and nothing is said about them unless the request asked
+    auto plain = hoverAt({15, 7}, false);
+    CHECK_EQ(plain.canShowTraits, false);
+    CHECK_EQ(plain.canHideTraits, false);
+
+    auto unspecified = hoverAt(cat, std::nullopt);
+    CHECK_EQ(unspecified.contents.value, hidden.contents.value);
+    CHECK_FALSE(unspecified.canShowTraits);
+    CHECK_FALSE(unspecified.canHideTraits);
 }
 
 TEST_CASE_FIXTURE(Fixture, "hover_verbosity_controls_what_the_hover_expands")

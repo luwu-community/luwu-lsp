@@ -25,8 +25,10 @@ struct HoverParams : TextDocumentPositionParams
 {
     // Luwu extension: overrides `hover.verbosity` for this request, and asks for the `can*Verbosity` fields of the result
     std::optional<HoverVerbosity> verbosity = std::nullopt;
+    // Luwu extension: overrides `hover.showTraits` for this request, and asks for the `can*Traits` fields of the result
+    std::optional<bool> showTraits = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(HoverParams, textDocument, position, verbosity)
+NLOHMANN_DEFINE_OPTIONAL(HoverParams, textDocument, position, verbosity, showTraits)
 
 struct Hover
 {
@@ -35,8 +37,11 @@ struct Hover
     // Luwu extension, set when the request named a verbosity: whether a higher (lower) one would show more (less)
     std::optional<bool> canIncreaseVerbosity = std::nullopt;
     std::optional<bool> canDecreaseVerbosity = std::nullopt;
+    // Luwu extension, set when the request said whether to show traits: whether showing (hiding) them would change the hover
+    std::optional<bool> canShowTraits = std::nullopt;
+    std::optional<bool> canHideTraits = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(Hover, contents, range, canIncreaseVerbosity, canDecreaseVerbosity)
+NLOHMANN_DEFINE_OPTIONAL(Hover, contents, range, canIncreaseVerbosity, canDecreaseVerbosity, canShowTraits, canHideTraits)
 
 
 struct DefinitionParams : TextDocumentPositionParams

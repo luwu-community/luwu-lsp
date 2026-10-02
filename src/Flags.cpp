@@ -16,6 +16,7 @@
 #endif
 
 LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
 LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTINT(LuauTableTypeMaximumStringifierLength)
 
@@ -112,6 +113,11 @@ void applyLuwuFlags(bool luauCompatibilityMode)
         if (strncmp(flag->name, "Luwu", 4) == 0)
             flag->value = enabled;
     }
+
+    // The `class` library (`class.isinstance`, `class.implements`, `class.of`, ...) is only declared when a global may
+    // be called `class` -- an upstream-named flag, so the loop above doesn't reach it. Without it the whole library
+    // types as an error, and the refinements `isinstance` and `implements` carry are never attached.
+    FFlag::LuauAllowGlobalDeclarationToBeCalledClass.value = enabled;
 }
 
 void applyRequiredFlags()

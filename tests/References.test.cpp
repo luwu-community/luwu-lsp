@@ -476,6 +476,29 @@ TEST_CASE_FIXTURE(Fixture, "cross_module_find_references_of_an_exported_table_ty
     CHECK_EQ(result->at(1).range, lsp::Range{{4, 20}, {4, 28}});
 }
 
+TEST_CASE_FIXTURE(Fixture, "find_references_of_a_property_on_a_builtin_global_does_not_crash")
+{
+    // `table` is declared in the builtin definitions, whose module has no source node. Walking its
+    // reverse dependencies used to dereference a null source node and take the whole server down.
+    auto source = R"(
+        local t = {}
+        table.insert(t, 1)
+        table.insert(t, 2)
+    )";
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::ReferenceParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{2, 15}; // 'insert' property
+
+    // No references are reported -- the builtin module isn't something we can walk dependents of --
+    // but the request must come back instead of killing the server.
+    auto result = workspace.references(params, nullptr);
+    REQUIRE(result);
+    CHECK(result->empty());
+}
+
 TEST_CASE_FIXTURE(Fixture, "references_respect_cancellation")
 {
     auto cancellationToken = std::make_shared<Luau::FrontendCancellationToken>();

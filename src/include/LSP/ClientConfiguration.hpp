@@ -124,9 +124,11 @@ struct ClientHoverConfiguration
     bool strictDatamodelTypes = true;
     bool includeStringLength = true;
     lsp::HoverVerbosity verbosity = lsp::HoverVerbosity::Medium;
+    // Luwu Traits: whether a hover expands the traits of what it's about, rather than only naming them
+    bool showTraits = false;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
-    ClientHoverConfiguration, enabled, showTableKinds, multilineFunctionDefinitions, strictDatamodelTypes, includeStringLength, verbosity);
+    ClientHoverConfiguration, enabled, showTableKinds, multilineFunctionDefinitions, strictDatamodelTypes, includeStringLength, verbosity, showTraits);
 
 enum struct ImportRequireStyle
 {
