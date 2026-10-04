@@ -2199,7 +2199,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
 
             std::vector<Luau::TypeId> mostSpecific;
             for (Luau::TypeId trait : traits)
-                if (!implied.contains(Luau::follow(trait)))
+                if (implied.count(Luau::follow(trait)) == 0)
                     mostSpecific.push_back(trait);
 
             if (std::string traitLinks = buildReferencedTypeLinks(mostSpecific, "*Implements*"); !traitLinks.empty())
