@@ -107,7 +107,7 @@ std::optional<Luau::AutocompleteEntryMap> RobloxPlatform::completionCallback(
             auto ctv = ctx.value();
             while (ctv)
             {
-                for (auto& [propName, prop] : ctv->props)
+                for (auto& [propName, prop] : ctv->props())
                 {
                     // Don't include functions or events
                     LUAU_ASSERT(prop.readTy);
@@ -136,7 +136,7 @@ std::optional<Luau::AutocompleteEntryMap> RobloxPlatform::completionCallback(
         if (auto ctv = ctx.value())
         {
             Luau::AutocompleteEntryMap result;
-            for (auto& [propName, prop] : ctv->props)
+            for (auto& [propName, prop] : ctv->props())
             {
                 if (Luau::hasTag(prop, kSourcemapGeneratedTag) &&
                     !(prop.readTy && (Luau::is<Luau::FunctionType>(*prop.readTy) || Luau::isOverloadedFunction(*prop.readTy))))

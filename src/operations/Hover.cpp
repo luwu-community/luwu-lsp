@@ -1,6 +1,7 @@
 #include "LSP/Workspace.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 
 #include "Luau/AstQuery.h"
@@ -168,8 +169,8 @@ static constexpr size_t kMaxExpandedReferencedTypes = 5;
 // (`@[truthy(param, Type)] function f(param: T)`) names the parameter it narrows and the type it narrows it to;
 // `class.isinstance` and `class.implements` narrow their first argument to an object of their second, and do it by
 // the callee's type rather than by how the call is spelled, so a binding of one (`const is = class.isinstance`)
-// refines just as it does.
-std::string refinementText(Luau::TypeId ty)
+// refines just as it does. `typeLink` formats the type refined into, so a hover can link it.
+std::string refinementText(Luau::TypeId ty, const std::function<std::string(Luau::TypeId)>& typeLink)
 {
     ty = Luau::follow(ty);
 
@@ -177,7 +178,7 @@ std::string refinementText(Luau::TypeId ty)
     if (const auto* itv = Luau::get<Luau::IntersectionType>(ty))
     {
         for (Luau::TypeId part : itv->parts)
-            if (std::string text = refinementText(part); !text.empty())
+            if (std::string text = refinementText(part, typeLink); !text.empty())
                 return text;
         return "";
     }
@@ -194,8 +195,7 @@ std::string refinementText(Luau::TypeId ty)
     };
 
     if (ftv->truthyRefinement)
-        return "*Refines* " + argument(ftv->truthyRefinement->argIndex) + " into `" +
-               Luau::toString(Luau::follow(ftv->truthyRefinement->type)) + "`";
+        return "*Refines* " + argument(ftv->truthyRefinement->argIndex) + " into " + typeLink(Luau::follow(ftv->truthyRefinement->type));
 
     if (dynamic_cast<const Luau::MagicClassInstanceCheck*>(ftv->magic.get()))
         return "*Refines* " + argument(0) + " into an object of " + argument(1);
@@ -357,7 +357,7 @@ static std::string formatMethodLine(
 )
 {
     std::optional<Luau::TypeId> fnTy;
-    if (auto it = et->props.find(method->functionName.value); it != et->props.end() && it->second.readTy)
+    if (auto it = et->props().find(method->functionName.value); it != et->props().end() && it->second.readTy)
         fnTy = it->second.readTy;
     else if (auto astTy = module->astTypes.find(method->function))
         fnTy = *astTy;
@@ -769,7 +769,7 @@ static std::optional<std::string> buildClassFieldSummary(
             // generics print concretely, then the parameter's own annotation, then `any`. A field
             // whose type can't be resolved is still a field -- dropping the line entirely would
             // silently understate the class's shape, which is worse than printing `any`.
-            if (auto it = objectEt->props.find(arg->name.value); it != objectEt->props.end() && it->second.readTy)
+            if (auto it = objectEt->props().find(arg->name.value); it != objectEt->props().end() && it->second.readTy)
                 line += Luau::toString(Luau::follow(*it->second.readTy));
             else if (arg->annotation)
             {
@@ -799,7 +799,7 @@ static std::optional<std::string> buildClassFieldSummary(
             // annotation, so that generic classes (e.g. `class Box<T> ... end`) show `string`
             // rather than `T` when hovering over a `Box<string>`. See formatMethodLine for the
             // equivalent handling of methods.
-            if (auto it = objectEt->props.find(prop->name.value); it != objectEt->props.end() && it->second.readTy)
+            if (auto it = objectEt->props().find(prop->name.value); it != objectEt->props().end() && it->second.readTy)
                 line += Luau::toString(Luau::follow(*it->second.readTy));
             else if (prop->ty)
             {
@@ -888,7 +888,7 @@ static std::optional<std::string> buildClassFieldSummary(
             if (!traitEt || !traitEt->traitInfo)
                 continue;
 
-            for (const auto& [name, traitProp] : traitEt->props)
+            for (const auto& [name, traitProp] : traitEt->props())
             {
                 // what the trait expects is provided by whoever implements it -- a class's own declaration, already listed
                 // above, but for a trait needing it only a requirement it passes on to its own implementors
@@ -898,8 +898,8 @@ static std::optional<std::string> buildClassFieldSummary(
                 if (isDunderName(name) || ownedElsewhere || declaresMember(name) || !listed.insert(name).second)
                     continue;
 
-                auto own = objectEt->props.find(name);
-                if (own == objectEt->props.end() || !own->second.readTy || !showsPrivate(own->second.isPrivate))
+                auto own = objectEt->props().find(name);
+                if (own == objectEt->props().end() || !own->second.readTy || !showsPrivate(own->second.isPrivate))
                     continue;
 
                 std::string origin = "  -- from " + traitEt->name;
@@ -989,7 +989,7 @@ static std::string buildExternTypeSummary(
     size_t totalFields = 0;
     size_t totalFunctions = 0;
 
-    for (const auto& [name, prop] : et->props)
+    for (const auto& [name, prop] : et->props())
     {
         if (isDunderName(name))
             continue;
@@ -1675,7 +1675,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
                 summary = buildClassFieldSummary(
                     frontend, module, moduleName, spanTy, et, scope, config.hover.showTableKinds, isClassValue, limits.referencedSummaryMembers
                 );
-            else if (!et->props.empty())
+            else if (!et->props().empty())
                 summary = buildExternTypeSummary(module, spanTy, et, scope, config.hover.showTableKinds, limits.referencedSummaryMembers);
 
             if (!summary)
@@ -1777,6 +1777,22 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             *definitionModuleName + " global definitions"};
     };
 
+    // A type's name, linked to where it's declared when that's known, and naming the module it's from
+    // when that's a different one
+    auto typeLink = [&](Luau::TypeId ty) -> std::string
+    {
+        std::string name = Luau::toString(Luau::follow(ty));
+        auto source = resolveTypeSource(ty);
+        if (!source)
+            return "`" + name + "`";
+
+        std::string link =
+            "[`" + name + "`](" + source->location.uri.toString() + "#L" + std::to_string(source->location.range.start.line + 1) + ")";
+        if (source->location.uri != textDocument->uri())
+            link += " *from* [" + source->moduleLabel + "](" + source->location.uri.toString() + ")";
+        return link;
+    };
+
     // Hovering a member accessed off a class or extern type (`Documentation.from`, `comm:extract`)
     // shows the member alone, which says nothing about what it belongs to or where that lives
     std::string memberOwnerLine;
@@ -1790,20 +1806,6 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
                 Luau::TypeId owner = Luau::follow(*ownerTy);
                 if (Luau::get<Luau::ExternType>(owner))
                 {
-                    std::string ownerName = Luau::toString(owner);
-                    std::string ownerLink = "`" + ownerName + "`";
-                    std::string ownerModule;
-
-                    if (auto source = resolveTypeSource(owner))
-                    {
-                        ownerLink = "[`" + ownerName + "`](" + source->location.uri.toString() + "#L" +
-                                    std::to_string(source->location.range.start.line + 1) + ")";
-
-                        // Naming the module is only news when it's a different one
-                        if (source->location.uri != textDocument->uri())
-                            ownerModule = " *from* [" + source->moduleLabel + "](" + source->location.uri.toString() + ")";
-                    }
-
                     const char* kind = "*Field of*";
                     if (Luau::get<Luau::FunctionType>(Luau::follow(*type)))
                         kind = indexName->op == ':' ? "*Method of*" : "*Function of*";
@@ -1811,7 +1813,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
                     // Two trailing spaces: a footer can follow another one (a field whose type is
                     // an object has both), and a plain newline would run them together as one
                     // paragraph
-                    memberOwnerLine = "  \n" + std::string(kind) + " " + ownerLink + ownerModule;
+                    memberOwnerLine = "  \n" + std::string(kind) + " " + typeLink(owner);
                     memberOwnerType = owner;
                 }
             }
@@ -1906,7 +1908,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     }
 
     // Links to where each of `referenced` is defined, grouped by module: `*References* [`A`](...) · [`B`](...)`
-    auto buildReferencedTypeLinks = [&](const std::vector<Luau::TypeId>& referenced) -> std::string
+    auto buildReferencedTypeLinks = [&](const std::vector<Luau::TypeId>& referenced, const std::string& label = "*References*") -> std::string
     {
         // A wide type can reference dozens of others; past a handful the links stop being useful
         const size_t kMaxReferencedTypeLinks = limits.referencedTypeLinks;
@@ -1985,7 +1987,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             // them; a single module reads as one line, with the types first and their module named
             // once at the end -- the same "<what> from <module>" shape the origin footers use
             const bool oneModule = modules.size() == 1;
-            referencedTypeLinks = oneModule ? "*References* " : "*References*\n";
+            referencedTypeLinks = label + (oneModule ? " " : "\n");
 
             for (const auto& module : modules)
             {
@@ -2029,11 +2031,6 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
 
             referenced.push_back(span.type);
         }
-
-        // The class an object belongs to is summarized below, `implements` list and all
-        if (objectOfType)
-            for (Luau::TypeId trait : traitsOf(*objectOfType))
-                referenced.push_back(trait);
 
         referencedTypeLinks = buildReferencedTypeLinks(referenced);
     }
@@ -2173,10 +2170,41 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     std::string objectOfLine;
     if (objectOfType)
     {
-        // Luwu Traits (rfcs/classes/traits.md): a value typed as a trait is an object of some class implementing it
+        // Luwu Traits (rfcs/classes/traits.md): a value typed as a trait is an object of some class implementing it --
+        // spelled out, since the type alone reads the same as the trait itself, and doesn't say it's a trait
         const auto* objectEt = Luau::get<Luau::ExternType>(*objectOfType);
         bool isTrait = objectEt && objectEt->traitInfo;
-        objectOfLine = typeIdentityLine(*objectOfType, isTrait ? "*Implements* " : "*Object of* ");
+        objectOfLine = typeIdentityLine(*objectOfType, isTrait ? "*This object implements* " : "*Object of* ");
+
+        // The traits its class implements, on their own line rather than among the references, since the hovered type
+        // doesn't mention them. Only the most specific: one another of them needs is implied, and says nothing new.
+        // Two trailing spaces, so the line doesn't run on from the one above it as one paragraph
+        if (!isTrait)
+        {
+            std::vector<Luau::TypeId> traits = traitsOf(*objectOfType);
+
+            std::unordered_set<Luau::TypeId> implied;
+            std::vector<Luau::TypeId> pending;
+            for (Luau::TypeId trait : traits)
+                for (Luau::TypeId needed : traitsOf(trait))
+                    pending.push_back(Luau::follow(needed));
+            while (!pending.empty())
+            {
+                Luau::TypeId trait = pending.back();
+                pending.pop_back();
+                if (implied.insert(trait).second)
+                    for (Luau::TypeId needed : traitsOf(trait))
+                        pending.push_back(Luau::follow(needed));
+            }
+
+            std::vector<Luau::TypeId> mostSpecific;
+            for (Luau::TypeId trait : traits)
+                if (!implied.contains(Luau::follow(trait)))
+                    mostSpecific.push_back(trait);
+
+            if (std::string traitLinks = buildReferencedTypeLinks(mostSpecific, "*Implements*"); !traitLinks.empty())
+                objectOfLine += "  \n" + traitLinks;
+        }
     }
 
     typeString = importedModuleLine + typeString + objectOfLine + memberOwnerLine;
@@ -2191,7 +2219,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
                          " into the type its result is compared with";
     }
     else
-        refinement = refinementText(*type);
+        refinement = refinementText(*type, typeLink);
 
     // Two trailing spaces, so the line doesn't run on from the one above it as one paragraph
     if (!refinement.empty())

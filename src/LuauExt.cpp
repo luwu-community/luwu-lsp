@@ -1352,7 +1352,7 @@ std::optional<std::pair<const Luau::ExternType*, const Luau::Property*>> lookupC
     const auto* externType = Luau::get<Luau::ExternType>(Luau::follow(ty));
     while (externType)
     {
-        if (auto it = externType->props.find(name); it != externType->props.end())
+        if (auto it = externType->props().find(name); it != externType->props().end())
         {
             if (!it->second.location)
                 return std::nullopt;

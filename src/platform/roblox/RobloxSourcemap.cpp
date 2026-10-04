@@ -139,7 +139,7 @@ static void injectChildrenLookupFunctions(
             {"name", "recursive"}, {optionalInstanceType});
 
         attachChildLookupFunction(globals, arena, node, findFirstChildFunction, /* supportsRecursiveParameter= */ true);
-        ctv->props["FindFirstChild"] = Luau::Property{
+        ctv->props()["FindFirstChild"] = Luau::Property{
             /* type */ findFirstChildFunction,
             /* deprecated */ false,
             /* deprecatedSuggestion */ {},
@@ -154,7 +154,7 @@ static void injectChildrenLookupFunctions(
                 arena, ty, {globals.builtinTypes->stringType, globals.builtinTypes->optionalNumberType}, {"name", "timeout"}, {*instanceType});
             attachChildLookupFunction(
                 globals, arena, node, waitForChildFunction, /* supportsRecursiveParameter= */ false, /*supportsTimeoutParameter= */ true);
-            ctv->props["WaitForChild"] = Luau::Property{
+            ctv->props()["WaitForChild"] = Luau::Property{
                 /* type */ waitForChildFunction,
                 /* deprecated */ false,
                 /* deprecatedSuggestion */ {},
@@ -170,7 +170,7 @@ static void injectChildrenLookupFunctions(
                 arena, ty, {globals.builtinTypes->stringType, globals.builtinTypes->numberType}, {"name", "timeout"}, {optionalInstanceType});
             attachChildLookupFunction(globals, arena, node, waitForChildFunction);
             attachChildLookupFunction(globals, arena, node, waitForChildWithTimeoutFunction);
-            ctv->props["WaitForChild"] = Luau::Property{
+            ctv->props()["WaitForChild"] = Luau::Property{
                 /* type */ Luau::makeIntersection(arena, {waitForChildFunction, waitForChildWithTimeoutFunction}),
                 /* deprecated */ false,
                 /* deprecatedSuggestion */ {},
@@ -296,14 +296,14 @@ static Luau::TypeId getSourcemapType(const Luau::GlobalTypes& globals, Luau::Typ
                 if (node->parent)
                 {
                     if (FFlag::LuauSolverV2)
-                        ctv->props["Parent"] = Luau::Property::rw(getSourcemapType(globals, arena, node->parent), instanceTy->type);
+                        ctv->props()["Parent"] = Luau::Property::rw(getSourcemapType(globals, arena, node->parent), instanceTy->type);
                     else
-                        ctv->props["Parent"] = Luau::makeProperty(getSourcemapType(globals, arena, node->parent));
+                        ctv->props()["Parent"] = Luau::makeProperty(getSourcemapType(globals, arena, node->parent));
                 }
 
                 // Add children as properties
                 for (const auto& child : node->children)
-                    ctv->props[child->name] = Luau::Property{
+                    ctv->props()[child->name] = Luau::Property{
                         getSourcemapType(globals, arena, child),
                         /* deprecated */ false,
                         /* deprecatedSuggestion */ {},
@@ -319,7 +319,7 @@ static Luau::TypeId getSourcemapType(const Luau::GlobalTypes& globals, Luau::Typ
                         arena, typeId, {globals.builtinTypes->stringType}, {"name"}, {Luau::makeOption(globals.builtinTypes, arena, *instanceType)});
 
                     Luau::attachMagicFunction(findFirstAncestorFunction, std::make_shared<MagicFindFirstAncestor>(globals, arena, node));
-                    ctv->props["FindFirstAncestor"] = Luau::makeProperty(findFirstAncestorFunction, "@roblox/globaltype/Instance.FindFirstAncestor");
+                    ctv->props()["FindFirstAncestor"] = Luau::makeProperty(findFirstAncestorFunction, "@roblox/globaltype/Instance.FindFirstAncestor");
 
                     injectChildrenLookupFunctions(globals, arena, ctv, typeId, node);
                 }
@@ -341,7 +341,7 @@ void addChildrenToCTV(const Luau::GlobalTypes& globals, Luau::TypeArena& arena, 
         // Extend the props to include the children
         for (const auto& child : node->children)
         {
-            ctv->props[child->name] = Luau::Property{
+            ctv->props()[child->name] = Luau::Property{
                 getSourcemapType(globals, arena, child),
                 /* deprecated */ false,
                 /* deprecatedSuggestion */ {},
@@ -362,11 +362,11 @@ static void clearSourcemapGeneratedTypes(Luau::GlobalTypes& globals)
     {
         if (auto* ctv = Luau::getMutable<Luau::ExternType>(tfun.type))
         {
-            for (auto it = ctv->props.begin(); it != ctv->props.end();)
+            for (auto it = ctv->props().begin(); it != ctv->props().end();)
             {
                 // TODO: will this clear out the generated FindFirstChild/WaitForChild function, is that a problem?
                 if (hasTag(it->second, kSourcemapGeneratedTag))
-                    it = ctv->props.erase(it);
+                    it = ctv->props().erase(it);
                 else
                     ++it;
             }
@@ -581,7 +581,7 @@ void RobloxPlatform::handleSourcemapUpdate(Luau::Frontend& frontend, const Luau:
                 // Player.Backpack should be defined
                 if (auto backpackType = globals.globalScope->lookupType("Backpack"))
                 {
-                    ctv->props["Backpack"] = Luau::makeProperty(backpackType->type);
+                    ctv->props()["Backpack"] = Luau::makeProperty(backpackType->type);
                     // TODO: should we duplicate StarterPack into here as well? Is that a reasonable assumption to make?
                 }
 
@@ -590,7 +590,7 @@ void RobloxPlatform::handleSourcemapUpdate(Luau::Frontend& frontend, const Luau:
                 {
                     if (auto starterGui = rootSourceNode->findChild("StarterGui"))
                         addChildrenToCTV(globals, instanceTypes, playerGuiType->type, *starterGui);
-                    ctv->props["PlayerGui"] = Luau::makeProperty(playerGuiType->type);
+                    ctv->props()["PlayerGui"] = Luau::makeProperty(playerGuiType->type);
                 }
 
                 // Player.StarterGear should contain StarterPack instances
@@ -599,7 +599,7 @@ void RobloxPlatform::handleSourcemapUpdate(Luau::Frontend& frontend, const Luau:
                     if (auto starterPack = rootSourceNode->findChild("StarterPack"))
                         addChildrenToCTV(globals, instanceTypes, starterGearType->type, *starterPack);
 
-                    ctv->props["StarterGear"] = Luau::makeProperty(starterGearType->type);
+                    ctv->props()["StarterGear"] = Luau::makeProperty(starterGearType->type);
                 }
 
                 // Player.PlayerScripts should contain StarterPlayerScripts instances
@@ -612,7 +612,7 @@ void RobloxPlatform::handleSourcemapUpdate(Luau::Frontend& frontend, const Luau:
                             addChildrenToCTV(globals, instanceTypes, playerScriptsType->type, *starterPlayerScripts);
                         }
                     }
-                    ctv->props["PlayerScripts"] = Luau::makeProperty(playerScriptsType->type);
+                    ctv->props()["PlayerScripts"] = Luau::makeProperty(playerScriptsType->type);
                 }
             }
         }

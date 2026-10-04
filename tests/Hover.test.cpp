@@ -1724,6 +1724,7 @@ trait Greets needs Named
 end
 class Cat(public name: string) implements Greets end
 local c = Cat("a")
+local g: Greets = c
 )");
 
     auto hoverAt = [&](lsp::Position position)
@@ -1744,8 +1745,17 @@ local c = Cat("a")
     // A class references the traits it implements, including those implied through `needs`
     CHECK_NE(hoverAt({9, 7}).find("*References* " + greets + " · " + named), std::string::npos);
     CHECK_NE(hoverAt({10, 11}).find("*References* " + greets + " · " + named), std::string::npos);
-    // So does an object of it, whose class is summarized below
-    CHECK_NE(hoverAt({10, 6}).find("*References* " + greets + " · " + named), std::string::npos);
+    // An object of it says which traits it implements, on a line of its own: the hovered type doesn't mention them.
+    // Only the most specific of them, though -- `Named` comes with `Greets`.
+    std::string object = hoverAt({10, 6});
+    CHECK_NE(object.find("*Implements* " + greets), std::string::npos);
+    CHECK_EQ(object.find(greets + " · " + named), std::string::npos);
+    CHECK_EQ(object.find("*References*"), std::string::npos);
+    // A value typed as a trait just names it, `needs` and all being in its summary
+    std::string traitTyped = hoverAt({11, 6});
+    CHECK_NE(traitTyped.find("*This object implements* " + greets), std::string::npos);
+    CHECK_EQ(traitTyped.find(named + " ·"), std::string::npos);
+    CHECK_EQ(traitTyped.find("*References*"), std::string::npos);
 }
 
 /// `class.implements` only exists, and only carries its refinement, when the trait flags are on as the globals are
@@ -1789,7 +1799,7 @@ local plain = Path
     };
 
     // A user-defined refinement names the parameter it narrows and what it narrows it to
-    CHECK_NE(hoverAt({4, 16}).find("*Refines* `self` into `FilesystemPath`"), std::string::npos);
+    CHECK_NE(hoverAt({4, 16}).find("*Refines* `self` into [`FilesystemPath`](" + uri.toString() + "#L2)"), std::string::npos);
 
     // `class.implements` refines by the callee's type, so a binding of it says the same thing
     CHECK_NE(hoverAt({5, 22}).find("*Refines* `o` into an object of `t`"), std::string::npos);

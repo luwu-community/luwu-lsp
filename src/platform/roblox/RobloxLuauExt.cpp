@@ -683,11 +683,11 @@ void RobloxPlatform::mutateRegisteredDefinitions(Luau::GlobalTypes& globals, std
     {
         if (auto* ctv = Luau::getMutable<Luau::ExternType>(objectType->type))
         {
-            attachMagicFunctionSafe(ctv->props, "IsA", std::make_shared<MagicInstanceIsA>());
-            attachMagicFunctionSafe(ctv->props, "GetPropertyChangedSignal", std::make_shared<MagicInstancePropertyCheck>());
+            attachMagicFunctionSafe(ctv->props(), "IsA", std::make_shared<MagicInstanceIsA>());
+            attachMagicFunctionSafe(ctv->props(), "GetPropertyChangedSignal", std::make_shared<MagicInstancePropertyCheck>());
 
-            attachTagSafe(ctv->props, "IsA", "ClassNames");
-            attachTagSafe(ctv->props, "GetPropertyChangedSignal", "Properties");
+            attachTagSafe(ctv->props(), "IsA", "ClassNames");
+            attachTagSafe(ctv->props(), "GetPropertyChangedSignal", "Properties");
         }
     }
 
@@ -697,23 +697,23 @@ void RobloxPlatform::mutateRegisteredDefinitions(Luau::GlobalTypes& globals, std
         {
             Luau::attachTag(instanceType->type, Luau::kTypeofRootTag);
 
-            attachMagicFunctionSafe(ctv->props, "FindFirstChildWhichIsA", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
-            attachMagicFunctionSafe(ctv->props, "FindFirstChildOfClass", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
-            attachMagicFunctionSafe(ctv->props, "FindFirstAncestorWhichIsA", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
-            attachMagicFunctionSafe(ctv->props, "FindFirstAncestorOfClass", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
-            attachMagicFunctionSafe(ctv->props, "Clone", std::make_shared<MagicInstanceClone>());
-            attachMagicFunctionSafe(ctv->props, "IsPropertyModified", std::make_shared<MagicInstancePropertyCheck>());
-            attachMagicFunctionSafe(ctv->props, "ResetPropertyToDefault", std::make_shared<MagicInstancePropertyCheck>());
-            attachMagicFunctionSafe(ctv->props, "QueryDescendants", std::make_shared<MagicQueryDescendants>());
+            attachMagicFunctionSafe(ctv->props(), "FindFirstChildWhichIsA", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
+            attachMagicFunctionSafe(ctv->props(), "FindFirstChildOfClass", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
+            attachMagicFunctionSafe(ctv->props(), "FindFirstAncestorWhichIsA", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
+            attachMagicFunctionSafe(ctv->props(), "FindFirstAncestorOfClass", std::make_shared<MagicInstanceFindFirstXWhichIsA>());
+            attachMagicFunctionSafe(ctv->props(), "Clone", std::make_shared<MagicInstanceClone>());
+            attachMagicFunctionSafe(ctv->props(), "IsPropertyModified", std::make_shared<MagicInstancePropertyCheck>());
+            attachMagicFunctionSafe(ctv->props(), "ResetPropertyToDefault", std::make_shared<MagicInstancePropertyCheck>());
+            attachMagicFunctionSafe(ctv->props(), "QueryDescendants", std::make_shared<MagicQueryDescendants>());
 
             // Autocomplete ClassNames for :IsA("") and counterparts
-            attachTagSafe(ctv->props, "FindFirstChildWhichIsA", "ClassNames");
-            attachTagSafe(ctv->props, "FindFirstChildOfClass", "ClassNames");
-            attachTagSafe(ctv->props, "FindFirstAncestorWhichIsA", "ClassNames");
-            attachTagSafe(ctv->props, "FindFirstAncestorOfClass", "ClassNames");
+            attachTagSafe(ctv->props(), "FindFirstChildWhichIsA", "ClassNames");
+            attachTagSafe(ctv->props(), "FindFirstChildOfClass", "ClassNames");
+            attachTagSafe(ctv->props(), "FindFirstAncestorWhichIsA", "ClassNames");
+            attachTagSafe(ctv->props(), "FindFirstAncestorOfClass", "ClassNames");
 
-            attachTagSafe(ctv->props, "IsPropertyModified", "Properties");
-            attachTagSafe(ctv->props, "ResetPropertyToDefault", "Properties");
+            attachTagSafe(ctv->props(), "IsPropertyModified", "Properties");
+            attachTagSafe(ctv->props(), "ResetPropertyToDefault", "Properties");
 
             // Go through all the defined classes and if they are a subclass of Instance then give them the
             // same metatable identity as Instance so that equality comparison works.
@@ -760,12 +760,12 @@ void RobloxPlatform::mutateRegisteredDefinitions(Luau::GlobalTypes& globals, std
     if (robloxMetadata.has_value() && !robloxMetadata->SERVICES.empty())
         if (auto serviceProviderType = globals.globalScope->lookupType("ServiceProvider"))
             if (auto* ctv = Luau::getMutable<Luau::ExternType>(serviceProviderType->type);
-                ctv && ctv->props.find("GetService") != ctv->props.end() && ctv->props["GetService"].readTy &&
-                Luau::get<Luau::FunctionType>(ctv->props["GetService"].readTy))
+                ctv && ctv->props().find("GetService") != ctv->props().end() && ctv->props()["GetService"].readTy &&
+                Luau::get<Luau::FunctionType>(ctv->props()["GetService"].readTy))
             {
-                Luau::attachTag(*ctv->props["GetService"].readTy, "Services");
+                Luau::attachTag(*ctv->props()["GetService"].readTy, "Services");
                 Luau::attachMagicFunction(
-                    *ctv->props["GetService"].readTy, std::make_shared<MagicTypeLookup>(robloxMetadata->SERVICES, "Invalid service name"));
+                    *ctv->props()["GetService"].readTy, std::make_shared<MagicTypeLookup>(robloxMetadata->SERVICES, "Invalid service name"));
             }
 
     // Move Enums over as imported type bindings
@@ -780,8 +780,8 @@ void RobloxPlatform::mutateRegisteredDefinitions(Luau::GlobalTypes& globals, std
             {
                 if (ctv->name == "EnumItem")
                 {
-                    attachMagicFunctionSafe(ctv->props, "IsA", std::make_shared<MagicEnumItemIsA>());
-                    attachTagSafe(ctv->props, "IsA", "Enums");
+                    attachMagicFunctionSafe(ctv->props(), "IsA", std::make_shared<MagicEnumItemIsA>());
+                    attachTagSafe(ctv->props(), "IsA", "Enums");
                 }
                 else if (ctv->name != "Enum" && ctv->name != "Enums")
                 {
@@ -801,7 +801,7 @@ void RobloxPlatform::mutateRegisteredDefinitions(Luau::GlobalTypes& globals, std
 
                     // Update the documentation symbol
                     Luau::asMutable(ty)->documentationSymbol = "@roblox/enum/" + ctv->name;
-                    for (auto& [name, prop] : ctv->props)
+                    for (auto& [name, prop] : ctv->props())
                     {
                         prop.documentationSymbol = "@roblox/enum/" + ctv->name + "." + name;
                         Luau::attachTag(prop, "EnumItem");
