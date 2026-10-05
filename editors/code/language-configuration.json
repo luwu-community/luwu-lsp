@@ -43,7 +43,10 @@
   "autoCloseBefore": ">}])` \n\t",
 
   "indentationRules": {
-    "increaseIndentPattern": "^((?!(\\-\\-)).)*((\\b(function|do|repeat)\\b((?!\\b(end|until)\\b).)*)|(\\{\\s*)|(\\b(then|else)\\b[;\\s]*))(\\-\\-.*)*$",
+    // the second alternative is a class/trait header (`export class Foo`,
+    // `trait Meower(tag: string) needs Animal`, `declare class type Bar`,
+    // `export declare trait type Baz`), whose body is closed by `end`
+    "increaseIndentPattern": "(?:^((?!(\\-\\-)).)*((\\b(function|do|repeat)\\b((?!\\b(end|until)\\b).)*)|(\\{\\s*)|(\\b(then|else)\\b[;\\s]*))(\\-\\-.*)*$)|(?:^\\s*(?:export\\s+)?(?:declare\\s+(?:class|trait)\\s+type|class|trait)\\s+[A-Za-z_]((?!\\-\\-|\\bend\\b).)*(\\-\\-.*)?$)",
     "decreaseIndentPattern": "^\\s*((\\b(end|until)\\b)|(\\})|(\\))|(\\b(else)\\b[;\\s]*))"
   },
 
@@ -59,6 +62,13 @@
     },
     {
       "beforeText": "^\\s*(?:local\\s+)?function\\s*[\\w.:]*\\s*\\([^)]*\\)\\s*$",
+      "afterText": "^\\s*end\\b",
+      "action": {
+        "indent": "indentOutdent"
+      }
+    },
+    {
+      "beforeText": "^\\s*(?:export\\s+)?(?:declare\\s+(?:class|trait)\\s+type|class|trait)\\s+[A-Za-z_]((?!\\-\\-|\\bend\\b).)*$",
       "afterText": "^\\s*end\\b",
       "action": {
         "indent": "indentOutdent"

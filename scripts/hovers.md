@@ -476,7 +476,7 @@ end
 <!-- /keyword -->
 
 <!-- keyword: private -->
-An access speciier that forbids a class field, function, or method from being accessible outside the lexical scope of the class.
+An access specifier that forbids a class field, function, or method from being accessible outside the lexical scope of the class.
 
 Attempting to access a `private` member from outside its class raises a runtime error.
 
@@ -806,7 +806,7 @@ Should the compiler trust type annotations to inline your code? Requires `--opti
 
 This significantly benefits:
 
-- Object-oriented code with classes
+- Object-oriented code with classes.
 - String metamethods.
 
 When enabled, significantly increases the speed of class-oriented code by allowing greedy inlining of methods based
@@ -857,7 +857,7 @@ Arguments passed to calls to this function get typechecked, even in nonstrict mo
 
 <!-- keyword: attribute_noinline -->
 Prevent a function or method from being inlined in `--!optimize 2` (O2) mode.
-In highly optimize code, you might need this to keep cold paths away from hot paths (and prevent their inlining).
+In highly optimized code, you might need this to keep cold paths away from hot paths (and prevent their inlining).
 
 This can also be useful for making sure stack traces are fully accurate for a function; inlining can erase a function's original
 call location, which might be important in debugging.
@@ -873,7 +873,18 @@ Can be written on a local function, a const function, a class method or a functi
 <!-- /keyword -->
 
 <!-- keyword: declare_extern_type -->
-Declare an *extern type*: a type the host provides (userdata from C++ or Rust, say) with no implementation in Luwu. It names a type only; nothing is put in value scope.
+
+An extern type is a userdata type the host provides, often implemented in a language like C++ or Rust.
+Extern types are similar to classes, but every field/method on them is public and they are not allowed to have static (non-self) functions.
+
+You will most likely find `declare extern type` syntax in host definition files to document the userdata types the host provides, but in Luwu you might
+see them in regular user-code as well.
+
+Extern types defined in an embedder-provided definitions file (often suffixed `.d.luwu` or `.d.luau`) are visible to the entire project (added to global types scope),
+whereas extern types defined within a regular module are visible only to the current module (unless exported).
+Declaring an `extern type` puts its type in the type system language's scope only.
+
+Exported extern types defined in user code may be imported just like type aliases.
 
 ```luwu
 -- websocket.luwu
@@ -889,28 +900,66 @@ const websocket = require("./websocket")
 type Websocket = websocket.Websocket
 ```
 
-Outside definition files an extern type belongs to its file unless it's `export`ed, and is imported like a type alias. Every member is public, methods take `self`, and `with` after the name is optional.
+Extern type declaration headers may terminate with `with` for backwards compatibility with Luau: `declare extern type Cat with props: value end`
 <!-- /keyword -->
 
 <!-- keyword: trait -->
-Define behavior and state that many classes share, without inheritance.
-A trait lists what implementing classes must declare (`expect`), and what it provides them: fields with default values and functions, which each class gets its own copy of.
+Define reusable functionality shared between classes.
+Traits serve the purpose of interfaces and implementation inheritance in Luwu.
 
 ```luwu
-trait Greeter
-    expect name: string
-    greeting = "hello"
-    function greet(self): string
-        return `{self.greeting}, {self.name}`
+trait Named
+    expect name: Name
+end
+trait Aged(age = 0)
+    final function is_adult(self)
+        return self.age >= 18
     end
 end
+class Name(first: string, last: string, middle: string?)
+    function parse(s: string): Name ... end
+end
+class Person(
+    name: Name | string,
+    age = 0
+) implements Named, Aged(age)
+    name: Name = if class.isinstance(name, Name) then name else Name.parse(name)
+end
+```
 
-class Cat implements Greeter
-    name = "Taz"
+Traits are very similar to classes. In fact, there are only a few differences between traits and classes:
+
+- Traits can `expect` classes to implement their members and do not need to define them in the trait body.
+- Traits cannot define a real `function __init` (but can define `__create`).
+- Traits cannot be directly constructed (only classes that implement them can)
+- Trait members can be `final`.
+
+Use `class.implements` to narrow upon a trait:
+
+```luwu
+trait Person
+    expect name: string
+end
+trait Employee needs Person
+    expect private pay: Salary | Money
+end
+trait Instructor needs Employee
+    classes_taught: { Class } = {}
+    average_rating: Rating? = nil
 end
 
-print(Cat():greet()) -- hello, Taz
-print(class.implements(Cat(), Greeter)) -- true
+class Student(name) implements Person
+    public name: string
+    private gpa: number = 3
+end
+class Professor(name) implements Instructor
+    public name: string
+    private pay = Salary(50_000)
+end
+class TeachingAssistant(name) implements Instructor
+    public name: string
+    private pay = Money(20)
+end
 ```
 
 A trait can take parameters, passed by each implementing class: `class Coin(amount: number) implements Item("Currency", amount)`.
@@ -930,43 +979,33 @@ end
 
 const main = Path("./src/main.luwu") -- a RelativePath
 ```
-
-A trait's own functions can be called through it: `Greeter.greet(cat)` calls `cat`'s class's `greet`, after checking the class implements `Greeter`.
-`type(Greeter)` and `typeof(Greeter)` are `"trait"`.
 <!-- /keyword -->
 
 <!-- keyword: export_trait -->
-Make a trait available to other modules, which can implement it: `class Dog implements mod.Named end`.
+Make a trait available to other modules.
 <!-- /keyword -->
 
 <!-- keyword: implements -->
-Lists the traits a class implements. The class gets each trait's fields and functions, must declare what each trait `expect`s, and passes the arguments of traits that take parameters.
-
-```luwu
-class Rifle implements Gun, Item("Weapon", 1)
-    -- ...
-end
-```
-
-A trait the listed ones `need` is implemented too, when it has no parameters.
-Implementing a trait is checked with `class.implements(object, Trait)`, which also refines the object's type.
+Traits this class implements. To check if an object of a class implements a trait, use `class.implements(obj, Trait)`.
 <!-- /keyword -->
 
 <!-- keyword: needs -->
-Lists the traits a trait needs: every class implementing this trait must implement them too.
-A needed trait without parameters is implemented automatically; one with parameters must be listed by the class, with its arguments.
+List other traits this trait needs; classes must implement all traits listed here.
+Traits that need other traits may access fields/functions on the traits they need.
+
+A needed trait without parameters is implemented automatically.
+
+Traits may override fields and functions of traits they need (as long as those members aren't `final`).
 
 ```luwu
-trait Weapon needs Tool
+trait Weapon needs Tool -- Tool and traits Tool needs are implemented automatically
     expect damage: number
 end
 ```
-
-Traits that need each other are always implemented together, so they are an error: combine them into one trait.
 <!-- /keyword -->
 
 <!-- keyword: expect -->
-Marks a member of a trait that every implementing class must declare itself, with the access specifier and `const` written here.
+Marks a member of a trait that every implementing class must declare itself.
 
 ```luwu
 trait Tool
@@ -975,12 +1014,10 @@ trait Tool
     expect function __init(self, props: Props) -- a constructor taking these arguments
 end
 ```
-
-A class missing an expected member is an error when the class is created.
 <!-- /keyword -->
 
 <!-- keyword: final -->
-Marks a function of a trait that implementing classes can't define themselves: every class gets the trait's version.
+Marks a field or function of a trait that implementing classes cannot override.
 
 ```luwu
 trait Listener

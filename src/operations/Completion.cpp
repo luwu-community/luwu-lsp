@@ -112,7 +112,13 @@ void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
 
     // We should only apply it if the line just above us is the start of the unclosed statement
     // Otherwise, we insert ends in weird places if theirs an unclosed stat a while away
-    if (!currentNode->is<Luau::AstStatBlock>())
+    // Class and trait bodies are member lists rather than blocks, so right after an unclosed
+    // `class Foo` / `trait Foo` header the innermost node is the class statement itself (or, for
+    // `declare class type Foo`, the declaration wrapping it)
+    auto* statClass = currentNode->as<Luau::AstStatClass>();
+    if (auto* declaredClass = currentNode->as<Luau::AstStatDeclareClass>())
+        statClass = declaredClass->shape;
+    if (!currentNode->is<Luau::AstStatBlock>() && !(statClass && !statClass->hasEnd))
         return;
     if (params.position.line - currentNode->location.begin.line > 1)
         return;
