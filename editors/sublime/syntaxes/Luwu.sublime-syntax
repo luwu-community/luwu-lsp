@@ -1,0 +1,1031 @@
+%YAML 1.2
+---
+# http://www.sublimetext.com/docs/syntax.html
+#
+# Ported from the Luwu grammar shipped with luwu-lsp:
+#   ../../code/syntaxes/Luwu.tmLanguage.json
+# which descends from https://github.com/JohnnyMorganz/Luau.tmLanguage
+#
+# Keep it in sync with Luau.sublime-syntax by hand: a change to shared syntax goes
+# in both files. Luwu-only syntax lives here -- classes, traits, `const`,
+# bracketed attributes, destructuring, `declare`/`expect` signatures, `none`,
+# `--!trust` and markdown in doc comments.
+name: Luwu
+file_extensions:
+  - luwu
+scope: source.luwu
+contexts:
+  main:
+    - include: function-definition
+    - include: number
+    - include: string
+    - include: shebang
+    - include: comment
+    - include: local-declaration
+    - include: const-declaration
+    - include: extern-type-declaration
+    - include: declare-function
+    - include: expect-function
+    - include: declare-variable
+    - include: expect-variable
+    - include: class-declaration
+    - include: trait-declaration
+    - include: implements-list-continuation
+    - include: needs-list-continuation
+    - include: public-declaration
+    - include: private-declaration
+    - include: final-declaration
+    - include: for-loop
+    - include: type-function
+    - include: type-alias-declaration
+    - include: keyword
+    - include: language_constant
+    - include: standard_library
+    - include: generics-instantiation
+    - include: identifier
+    - include: operator
+    - include: parentheses
+    - include: table
+    - include: type_cast
+    - include: type_annotation
+    - include: attribute
+
+  comment:
+    # A `--[[ ... ]]` / `--[=[ ... ]=]` block comment. Only its delimiters and prose
+    # are scoped as a comment, not the whole block, so code in a ```luwu / ```luau
+    # fence inside it is scoped purely as code and highlights like it would outside
+    # the comment.
+    - match: '--\[(=*)\['
+      scope: comment.block.luwu
+      push:
+        - match: '\]\1\]'
+          scope: comment.block.luwu
+          pop: true
+        - match: '(```luwu)\s*$'
+          captures:
+            1: comment.block.luwu
+          push:
+            - meta_content_scope: meta.embedded.block.luwu
+            - match: '^(?=\s*```)'
+              pop: true
+            - include: scope:source.luwu
+        - match: '(```luau?)\s*$'
+          captures:
+            1: comment.block.luwu
+          push:
+            - meta_content_scope: meta.embedded.block.luau
+            - match: '^(?=\s*```)'
+              pop: true
+            - include: scope:source.luau
+        - match: '(```)'
+          scope: comment.block.luwu
+        - include: markdown_prose
+        - include: doc_comment_tags
+        # Comment prose. Stops at `]`, a backtick, `@` and the markdown punctuation
+        # above so the end delimiter, fences, doc tags and markdown can still match.
+        - match: '[^\]`@*_~\[#>]+'
+          scope: comment.block.luwu
+        - match: '[\]`@*_~\[#>]'
+          scope: comment.block.luwu
+    - match: '(--!)(optimize|native|trust)\b'
+      captures:
+        1: keyword.operator.directive.luwu
+        2: keyword.control.directive.luwu
+      push:
+        - meta_scope: meta.directive.codegen.luwu
+        - match: \n
+          pop: true
+        - match: '\S+'
+          scope: variable.parameter.directive.luwu
+    - match: '(--!)(strict|nonstrict|nocheck|nolint)\b'
+      captures:
+        1: keyword.operator.directive.luwu
+        2: storage.modifier.directive.luwu
+      push:
+        - meta_scope: meta.directive.luwu
+        - match: \n
+          pop: true
+        - match: '\S+'
+          scope: variable.parameter.directive.luwu
+    - match: '---'
+      push:
+        - meta_scope: comment.line.double-dash.documentation.luwu
+        - match: \n
+          pop: true
+        - include: markdown_prose
+        - include: doc_comment_tags
+    - match: '--'
+      push:
+        - meta_scope: comment.line.double-dash.luwu
+        - match: \n
+          pop: true
+
+  # Markdown in doc comments -- `--[=[ ... ]=]` blocks and `---` lines are read as
+  # markdown, so headings, emphasis, lists, links and inline code render as such.
+  # Code fences are matched before this and highlight as Luwu/Luau instead.
+  markdown_prose:
+    # An ATX heading -- `# Title`.
+    - match: '(?:^|(?<=---))[ \t]*(#{1,6})[ \t]+(.*?)[ \t]*$'
+      scope: markup.heading.luwu
+      captures:
+        1: punctuation.definition.heading.luwu
+        2: entity.name.section.luwu
+    # A blockquote marker.
+    - match: '(?:^|(?<=---))[ \t]*(>)[ \t]?'
+      captures:
+        1: markup.quote.luwu
+    # A bullet or ordered list marker. The marker alone is scoped; the item's text
+    # is prose.
+    - match: '(?:^|(?<=---))[ \t]*([-*+]|\d+[.)])(?=[ \t])'
+      captures:
+        1: punctuation.definition.list.begin.luwu
+    # `**bold**` / `__bold__`.
+    - match: '(\*\*|__)(?=\S)(.+?)(\1)'
+      scope: markup.bold.luwu
+    # `*italic*` / `_italic_`. Guarded so a `snake_case` word or a `*` in prose is
+    # left alone.
+    - match: '(?<![\w*_])([*_])(?=[^\s*_])([^*_\n]+?)(\1)(?![\w*_])'
+      scope: markup.italic.luwu
+    # `~~struck through~~`.
+    - match: '(~~)(?=\S)(.+?)(~~)'
+      scope: markup.strikethrough.luwu
+    # `` `inline code` ``. Never a fence, which the rules above take first.
+    - match: '(?<!`)(`)(?!`)([^`\n]+)(`)(?!`)'
+      scope: markup.inline.raw.luwu
+      captures:
+        1: punctuation.definition.raw.luwu
+        3: punctuation.definition.raw.luwu
+    # `[text](target)`.
+    - match: '(\[)([^\]\n]*)(\])(\()([^)\n]*)(\))'
+      captures:
+        2: string.other.link.title.luwu
+        5: markup.underline.link.luwu
+
+  doc_comment_tags:
+    - match: '((?<=[\s*!\/])[\\@]param)(?:\s)+(\b\w+\b)'
+      captures:
+        1: storage.type.class.luadoc.luwu
+        2: variable.parameter.luwu
+    - match: '((?<=[\s*!\/])[\\@]return)(?:\s)+(\b\w+\b)'
+      captures:
+        1: storage.type.class.luadoc.luwu
+        2: variable.parameter.luwu
+    - match: '((?<=[\s*!\/])[\\@]type)(?:\s)+(\b\w+\b)'
+      captures:
+        1: storage.type.class.luadoc.luwu
+        2: entity.name.type.luwu
+    - match: '((?<=[\s*!\/])[\\@]field)(?:\s)+(\b\w+\b)'
+      captures:
+        1: storage.type.class.luadoc.luwu
+        2: variable.other.property.luwu
+    - match: '@\w+'
+      scope: storage.type.class.luadoc.luwu
+
+  # An attribute, bare (`@native`) or as a bracketed list
+  # (`@[deprecated { use = "dog" }, native]`). Only the bracketed form takes
+  # arguments (rfcs/attributes-for-types-variables-fields-classes.md). Luwu allows
+  # attributes in front of statements, table and table type fields, class members
+  # and parameters.
+  attribute:
+    - match: '(@)(\[)'
+      captures:
+        1: keyword.operator.attribute.luwu
+        2: punctuation.definition.attribute.begin.luwu
+      push:
+        - meta_scope: meta.attribute.luwu
+        - match: '(\])'
+          captures:
+            1: punctuation.definition.attribute.end.luwu
+          pop: true
+        - include: comment
+        - match: ','
+          scope: punctuation.separator.attribute.luwu
+        # One entry: the attribute's name, then its literal arguments -- a string,
+        # a table or a parenthesized list.
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          captures:
+            1: storage.type.attribute.luwu
+          push:
+            - match: '(?=[,\]])'
+              pop: true
+            - include: comment
+            - include: string
+            - include: number
+            - include: language_constant
+            - include: table
+            - include: parentheses
+    - match: '(@)([a-zA-Z_][a-zA-Z0-9_]*)'
+      scope: meta.attribute.luwu
+      captures:
+        1: keyword.operator.attribute.luwu
+        2: storage.type.attribute.luwu
+
+  for-loop:
+    - match: \b(for)\b
+      captures:
+        1: keyword.control.luwu
+      push:
+        - match: \b(in)\b|(=)
+          captures:
+            1: keyword.control.luwu
+            2: keyword.operator.assignment.luwu
+          pop: true
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*in\b|\s*[=,]|\s*$)'
+              pop: true
+            - include: type_literal
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.parameter.luwu
+
+  # A function definition. Luwu Traits: a trait's function may be `final` after its
+  # access specifier -- `public final function on_event(self)`.
+  function-definition:
+    - match: '\b(?:(export)\s+)?(?:(public)\s+|(private)\s+)?(?:(final)\s+)?(?:(local)\s+|(const)\s+)?(function)\b(?![,:])'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.modifier.access.luwu
+        3: storage.modifier.access.luwu
+        4: storage.modifier.final.luwu
+        5: storage.modifier.local.luwu
+        6: storage.modifier.const.luwu
+        7: keyword.control.luwu
+      push:
+        - meta_scope: meta.function.luwu
+        - match: '(?<=[\)\-{}\[\]"''])'
+          pop: true
+        - include: comment
+        - include: generics-declaration
+        - include: function-parameters
+        - match: \b(__add|__call|__concat|__div|__eq|__index|__le|__len|__lt|__metatable|__mod|__mode|__mul|__newindex|__pow|__sub|__tostring|__unm|__iter|__idiv)\b
+          scope: variable.language.metamethod.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: entity.name.function.luwu
+
+  function-parameters:
+    - match: (\()
+      captures:
+        1: punctuation.definition.parameters.begin.luwu
+      push:
+        - meta_scope: meta.parameter.luwu
+        - match: (\))
+          captures:
+            1: punctuation.definition.parameters.end.luwu
+          pop: true
+        - include: comment
+        - include: attribute
+        - match: \.\.\.
+          scope: variable.parameter.function.varargs.luwu
+        - match: '[a-zA-Z_][a-zA-Z0-9_]*'
+          scope: variable.parameter.function.luwu
+        - match: ','
+          scope: punctuation.separator.arguments.luwu
+        - match: ':'
+          captures:
+            0: keyword.operator.type.luwu
+          push:
+            - match: '(?=[\),])'
+              pop: true
+            - include: type_literal
+
+  # The shared body of a bodiless function signature -- generics, parameter list,
+  # metamethod and optional-marker names.
+  signature-function-body:
+    - include: comment
+    - include: generics-declaration
+    - include: function-parameters
+    - match: \b(__add|__call|__concat|__div|__eq|__index|__le|__len|__lt|__metatable|__mod|__mode|__mul|__newindex|__pow|__sub|__tostring|__unm|__iter|__idiv)\b
+      scope: variable.language.metamethod.luwu
+    # The `?` marking a trait member optional -- `expect function on_click?(self)`.
+    # Scoped like `nil` so it reads as "this member may be absent".
+    - match: '(?<=[a-zA-Z0-9_])\?(?=\s*[(<])'
+      scope: constant.language.nil.luwu
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      scope: entity.name.function.luwu
+
+  # `declare function name(params): Return` -- a function with no body, in a
+  # definition file or (Luwu) a source file, where it may be indented inside a `do`
+  # block. Only at the start of a line: traits spell a required function
+  # `expect function`.
+  declare-function:
+    - match: '^\s*(declare)\s+(function)\b'
+      captures:
+        1: storage.modifier.signature.luwu
+        2: keyword.control.luwu
+      push:
+        - meta_scope: meta.function.signature.luwu
+        - match: '(?<=[\)\-{}\[\]"''])'
+          pop: true
+        - include: signature-function-body
+
+  # Luwu Traits: `expect function name(params): Return` -- a function an implementer
+  # must provide. A trait may mark a member optional with `?` after its name:
+  # `expect function on_click?(self, cb: Callback)`.
+  expect-function:
+    - match: '\b(expect)\s+(?:(public|private)\s+)?(function)\b'
+      captures:
+        1: storage.modifier.signature.luwu
+        2: storage.modifier.access.luwu
+        3: keyword.control.luwu
+      push:
+        - meta_scope: meta.function.signature.luwu
+        - match: '(?<=[\)\-{}\[\]"''])'
+          pop: true
+        - include: signature-function-body
+
+  # `declare name: Type` -- a global, from a definition file or (Luwu) a source
+  # file, where it may be indented inside a `do` block. Luwu lets a declared value
+  # leave its type out: `declare name`. Only at the start of a line: traits spell a
+  # required field `expect name: Type`.
+  declare-variable:
+    - match: '^\s*(declare)\s+(?!(?:function|extern|class)\b)([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*(?::|;|--|$))'
+      captures:
+        1: storage.modifier.signature.luwu
+        2: variable.other.readwrite.luwu
+
+  # Luwu Traits: `expect name: Type` -- a field a trait requires of its
+  # implementers, which may carry the access specifier and `const` of the field
+  # (`expect private const id: string`). The type is optional: `expect cat` means
+  # `expect cat: any`.
+  expect-variable:
+    - match: '(?<![^.]\.|:)\b(expect)\s+(?:(public|private)\s+)?(?:(const)\s+)?(?!(?:function|extern|class)\b)([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*(?::|;|--|$))'
+      captures:
+        1: storage.modifier.signature.luwu
+        2: storage.modifier.access.luwu
+        3: storage.modifier.const.luwu
+        4: variable.other.readwrite.luwu
+
+  # `[export] declare extern type Name<T> extends Base [with] ... end`, from a
+  # definition file or (Luwu) a source file, where `export` makes it importable and
+  # `with` is optional. `declare` is optional here only so the
+  # `extern type Name ... end` summaries shown in hovers highlight too.
+  extern-type-declaration:
+    - match: '(?<![^.]\.|:)\b(?:(export)\s+)?(?:(declare)\s+)?(extern)\s+(type)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.modifier.signature.luwu
+        3: storage.modifier.extern.luwu
+        4: storage.type.luwu
+        5: entity.name.type.luwu
+      push:
+        - meta_scope: meta.extern-type.luwu
+        - match: '\b(end)\b'
+          captures:
+            1: keyword.control.luwu
+          pop: true
+        - include: comment
+        - include: generics-declaration
+        - match: '\b(extends)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)'
+          captures:
+            1: storage.modifier.extends.luwu
+            2: entity.name.type.luwu
+        - match: '\b(with)\b'
+          scope: keyword.control.luwu
+        - include: function-definition
+        - match: '[a-zA-Z_][a-zA-Z0-9_]*(?=\s*:)'
+          scope: variable.other.property.luwu
+        - include: type_annotation
+
+  # A class declaration. `declare class type` marks a class that exists but has no
+  # body here -- an embedder's or a definition file's class -- and may be exported:
+  # `export declare class type Name`.
+  class-declaration:
+    - match: '(?<![^.]\.|:)\b(?:(export)\s+)?(?:(declare)\s+(class)\s+(?:(type)\s+)?|(class)\s+)(?:([\w]+))\b'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.modifier.signature.luwu
+        3: keyword.control.luwu
+        4: keyword.control.luwu
+        5: keyword.control.luwu
+        6: entity.name.type.luwu
+      push:
+        - meta_scope: meta.class.luwu
+        - match: '(?<=[a-zA-Z0-9_>)}])(?!\s*[<({])(?!\s*\b(?:private|public)\b\s*\()(?!\s*\bimplements\b)'
+          pop: true
+        - include: comment
+        - include: generics-declaration
+        - include: primary-constructor
+        - include: pod-constructor-fields
+        - include: implements-list
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: entity.name.type.class.luwu
+
+  # A trait declaration. `declare trait type` marks a trait that exists but has no
+  # body here -- an embedder's or a definition file's trait -- and may be exported:
+  # `export declare trait type Name`.
+  trait-declaration:
+    - match: '(?<![^.]\.|:)\b(?:(export)\s+)?(?:(declare)\s+(trait)\s+(?:(type)\s+)?|(trait)\s+)(?:([\w]+))\b'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.modifier.signature.luwu
+        3: keyword.control.luwu
+        4: keyword.control.luwu
+        5: keyword.control.luwu
+        6: entity.name.type.luwu
+      push:
+        - meta_scope: meta.trait.luwu
+        - match: '(?<=[a-zA-Z0-9_>)}])(?!\s*[<({])(?!\s*\b(?:private|public)\b\s*\()(?!\s*\bneeds\b)'
+          pop: true
+        - include: comment
+        - include: generics-declaration
+        - include: primary-constructor
+        - include: pod-constructor-fields
+        - include: needs-list
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: entity.name.type.trait.luwu
+
+  primary-constructor:
+    # Luwu Classes: the access specifier on a class's primary constructor --
+    # `class Account private (holder: User)` -- which qualifies the constructor
+    # rather than the class. Only a qualifier when a parameter list follows it.
+    - match: '\b(public|private)\b(?=\s*\()'
+      scope: storage.modifier.access.luwu
+    - match: '(\()'
+      captures:
+        1: punctuation.definition.parameters.begin.luwu
+      push:
+        - meta_scope: meta.parameter.luwu
+        - match: '(\))'
+          captures:
+            1: punctuation.definition.parameters.end.luwu
+          pop: true
+        - include: comment
+        - include: attribute
+        # Luwu Classes: a primary constructor parameter may carry the access
+        # specifier and `const` modifier of the field it implicitly declares,
+        # Kotlin-style -- `class SshKey private (public const public_key: string)`.
+        # These are only qualifiers when another name follows, so a parameter may
+        # still be named `public`, `private` or `const`.
+        - match: '\b(?:(public|private)\s+)?(const)\b(?=\s+[a-zA-Z_])'
+          captures:
+            1: storage.modifier.access.luwu
+            2: storage.modifier.const.luwu
+        - match: '\b(public|private)\b(?=\s+[a-zA-Z_])'
+          scope: storage.modifier.access.luwu
+        # Default value of a primary constructor parameter (`class Name(a = expr)`).
+        - match: '(=)(?!=)'
+          captures:
+            1: keyword.operator.assignment.luwu
+          push:
+            - meta_scope: meta.parameter.default.luwu
+            - match: '(?=[,)])'
+              pop: true
+            - include: scope:source.luwu
+        - match: '[a-zA-Z_][a-zA-Z0-9_]*'
+          scope: variable.parameter.function.luwu
+        - match: ','
+          scope: punctuation.separator.arguments.luwu
+        - match: ':'
+          captures:
+            0: keyword.operator.type.luwu
+          push:
+            - match: '(?=[\),])|(?=\s*=(?!=))'
+              pop: true
+            - include: type_literal
+
+  # Not valid Luau syntax -- only used to highlight the POD-constructor field list
+  # (`class Name { field: Type, ... }`) shown in class hovers.
+  pod-constructor-fields:
+    - match: '(\{)'
+      captures:
+        1: punctuation.definition.table.begin.luwu
+      push:
+        - meta_scope: meta.table.luwu
+        - match: '(\})'
+          captures:
+            1: punctuation.definition.table.end.luwu
+          pop: true
+        - include: comment
+        - include: attribute
+        - match: '\b(const)\b'
+          scope: storage.modifier.const.luwu
+        - match: '[a-zA-Z_][a-zA-Z0-9_]*(?=\s*:)'
+          scope: variable.parameter.function.luwu
+        - match: ','
+          scope: punctuation.separator.arguments.luwu
+        - match: ':'
+          captures:
+            0: keyword.operator.type.luwu
+          push:
+            - match: '(?=[,}])'
+              pop: true
+            - include: type_literal
+
+  # Luwu Traits: the traits a class implements, after its header --
+  # `class Heading(level: number) implements Element(`h{level}`), Renderable`.
+  # An entry may take generic arguments and trait arguments.
+  implements-list:
+    - match: '\b(implements)\b'
+      captures:
+        1: storage.modifier.implements.luwu
+      push: implements-list-body
+
+  # This copy picks the list up when it starts a line of its own, below the header.
+  implements-list-continuation:
+    - match: '^\s*\b(implements)\b(?=\s+[a-zA-Z_])'
+      captures:
+        1: storage.modifier.implements.luwu
+      push: implements-list-body
+
+  implements-list-body:
+    - meta_scope: meta.implements.luwu
+    - match: '(?<=[a-zA-Z0-9_>)])(?<!\bimplements)(?!\s*[,<(.])'
+      pop: true
+    - include: comment
+    - match: (<)
+      captures:
+        1: punctuation.definition.typeparameters.begin.luwu
+      push:
+        - match: (>)
+          captures:
+            1: punctuation.definition.typeparameters.end.luwu
+          pop: true
+        - include: type_literal
+    - include: parentheses
+    - match: ','
+      scope: punctuation.separator.arguments.luwu
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      scope: entity.name.type.luwu
+
+  # Luwu Traits: the supertraits a trait needs its implementers to also implement --
+  # `trait Enemy needs Npc<Character>`.
+  needs-list:
+    - match: '\b(needs)\b'
+      captures:
+        1: storage.modifier.needs.luwu
+      push: needs-list-body
+
+  # This copy picks the list up when it starts a line of its own, below the header.
+  needs-list-continuation:
+    - match: '^\s*\b(needs)\b(?=\s+[a-zA-Z_])'
+      captures:
+        1: storage.modifier.needs.luwu
+      push: needs-list-body
+
+  needs-list-body:
+    - meta_scope: meta.needs.luwu
+    - match: '(?<=[a-zA-Z0-9_>)])(?<!\bneeds)(?!\s*[,<(.])'
+      pop: true
+    - include: comment
+    - match: (<)
+      captures:
+        1: punctuation.definition.typeparameters.begin.luwu
+      push:
+        - match: (>)
+          captures:
+            1: punctuation.definition.typeparameters.end.luwu
+          pop: true
+        - include: type_literal
+    - include: parentheses
+    - match: ','
+      scope: punctuation.separator.arguments.luwu
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      scope: entity.name.type.luwu
+
+  generics-declaration:
+    - match: (<)
+      push:
+        - match: (>)
+          pop: true
+        - match: '[a-zA-Z_][a-zA-Z0-9_]*'
+          scope: entity.name.type.luwu
+        - match: '='
+          scope: keyword.operator.assignment.luwu
+        - include: type_literal
+
+  # Explicit generic instantiation at a call site -- `f<<number>>(x)`.
+  generics-instantiation:
+    - match: (<<)
+      captures:
+        1: punctuation.definition.typeparameters.begin.luwu
+      push:
+        - match: (>>)
+          captures:
+            1: punctuation.definition.typeparameters.end.luwu
+          pop: true
+        - include: comment
+        - include: type_literal
+
+  identifier:
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*(?:<<|[({"'']|\[\[))'
+      scope: entity.name.function.luwu
+    - match: '(?<=[^.]\.|:)\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      scope: variable.other.property.luwu
+    - match: '\b([A-Z_][A-Z0-9_]*)\b'
+      scope: variable.other.constant.luwu
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      scope: variable.other.readwrite.luwu
+
+  interpolated_string_expression:
+    - match: '\{'
+      captures:
+        0: punctuation.definition.interpolated-string-expression.begin.luwu
+      push:
+        - meta_scope: meta.template.expression.luwu
+        - meta_content_scope: meta.embedded.line.luwu
+        - match: '\}'
+          captures:
+            0: punctuation.definition.interpolated-string-expression.end.luwu
+          pop: true
+        - include: scope:source.luwu
+
+  keyword:
+    - match: \b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\b
+      scope: keyword.control.luwu
+    - match: \b(local)\b
+      scope: storage.modifier.local.luwu
+    - match: \b(const)\b
+      scope: storage.modifier.const.luwu
+    - match: '\b(function)\b(?![,:])'
+      scope: keyword.control.luwu
+    - match: '(?<![^.]\.|:)\b(self)\b'
+      scope: variable.language.self.luwu
+    - match: \b(and|or|not)\b
+      scope: keyword.operator.logical.luwu keyword.operator.wordlike.luwu
+    - match: '(?<=[^.]\.|:)\b(__add|__call|__concat|__div|__eq|__index|__le|__len|__lt|__metatable|__mod|__mode|__mul|__newindex|__pow|__sub|__tostring|__unm)\b'
+      scope: variable.language.metamethod.luwu
+    - match: '(?<![.])\.{3}(?!\.)'
+      scope: keyword.other.unit.luwu
+
+  language_constant:
+    - match: '(?<![^.]\.|:)\b(false)\b'
+      scope: constant.language.boolean.false.luwu
+    - match: '(?<![^.]\.|:)\b(true)\b'
+      scope: constant.language.boolean.true.luwu
+    - match: '(?<![^.]\.|:)\b(nil(?!:))\b'
+      scope: constant.language.nil.luwu
+    - match: '(?<![^.]\.|:)\b(none(?!:))\b'
+      scope: constant.language.none.luwu
+
+  local-declaration:
+    - match: '\b(?:(export)\s+)?(local)\b'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.modifier.local.luwu
+      push:
+        - match: '(?=\s*do\b|\s*[=;])|^(?!\s*[|&])'
+          pop: true
+        - include: comment
+        - include: attribute
+        - include: destructure-pattern
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*do\b|\s*[=;,])|^(?!\s*[|&])'
+              pop: true
+            - include: type_literal
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
+  const-declaration:
+    - match: '\b(?:(export)\s+)?(const)\b'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.modifier.const.luwu
+      push:
+        - match: '(?=\s*[=;])|^(?!\s*[|&])'
+          pop: true
+        - include: comment
+        - include: attribute
+        - include: destructure-pattern
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*[=;,])|^(?!\s*[|&])'
+              pop: true
+            - include: type_literal
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
+  public-declaration:
+    - match: '\b(public)\b(?:\s+(final)\b)?(?:\s+(const)\b)?'
+      captures:
+        1: storage.modifier.access.luwu
+        2: storage.modifier.final.luwu
+        3: storage.modifier.const.luwu
+      push:
+        - match: '(?=\s*[=;])|^(?!\s*[|&])'
+          pop: true
+        - include: comment
+        - include: attribute
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*[=;,])|^(?!\s*[|&])'
+              pop: true
+            - include: type_literal
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
+  private-declaration:
+    - match: '\b(private)\b(?:\s+(final)\b)?(?:\s+(const)\b)?'
+      captures:
+        1: storage.modifier.access.luwu
+        2: storage.modifier.final.luwu
+        3: storage.modifier.const.luwu
+      push:
+        - match: '(?=\s*[=;])|^(?!\s*[|&])'
+          pop: true
+        - include: comment
+        - include: attribute
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*[=;,])|^(?!\s*[|&])'
+              pop: true
+            - include: type_literal
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
+  # Luwu Traits: `final name` -- a trait field an implementing class can't redefine,
+  # without an access specifier. Only a modifier when a field name follows it, so
+  # `final` still works as an ordinary name. The qualified forms are in
+  # public-declaration, private-declaration and function-definition.
+  final-declaration:
+    - match: '\b(final)\b(?=\s+(?!(?:and|or|not|then|do|end|else|elseif|in|until|function)\b)[a-zA-Z_])'
+      captures:
+        1: storage.modifier.final.luwu
+      push:
+        - match: '(?=\s*[=;])|^(?!\s*[|&])'
+          pop: true
+        - include: comment
+        - include: attribute
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*[=;,])|^(?!\s*[|&])'
+              pop: true
+            - include: type_literal
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
+  # A Luwu destructuring pattern, `.{key, key as name, key.{inner}, key: T}`
+  # (rfcs/destructuring.md), after `local`/`const` and an optional name. A key
+  # followed by `as` is only the field being read, so it is scoped as a property;
+  # the name after `as`, a bare key, and a key with its own `.{...}` are what get
+  # bound.
+  destructure-pattern:
+    - match: '(\.)?\s*(\{)'
+      captures:
+        1: punctuation.accessor.luwu
+        2: punctuation.definition.destructure.begin.luwu
+      push:
+        - match: '\}'
+          scope: punctuation.definition.destructure.end.luwu
+          pop: true
+        - include: comment
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\s+(as)\b'
+          captures:
+            1: variable.other.property.luwu
+            2: keyword.control.as.luwu
+        - include: destructure-pattern
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*[,}])'
+              pop: true
+            - include: type_literal
+        - match: ','
+          scope: punctuation.separator.comma.luwu
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
+  number:
+    - match: '\b0_*[xX]_*[\da-fA-F_]*(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+      scope: constant.numeric.hex.luwu
+    - match: '\b0_*[bB][01_]+(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+      scope: constant.numeric.binary.luwu
+    - match: '(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+      scope: constant.numeric.decimal.luwu
+
+  operator:
+    - match: '==|~=|<=?|>=?'
+      scope: keyword.operator.comparison.luwu
+    - match: \+=|-=|/=|//=|\*=|%=|\^=|\.\.=|=
+      scope: keyword.operator.assignment.luwu
+    - match: \+|-|%|\*|\/\/|\/|\^
+      scope: keyword.operator.arithmetic.luwu
+    - match: '#|(?<!\.)\.{2}(?!\.)'
+      scope: keyword.operator.other.luwu
+
+  parentheses:
+    - match: (\()
+      captures:
+        1: punctuation.arguments.begin.luwu
+      push:
+        - match: (\))
+          captures:
+            1: punctuation.arguments.end.luwu
+          pop: true
+        - match: ','
+          scope: punctuation.separator.arguments.luwu
+        - include: scope:source.luwu
+
+  shebang:
+    - match: \A(#!).*$\n?
+      scope: comment.line.shebang.luwu
+      captures:
+        1: punctuation.definition.comment.luwu
+
+  standard_library:
+    - match: '(?<![^.]\.|:)\b(assert|collectgarbage|error|gcinfo|getfenv|getmetatable|ipairs|loadstring|newproxy|next|pairs|pcall|print|rawequal|rawset|require|select|setfenv|setmetatable|tonumber|tostring|type|typeof|unpack|xpcall)\b'
+      scope: support.function.luwu
+    - match: '(?<![^.]\.|:)\b(_G|_VERSION)\b'
+      scope: constant.language.luwu
+    - match: '(?<![^.]\.|:)\b(bit32\.(?:arshift|band|bnot|bor|btest|bxor|extract|lrotate|lshift|replace|rrotate|rshift|countlz|countrz|byteswap)|coroutine\.(?:create|isyieldable|resume|running|status|wrap|yield|close)|debug\.(?:info|loadmodule|profilebegin|profileend|traceback)|integer\.(?:add|arshift|band|bnot|bor|bswap|btest|bxor|clamp|countlz|countrz|create|div|extract|fromstring|ge|gt|idiv|le|lrotate|lshift|lt|max|min|mod|mul|neg|rem|replace|rrotate|rshift|sub|tonumber|udiv|uge|ugt|ule|ult|urem)|math\.(?:abs|acos|asin|atan|atan2|ceil|clamp|cos|cosh|deg|exp|floor|fmod|frexp|isfinite|isinf|isnan|ldexp|lerp|log|log10|map|max|min|modf|noise|pow|rad|random|randomseed|round|sign|sin|sinh|sqrt|tan|tanh)|os\.(?:clock|date|difftime|time)|string\.(?:byte|char|find|format|gmatch|gsub|len|lower|match|pack|packsize|rep|reverse|split|sub|unpack|upper)|table\.(?:concat|create|find|foreach|foreachi|getn|insert|maxn|move|pack|remove|sort|unpack|clear|freeze|isfrozen|clone)|task\.(?:spawn|synchronize|desynchronize|wait|defer|delay)|utf8\.(?:char|codepoint|codes|graphemes|len|nfcnormalize|nfdnormalize|offset)|buffer\.(?:create|fromstring|tostring|len|readbits|readi8|readu8|readi16|readu16|readi32|readu32|readinteger|readf32|readf64|writebits|writei8|writeu8|writei16|writeu16|writei32|writeu32|writeinteger|writef32|writef64|readstring|writestring|copy|fill)|vector\.(?:abs|angle|ceil|clamp|create|cross|dot|floor|lerp|magnitude|max|min|normalize|sign))\b'
+      scope: support.function.luwu
+    - match: '(?<![^.]\.|:)\b(bit32|buffer|coroutine|debug|integer(\.(maxsigned|minsigned))?|math(\.(huge|pi|nan|e|phi|sqrt2|tau))?|os|string|table|task|utf8(\.charpattern)?|vector(\.(one|zero))?)\b'
+      scope: support.constant.luwu
+    - match: '(?<![^.]\.|:)\b(delay|DebuggerManager|elapsedTime|PluginManager|printidentity|settings|spawn|stats|tick|time|UserSettings|version|wait|warn)\b'
+      scope: support.function.luwu
+    - match: '(?<![^.]\.|:)\b(game|plugin|shared|script|workspace|Enum(?:\.\w+){0,2})\b'
+      scope: constant.language.luwu
+
+  string:
+    - match: '"'
+      push:
+        - meta_scope: string.quoted.double.luwu
+        - match: '"'
+          pop: true
+        - include: string_escape
+    - match: "'"
+      push:
+        - meta_scope: string.quoted.single.luwu
+        - match: "'"
+          pop: true
+        - include: string_escape
+    - match: '\[(=*)\['
+      push:
+        - meta_scope: string.other.multiline.luwu
+        - match: '\]\1\]'
+          pop: true
+    - match: '`'
+      push:
+        - meta_scope: string.interpolated.luwu
+        - match: '`'
+          pop: true
+        - include: interpolated_string_expression
+        - include: string_escape
+
+  string_escape:
+    - match: '\\[abfnrtvz''"`{\\]'
+      scope: constant.character.escape.luwu
+    - match: '\\\d{1,3}'
+      scope: constant.character.escape.luwu
+    - match: '\\x[0-9a-fA-F]{2}'
+      scope: constant.character.escape.luwu
+    - match: '\\x\{[0-9a-fA-F]*\}'
+      scope: constant.character.escape.luwu
+    - match: '\\u\{[0-9a-fA-F]*\}'
+      scope: constant.character.escape.luwu
+    - match: \\$
+      scope: constant.character.escape.luwu
+
+  table:
+    - match: '(\{)'
+      captures:
+        1: punctuation.table.begin.luwu
+      push:
+        - match: '(\})'
+          captures:
+            1: punctuation.table.end.luwu
+          pop: true
+        - match: '[,;]'
+          scope: punctuation.separator.fields.luwu
+        - include: scope:source.luwu
+
+  type-alias-declaration:
+    - match: '(?<![^.]\.|:)\b(?:(export)\s+)?(type)\b(?=\s+(?!function\b)[a-zA-Z_][a-zA-Z0-9_]*)'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.type.luwu
+      push:
+        - match: '(?=[),}\]](?!\s*[&|]))|(?=\s*;)|(?=\s*(?:[*+%^]|\/\/?|(?<!\.)\.\.(?!\.)|-(?![->`])|~=|==))|(?=\s*\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while)\b)|(?=^\s*$)|(?=^\s*(?:@|\b(?:export\s+)?type\b|\b(?:declare\s+)?extern\s+type\b))|(?=^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(?:(?:[+\-*/%^]|\.\.)?=(?!=)|\(|\[|:))'
+          pop: true
+        - include: type_literal
+        - match: '='
+          scope: keyword.operator.assignment.luwu
+
+  type-function:
+    - match: '(?<![^.]\.|:)\b(?:(export)\s+)?(type)\s+(function)\b'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.type.luwu
+        3: keyword.control.luwu
+      push:
+        - meta_scope: meta.function.luwu
+        - match: '(?<=[\)\-{}\[\]"''])'
+          pop: true
+        - include: comment
+        - include: generics-declaration
+        - include: function-parameters
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: entity.name.type.luwu
+
+  type_annotation:
+    - match: ':(?!\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*(?:<<|[({"'']|\[\[)))'
+      push:
+        - match: (?<=\))(?!\s*->)|=|;|$|(?=\breturn\b)|(?=\bend\b)
+          pop: true
+        - include: comment
+        - include: type_literal
+
+  type_cast:
+    - match: (::)
+      captures:
+        1: keyword.operator.typecast.luwu
+      push:
+        - match: '(?=[),}\]](?!\s*[&|]))|(?=\s*;)|(?=\s*(?:[*+%^]|\/\/?|(?<!\.)\.\.(?!\.)|-(?![->`])|~=|==))|(?=\s*\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while)\b)|(?=^\s*$)|(?=^\s*(?:@|\b(?:export\s+)?type\b|\b(?:declare\s+)?extern\s+type\b))|(?=^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(?:(?:[+\-*/%^]|\.\.)?=(?!=)|\(|\[|:))'
+          pop: true
+        - include: type_literal
+
+  type_literal:
+    - include: comment
+    - include: attribute
+    - include: string
+    - match: \?|\&|\|
+      scope: keyword.operator.type.luwu
+    - match: '->'
+      scope: keyword.operator.type.function.luwu
+    - match: \b(false)\b
+      scope: constant.language.boolean.false.luwu
+    - match: \b(true)\b
+      scope: constant.language.boolean.true.luwu
+    - match: \b(nil|string|number|integer|boolean|thread|vector|buffer|unknown|never|any)\b
+      scope: support.type.primitive.luwu
+    - match: \b(typeof)\b(\()
+      captures:
+        1: support.function.luwu
+        2: punctuation.arguments.begin.typeof.luwu
+      push:
+        - match: (\))
+          captures:
+            1: punctuation.arguments.end.typeof.luwu
+          pop: true
+        - include: scope:source.luwu
+    - match: (<)
+      captures:
+        1: punctuation.definition.typeparameters.begin.luwu
+      push:
+        - match: (>)
+          captures:
+            1: punctuation.definition.typeparameters.end.luwu
+          pop: true
+        - match: '='
+          scope: keyword.operator.assignment.luwu
+        - include: type_literal
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      scope: entity.name.type.luwu
+    - match: '\{'
+      push:
+        - match: '\}'
+          pop: true
+        # The `read`/`write` variance modifier on an indexer --
+        # `{ read [string]: number }`. Named properties pick theirs up in the rule
+        # below, but an indexer has no name, so it needs its own match ahead of the
+        # `[` rule.
+        - match: '\b(read|write)\b(?=\s*\[)'
+          scope: storage.modifier.access.luwu
+        - match: '\['
+          push:
+            - match: '\]'
+              pop: true
+            - include: type_literal
+        - match: '\b(?:(read|write)\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\b(:)'
+          captures:
+            1: storage.modifier.access.luwu
+            2: variable.property.luwu
+            3: keyword.operator.type.luwu
+        - include: type_literal
+        - match: '[,;]'
+          scope: punctuation.separator.fields.type.luwu
+    - match: \(
+      push:
+        - match: \)
+          pop: true
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b(:)'
+          scope: variable.parameter.luwu
+          captures:
+            1: variable.parameter.luwu
+            2: keyword.operator.type.luwu
+        - include: type_literal
