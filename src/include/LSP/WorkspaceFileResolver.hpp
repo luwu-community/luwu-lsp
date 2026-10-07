@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <optional>
 #include <unordered_map>
 #include <memory>
@@ -82,6 +83,9 @@ struct WorkspaceFileResolver
 {
 private:
     mutable std::unordered_map<Uri, Luau::Config, UriHash> configCache{};
+    // A directory's config again for each language its files are written in (`Luau::Config::language`, from the file
+    // extension), since a `.luau` and a `.luwu` file in one directory share everything else.
+    mutable std::map<std::pair<std::string, Luau::Language>, Luau::Config> languageConfigCache{};
 
     // Cache for plugin-transformed documents
     mutable std::unordered_map<Uri, std::unique_ptr<Luau::LanguageServer::Plugin::PluginTextDocument>, UriHash> pluginDocuments{};

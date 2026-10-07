@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <unordered_set>
@@ -120,7 +121,32 @@ void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
         statClass = declaredClass->shape;
     if (!currentNode->is<Luau::AstStatBlock>() && !(statClass && !statClass->hasEnd))
         return;
-    if (params.position.line - currentNode->location.begin.line > 1)
+
+    // A class header can span several lines (`class Hp(\n    name: string,\n)`), so the body starts
+    // after the header's last token rather than on the line of the `class` keyword. Pressing Enter
+    // inside the header, e.g. between the parentheses of a primary constructor, is not opening the
+    // body, so no `end` goes there; it goes in once Enter is pressed after the header ends
+    unsigned int bodyStartLine = currentNode->location.begin.line;
+    if (statClass && !statClass->hasEnd)
+    {
+        Luau::Position headerEnd = statClass->name->location.end;
+        for (auto* generic : statClass->generics)
+            headerEnd = std::max(headerEnd, generic->location.end);
+        for (auto* genericPack : statClass->genericPacks)
+            headerEnd = std::max(headerEnd, genericPack->location.end);
+        if (statClass->primaryConstructor)
+            headerEnd = std::max(headerEnd, statClass->primaryConstructor->argLocation.end);
+        for (const auto& ref : statClass->implements)
+            headerEnd = std::max(headerEnd, ref.location.end);
+        for (const auto& ref : statClass->needs)
+            headerEnd = std::max(headerEnd, ref.location.end);
+
+        if (position < headerEnd)
+            return;
+        bodyStartLine = headerEnd.line;
+    }
+
+    if (params.position.line - bodyStartLine > 1)
         return;
 
     auto parentNode = getParentNode(ancestry);

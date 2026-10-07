@@ -1481,6 +1481,91 @@ TEST_CASE_FIXTURE(Fixture, "autocomplete_end_for_incomplete_declared_class")
     CHECK_EQ(edits[0].newText, "        end\n");
 }
 
+static void triggerEndAutocompletion(Fixture& fixture, const Uri& uri, const lsp::Position& marker)
+{
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    params.context = lsp::CompletionContext{};
+    params.context->triggerCharacter = "\n";
+    fixture.workspace.completion(params, nullptr);
+}
+
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_not_inserted_inside_class_primary_constructor_parens")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        class Hp(
+            |
+        )
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+    triggerEndAutocompletion(*this, uri, marker);
+    CHECK(client->requestQueue.empty());
+}
+
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_not_inserted_inside_trait_parameter_parens")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        trait Element(
+            |
+        )
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+    triggerEndAutocompletion(*this, uri, marker);
+    CHECK(client->requestQueue.empty());
+}
+
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_after_multiline_class_primary_constructor")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        class Hp(
+            current: number,
+            max: number
+        )
+            |
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+    triggerEndAutocompletion(*this, uri, marker);
+    auto edits = requireEndAutocompletionEdits(client.get(), uri);
+    REQUIRE_EQ(edits.size(), 1);
+    CHECK_EQ(edits[0].range, lsp::Range{{marker.line + 1, 0}, {marker.line + 1, 0}});
+    CHECK_EQ(edits[0].newText, "        end\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_after_multiline_trait_parameters")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        trait Element(
+            tag: string
+        )
+            |
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+    triggerEndAutocompletion(*this, uri, marker);
+    auto edits = requireEndAutocompletionEdits(client.get(), uri);
+    REQUIRE_EQ(edits.size(), 1);
+    CHECK_EQ(edits[0].range, lsp::Range{{marker.line + 1, 0}, {marker.line + 1, 0}});
+    CHECK_EQ(edits[0].newText, "        end\n");
+}
+
 TEST_CASE_FIXTURE(Fixture, "autocomplete_end_for_incomplete_function")
 {
     client->globalConfig.completion.autocompleteEnd = true;

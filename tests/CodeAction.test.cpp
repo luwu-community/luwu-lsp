@@ -297,6 +297,146 @@ print(used)
     CHECK_FALSE(action);
 }
 
+TEST_CASE_FIXTURE(Fixture, "const_local_quick_fix")
+{
+    auto uri = newDocument("test.luau", R"(--!lint ConstLocal
+local rows = 1
+print(rows)
+)");
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{1, 6}, {1, 10}};
+    params.context.only = {lsp::CodeActionKind::QuickFix};
+
+    auto result = workspace.codeAction(params, nullptr);
+    auto action = findCodeAction(result, "Change 'local' to 'const'");
+    REQUIRE(action);
+    CHECK(action->isPreferred == true);
+    REQUIRE(action->edit);
+    auto& changes = action->edit->changes.at(uri);
+    REQUIRE_EQ(changes.size(), 1);
+    CHECK_EQ(changes[0].newText, "const");
+    CHECK_EQ(changes[0].range.start, lsp::Position{1, 0});
+    CHECK_EQ(changes[0].range.end, lsp::Position{1, 5});
+}
+
+TEST_CASE_FIXTURE(Fixture, "const_local_fix_all_source_action")
+{
+    auto uri = newDocument("test.luau", R"(--!lint ConstLocal
+local a = 1
+local function f() return a end
+local b = 2
+b = 3
+print(a, f(), b)
+)");
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{0, 0}, {6, 0}};
+    params.context.only = {lsp::CodeActionKind::Source};
+
+    auto result = workspace.codeAction(params, nullptr);
+    auto action = findCodeAction(result, "Make all never-reassigned locals 'const'");
+    REQUIRE(action);
+    REQUIRE(action->edit);
+    auto& changes = action->edit->changes.at(uri);
+    // `a` and `f`, not `b`
+    REQUIRE_EQ(changes.size(), 2);
+    CHECK_EQ(changes[0].range.start.line, 1);
+    CHECK_EQ(changes[1].range.start.line, 2);
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_and_or_quick_fix")
+{
+    auto uri = newDocument("test.luau", R"(
+local c = math.random() > 0.5
+local v = c and 1 or 2
+print(v)
+)");
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{2, 12}, {2, 12}};
+    params.context.only = {lsp::CodeActionKind::QuickFix};
+
+    auto result = workspace.codeAction(params, nullptr);
+    auto action = findCodeAction(result, "Rewrite as 'if a then b else c'");
+    REQUIRE(action);
+    REQUIRE(action->edit);
+    auto& changes = action->edit->changes.at(uri);
+    REQUIRE_EQ(changes.size(), 1);
+    CHECK_EQ(changes[0].newText, "if c then 1 else 2");
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_and_or_fix_all_handles_nesting_and_precedence")
+{
+    auto uri = newDocument("test.luau", R"(
+local c = math.random() > 0.5
+local a = c and (c and 1 or 2) or 3
+local d = c and 1 or 2 or 3
+print(a, d)
+)");
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{0, 0}, {5, 0}};
+    params.context.only = {lsp::CodeActionKind::Source};
+
+    auto result = workspace.codeAction(params, nullptr);
+    auto action = findCodeAction(result, "Rewrite all 'a and b or c' as 'if a then b else c'");
+    REQUIRE(action);
+    REQUIRE(action->edit);
+    auto& changes = action->edit->changes.at(uri);
+
+    // the nested one is rewritten inside its parent's edit, so the edits don't overlap; the one that is an operand of
+    // another `or` keeps parentheses, since an if-then-else would swallow the `or 3`
+    REQUIRE_EQ(changes.size(), 2);
+    CHECK_EQ(changes[0].newText, "if c then (if c then 1 else 2) else 3");
+    CHECK_EQ(changes[1].newText, "(if c then 1 else 2)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "binding_keyword_toggle")
+{
+    auto uri = newDocument("test.luau", R"(
+const fixed = 1
+local free = 2
+local changed = 3
+changed = 4
+local f = function()
+    local inner = 1
+    return inner
+end
+f = nil
+print(fixed, free, changed, f)
+)");
+
+    auto actionsAt = [&](size_t line, size_t column)
+    {
+        lsp::CodeActionParams params;
+        params.textDocument.uri = uri;
+        params.range = {{line, column}, {line, column}};
+        params.context.only = {lsp::CodeActionKind::RefactorRewrite};
+        return workspace.codeAction(params, nullptr);
+    };
+
+    auto toLocal = findCodeAction(actionsAt(1, 7), "Switch to 'local'");
+    REQUIRE(toLocal);
+    REQUIRE(toLocal->edit);
+    CHECK_EQ(toLocal->edit->changes.at(uri)[0].newText, "local");
+
+    auto toConst = findCodeAction(actionsAt(2, 0), "Switch to 'const'");
+    REQUIRE(toConst);
+    CHECK_EQ(toConst->edit->changes.at(uri)[0].newText, "const");
+
+    // reassigned locals can be switched too: the errors that follow show what reassigns them
+    CHECK(findCodeAction(actionsAt(3, 7), "Switch to 'const'"));
+    // the innermost binding under the cursor is the one switched
+    auto inner = findCodeAction(actionsAt(6, 11), "Switch to 'const'");
+    REQUIRE(inner);
+    CHECK_EQ(inner->edit->changes.at(uri)[0].range.start, lsp::Position{6, 4});
+}
+
 TEST_CASE_FIXTURE(Fixture, "redundant_native_attribute_fix")
 {
     auto uri = newDocument("test.luau", R"(--!native

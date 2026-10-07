@@ -610,7 +610,7 @@ const function job_count(): number
     local jobs = math.min(thread.parallelism() - 1, 16)
     const mem_gb = available_memory_gb()
     if mem_gb then
-        jobs = math.min(jobs, mem_gb // 2)
+        jobs = math.min(jobs, mem_gb // 1)
     end
     return math.max(jobs, 1)
 end

@@ -327,9 +327,24 @@ struct InlayHintVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // An `if local` chain is named by its first binding (`if local x when ...`) rather than by that binding's value
+    static std::string ifConditionHint(Luau::AstStatIf* ifStat)
+    {
+        if (ifStat->clauses.size == 0)
+            return singleLineExprString(ifStat->condition);
+
+        const Luau::AstIfClause& first = ifStat->clauses.data[0];
+        std::string hint = first.local ? std::string(first.local->isConst ? "const " : "local ") + first.local->name.value
+                                       : singleLineExprString(first.expr);
+        if (ifStat->clauses.size > 1)
+            hint += " when ...";
+
+        return hint;
+    }
+
     bool visit(Luau::AstStatIf* ifStat) override
     {
-        addBlockEndHint(ifStat->location, "if " + singleLineExprString(ifStat->condition));
+        addBlockEndHint(ifStat->location, "if " + ifConditionHint(ifStat));
 
         // Every `elseif` in a chain is its own nested AstStatIf (as `elsebody`), sharing the same
         // `location.end` (the chain's final `end`) as the outer `if` -- so letting the default
@@ -339,7 +354,7 @@ struct InlayHintVisitor : public Luau::AstVisitor
         Luau::AstStat* current = ifStat;
         while (auto* asIf = current->as<Luau::AstStatIf>())
         {
-            asIf->condition->visit(this);
+            asIf->visitCondition(this);
             asIf->thenbody->visit(this);
 
             if (!asIf->elsebody)

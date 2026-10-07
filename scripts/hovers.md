@@ -12,6 +12,18 @@ Early exit from a `for`, `while`, or `repeat` loop.
 Used to separate the loop body from the looping condition or when used standalone, makes a `do ... end` block to scope local variables and expressions in a way that they don't leak to outside code.
 <!-- /keyword -->
 
+<!-- keyword: do_expr -->
+A `do` expression runs its block and evaluates to the value its `give` gives.
+<!-- /keyword -->
+
+<!-- keyword: give -->
+Exits the enclosing `do` expression with this value.
+<!-- /keyword -->
+
+<!-- keyword: when -->
+Separates the clauses of an `if` condition; the branch runs only when every clause passes.
+<!-- /keyword -->
+
 <!-- keyword: if -->
 Branch on a conditional expression.
 Most values are considered `truthy`, including all strings, numbers, complex types, etc.

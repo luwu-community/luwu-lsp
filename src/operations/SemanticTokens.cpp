@@ -449,6 +449,78 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // Luwu If-Local, Do Expressions and Table Comprehensions: `when` and `give` are contextual keywords, so the
+    // grammar only highlights one when the next token is on the same line. The AST knows exactly where they are,
+    // which also covers a `when`/`give` that ends its line without catching a variable named `give` or `when`
+    void addKeywordToken(const Luau::Location& location, unsigned int length)
+    {
+        // A missing `give` leaves its location on whatever token stood there instead
+        if (location.begin.line != location.end.line || location.end.column - location.begin.column != length)
+            return;
+        tokens.emplace_back(SemanticToken{location.begin, location.end, lsp::SemanticTokenTypes::Keyword, lsp::SemanticTokenModifiers::None});
+    }
+
+    bool visit(Luau::AstStatIf* statIf) override
+    {
+        for (const auto& clause : statIf->clauses)
+            if (clause.whenLocation)
+                addKeywordToken(*clause.whenLocation, 4);
+
+        return true;
+    }
+
+    bool visit(Luau::AstExprIfElse* ifElse) override
+    {
+        for (const auto& clause : ifElse->clauses)
+            if (clause.whenLocation)
+                addKeywordToken(*clause.whenLocation, 4);
+
+        return true;
+    }
+
+    bool visit(Luau::AstStatGive* give) override
+    {
+        Luau::Position keywordEnd{give->location.begin.line, give->location.begin.column + 4};
+        addKeywordToken(Luau::Location{give->location.begin, keywordEnd}, 4);
+        return true;
+    }
+
+    bool visit(Luau::AstExprTableComprehension* comprehension) override
+    {
+        // The comprehension is stored as the loops it runs, each one's body holding only the next clause. A single
+        // plain `when` is an ordinary if whose `if` is that `when`; a chain records its `when`s in its clauses,
+        // which visit(AstStatIf) covers. Every loop's `doLocation` is the one `give`
+        std::optional<Luau::Location> giveLocation;
+        Luau::AstStat* stat = comprehension->loop;
+        while (stat)
+        {
+            Luau::AstStatBlock* body = nullptr;
+            if (auto* statFor = stat->as<Luau::AstStatFor>())
+            {
+                giveLocation = statFor->doLocation;
+                body = statFor->body;
+            }
+            else if (auto* statForIn = stat->as<Luau::AstStatForIn>())
+            {
+                giveLocation = statForIn->doLocation;
+                body = statForIn->body;
+            }
+            else if (auto* guard = stat->as<Luau::AstStatIf>())
+            {
+                if (guard->clauses.size == 0)
+                    addKeywordToken(guard->ifLocation, 4);
+                body = guard->thenbody;
+            }
+
+            stat = body && body->body.size == 1 ? body->body.data[0] : nullptr;
+        }
+
+        if (giveLocation)
+            addKeywordToken(*giveLocation, 4);
+
+        return true;
+    }
+
     bool visit(Luau::AstStatBlock* block) override
     {
         for (Luau::AstStat* stat : block->body)

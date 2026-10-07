@@ -5,6 +5,9 @@
 
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
+LUAU_FASTFLAG(LuwuIfLocal)
+LUAU_FASTFLAG(LuwuTableComprehensions)
+LUAU_FASTFLAG(DebugLuwuDoExpr)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -234,6 +237,108 @@ TEST_CASE_FIXTURE(Fixture, "none_is_left_to_the_luwu_grammar")
 
     auto luwuTokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule(), /* grammarHighlightsNone= */ true);
     CHECK_FALSE(getSemanticToken(luwuTokens, Luau::Position{0, 10}));
+}
+
+// The position of the `occurrence`th (0-based) `word` on `line` of `source`
+static Luau::Position wordPosition(const std::string& source, unsigned int line, const std::string& word, size_t occurrence = 0)
+{
+    size_t lineStart = 0;
+    for (unsigned int i = 0; i < line; i++)
+        lineStart = source.find('\n', lineStart) + 1;
+    std::string text = source.substr(lineStart, source.find('\n', lineStart) - lineStart);
+
+    size_t column = text.find(word);
+    for (size_t i = 0; i < occurrence; i++)
+        column = text.find(word, column + 1);
+    REQUIRE(column != std::string::npos);
+    return Luau::Position{line, static_cast<unsigned int>(column)};
+}
+
+static void checkKeywordToken(const std::vector<SemanticToken>& tokens, const Luau::Position& position)
+{
+    auto token = getSemanticToken(tokens, position);
+    REQUIRE(token);
+    CHECK_EQ(token->tokenType, lsp::SemanticTokenTypes::Keyword);
+}
+
+static void checkNotKeywordToken(const std::vector<SemanticToken>& tokens, const Luau::Position& position)
+{
+    auto token = getSemanticToken(tokens, position);
+    if (token)
+        CHECK_NE(token->tokenType, lsp::SemanticTokenTypes::Keyword);
+}
+
+TEST_CASE_FIXTURE(Fixture, "table_comprehension_when_and_give_have_keyword_semantic_tokens")
+{
+    ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};
+    ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
+    ENABLE_NEW_SOLVER();
+
+    // `when` and `give` ending their lines are what the grammar can't tell apart from names
+    std::string source = "local xs = { 1, 2 }\n"
+                         "local ys = { for _, v in xs when\n"
+                         "    v > 1 give\n"
+                         "    v * 2 }\n"
+                         "local zs = { for _, v in xs when const w = v when w > 1 give w }\n"
+                         "local ns = { for i = 1, 10 give i }\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    checkKeywordToken(tokens, wordPosition(source, 1, "when"));
+    checkKeywordToken(tokens, wordPosition(source, 2, "give"));
+    checkKeywordToken(tokens, wordPosition(source, 4, "when", 0));
+    checkKeywordToken(tokens, wordPosition(source, 4, "when", 1));
+    checkKeywordToken(tokens, wordPosition(source, 4, "give"));
+    checkKeywordToken(tokens, wordPosition(source, 5, "give"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "if_local_when_has_keyword_semantic_token")
+{
+    ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local function f(s: string?)\n"
+                         "    if local n = s when\n"
+                         "        #n > 0 then\n"
+                         "    end\n"
+                         "    local y = if local m = s when #m > 0 then m else nil\n"
+                         "end\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    checkKeywordToken(tokens, wordPosition(source, 1, "when"));
+    checkKeywordToken(tokens, wordPosition(source, 4, "when"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "do_expression_give_has_keyword_semantic_token")
+{
+    ScopedFastFlag doExpr{FFlag::DebugLuwuDoExpr, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local a = do\n"
+                         "    give\n"
+                         "        5\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    checkKeywordToken(tokens, wordPosition(source, 1, "give"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "variables_named_give_and_when_are_not_keywords")
+{
+    ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};
+    ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
+    ScopedFastFlag doExpr{FFlag::DebugLuwuDoExpr, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local give = 1\n"
+                         "local when = give\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    checkNotKeywordToken(tokens, wordPosition(source, 0, "give"));
+    checkNotKeywordToken(tokens, wordPosition(source, 1, "when"));
+    checkNotKeywordToken(tokens, wordPosition(source, 1, "give"));
 }
 
 TEST_SUITE_END();

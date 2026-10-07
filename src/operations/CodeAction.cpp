@@ -10,6 +10,7 @@
 #include "Luau/Ast.h"
 #include "Luau/Error.h"
 
+#include <algorithm>
 #include <unordered_set>
 
 LUAU_FASTFLAG(LuauSolverV2)
@@ -56,6 +57,32 @@ Luau::AstStat* findStatementContainingLocal(Luau::AstStatBlock* root, const Luau
     FindStatementContainingLocal finder(location);
     root->visit(&finder);
     return finder.result;
+}
+
+// Deleting a statement by deleting its lines is only safe when nothing else is on them. A binding in an `if local`
+// chain is a declaration inside the `if` line, and a statement in a one-line `do` (a block or an expression) shares its
+// line with the code around it: deleting their lines would delete that code too.
+bool locationOwnsItsLines(const TextDocument& textDocument, const Luau::Location& location)
+{
+    std::string first = textDocument.getLine(location.begin.line);
+    for (size_t i = 0; i < location.begin.column && i < first.size(); ++i)
+    {
+        if (!isspace(static_cast<unsigned char>(first[i])))
+            return false;
+    }
+
+    std::string last = textDocument.getLine(location.end.line);
+    for (size_t i = location.end.column; i < last.size(); ++i)
+    {
+        // a trailing comment goes with the statement
+        if (last.compare(i, 2, "--") == 0)
+            break;
+
+        if (!isspace(static_cast<unsigned char>(last[i])) && last[i] != ';')
+            return false;
+    }
+
+    return true;
 }
 
 // The leading whitespace of a source line, used to match the document's existing indentation
@@ -495,7 +522,7 @@ void generateUnusedCodeFixes(const lsp::DocumentUri& uri, const Luau::LintWarnin
     }
 
     // Fix 2: Delete the declaration/statement
-    if (auto statement = findStatementContainingLocal(root, lint.location))
+    if (auto statement = findStatementContainingLocal(root, lint.location); statement && locationOwnsItsLines(textDocument, statement->location))
     {
         lsp::CodeAction action;
         action.title = std::string("Remove unused ") + kindLabel + ": '" + name + "'";
@@ -557,6 +584,281 @@ void generateRedundantNativeAttributeFix(const lsp::DocumentUri& uri, const Luau
     action.edit = workspaceEdit;
 
     result.push_back(action);
+}
+
+// Luwu: the `local`/`const` keyword of a binding statement, if `stat` is one
+std::optional<Luau::Location> bindingKeywordLocation(Luau::AstStat* stat)
+{
+    if (auto local = stat->as<Luau::AstStatLocal>())
+        return local->keywordLocation;
+    if (auto function = stat->as<Luau::AstStatLocalFunction>())
+        return function->keywordLocation;
+    return std::nullopt;
+}
+
+// Luwu: swaps a binding's `local` keyword for `const` or back. Both are five letters, so the edit covers exactly the
+// keyword; returns nothing if the text there isn't `from`.
+std::optional<lsp::TextEdit> switchBindingKeywordEdit(
+    const TextDocument& textDocument,
+    Luau::AstStat* stat,
+    const std::string& from,
+    const std::string& to
+)
+{
+    std::optional<Luau::Location> keyword = bindingKeywordLocation(stat);
+    if (!keyword)
+        return std::nullopt;
+
+    Luau::Location range{keyword->begin, Luau::Position{keyword->begin.line, keyword->begin.column + unsigned(from.size())}};
+    lsp::Range lspRange = textDocument.convertLocation(range);
+    if (textDocument.getText(lspRange) != from)
+        return std::nullopt;
+
+    return lsp::TextEdit{lspRange, to};
+}
+
+void addSingleEditAction(const lsp::DocumentUri& uri, std::string title, lsp::CodeActionKind kind, bool isPreferred,
+    std::vector<lsp::TextEdit> edits, const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
+{
+    lsp::CodeAction action;
+    action.title = std::move(title);
+    action.kind = std::move(kind);
+    action.isPreferred = isPreferred;
+
+    if (diagnostic)
+        action.diagnostics.push_back(*diagnostic);
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::move(edits));
+    action.edit = workspaceEdit;
+
+    result.push_back(std::move(action));
+}
+
+// Luwu: ConstLocal: `local` -> `const` on the statement the warning points into
+void generateConstLocalFix(const lsp::DocumentUri& uri, const Luau::LintWarning& lint, const TextDocument& textDocument, Luau::AstStatBlock* root,
+    const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
+{
+    Luau::AstStat* stat = findStatementContainingLocal(root, lint.location);
+    if (!stat)
+        return;
+
+    if (auto edit = switchBindingKeywordEdit(textDocument, stat, "local", "const"))
+        addSingleEditAction(uri, "Change 'local' to 'const'", lsp::CodeActionKind::QuickFix, true, {*edit}, diagnostic, result);
+}
+
+// Luwu: the and-or expressions LuaAndOr reported, found by location, with what each sits in
+struct FindAndOrExpressions : Luau::AstVisitor
+{
+    std::vector<Luau::Location> targets;
+    std::vector<Luau::AstExprBinary*> found;
+    // An and-or that is an operand of another expression has to keep its own parentheses once it's an if-then-else,
+    // which reaches as far right as it can: `a and b or c or d` would become `if a then b else (c or d)`
+    std::unordered_set<Luau::AstExprBinary*> needsParentheses;
+
+    void noteOperand(Luau::AstExpr* operand)
+    {
+        if (auto binary = operand->as<Luau::AstExprBinary>())
+            needsParentheses.insert(binary);
+    }
+
+    bool visit(Luau::AstExprBinary* node) override
+    {
+        noteOperand(node->left);
+        noteOperand(node->right);
+
+        if (std::find(targets.begin(), targets.end(), node->location) != targets.end())
+            found.push_back(node);
+        return true;
+    }
+
+    bool visit(Luau::AstExprUnary* node) override
+    {
+        noteOperand(node->expr);
+        return true;
+    }
+
+    bool visit(Luau::AstExprTypeAssertion* node) override
+    {
+        noteOperand(node->expr);
+        return true;
+    }
+
+    bool visit(Luau::AstExprIndexName* node) override
+    {
+        noteOperand(node->expr);
+        return true;
+    }
+
+    bool visit(Luau::AstExprIndexExpr* node) override
+    {
+        noteOperand(node->expr);
+        return true;
+    }
+
+    bool visit(Luau::AstExprCall* node) override
+    {
+        noteOperand(node->func);
+        return true;
+    }
+
+    bool visit(Luau::AstExprIfElse* node) override
+    {
+        noteOperand(node->condition);
+        return true;
+    }
+};
+
+// Luwu: rewrites and-or expressions as if-then-else. Text is copied from the document, so an and-or nested in another
+// one's operands is rewritten inside its parent's replacement, and edits never overlap.
+struct AndOrRewriter
+{
+    const TextDocument& textDocument;
+    const std::vector<Luau::AstExprBinary*>& rewrite;
+    const std::unordered_set<Luau::AstExprBinary*>& needsParentheses;
+
+    std::string text(const Luau::Position& begin, const Luau::Position& end) const
+    {
+        return textDocument.getText(textDocument.convertLocation(Luau::Location{begin, end}));
+    }
+
+    // `range`'s text, with every outermost and-or to rewrite inside it replaced
+    std::string rewriteRange(const Luau::Location& range) const
+    {
+        std::string out;
+        Luau::Position cursor = range.begin;
+
+        for (Luau::AstExprBinary* node : rewrite)
+        {
+            bool inside = range.encloses(node->location) && !(node->location == range);
+            if (!inside || node->location.begin < cursor)
+                continue;
+
+            out += text(cursor, node->location.begin);
+            out += rewriteNode(node);
+            cursor = node->location.end;
+        }
+
+        out += text(cursor, range.end);
+        return out;
+    }
+
+    std::string rewriteNode(Luau::AstExprBinary* node) const
+    {
+        auto and_ = node->left->as<Luau::AstExprBinary>();
+        std::string replacement = "if " + rewriteRange(and_->left->location) + " then " + rewriteRange(and_->right->location) + " else " +
+                                  rewriteRange(node->right->location);
+
+        if (needsParentheses.count(node))
+            return "(" + replacement + ")";
+        return replacement;
+    }
+};
+
+std::vector<lsp::TextEdit> computeAndOrEdits(
+    const TextDocument& textDocument,
+    Luau::AstStatBlock* root,
+    const std::vector<Luau::Location>& locations
+)
+{
+    FindAndOrExpressions finder;
+    finder.targets = locations;
+    root->visit(&finder);
+
+    // Outermost first, so rewriteRange meets a parent before the and-ors nested in it
+    std::sort(finder.found.begin(), finder.found.end(),
+        [](Luau::AstExprBinary* a, Luau::AstExprBinary* b)
+        {
+            if (a->location.begin != b->location.begin)
+                return a->location.begin < b->location.begin;
+            return b->location.end < a->location.end;
+        });
+
+    AndOrRewriter rewriter{textDocument, finder.found, finder.needsParentheses};
+
+    std::vector<lsp::TextEdit> edits;
+    Luau::Position covered{0, 0};
+    bool any = false;
+    for (Luau::AstExprBinary* node : finder.found)
+    {
+        if (!node->left->is<Luau::AstExprBinary>())
+            continue;
+        // nested in one already rewritten
+        if (any && node->location.begin < covered)
+            continue;
+
+        edits.push_back({textDocument.convertLocation(node->location), rewriter.rewriteNode(node)});
+        covered = node->location.end;
+        any = true;
+    }
+    return edits;
+}
+
+void generateLuaAndOrFix(const lsp::DocumentUri& uri, const Luau::LintWarning& lint, const TextDocument& textDocument, Luau::AstStatBlock* root,
+    const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
+{
+    std::vector<lsp::TextEdit> edits = computeAndOrEdits(textDocument, root, {lint.location});
+    if (!edits.empty())
+        addSingleEditAction(uri, "Rewrite as 'if a then b else c'", lsp::CodeActionKind::QuickFix, true, std::move(edits), diagnostic, result);
+}
+
+// Luwu: the binding statement whose keyword or names `position` is on
+struct FindBindingStatementAt : Luau::AstVisitor
+{
+    Luau::Position position;
+    Luau::AstStat* result = nullptr;
+
+    explicit FindBindingStatementAt(const Luau::Position& position)
+        : position(position)
+    {
+    }
+
+    bool on(const Luau::Location& location) const
+    {
+        return location.begin <= position && position <= location.end;
+    }
+
+    bool visit(Luau::AstStatLocal* node) override
+    {
+        bool onKeyword = node->keywordLocation && on(*node->keywordLocation);
+        bool onName = std::any_of(node->vars.begin(), node->vars.end(),
+            [&](Luau::AstLocal* local)
+            {
+                return on(local->location);
+            });
+
+        if (onKeyword || onName)
+            result = node;
+        return !result;
+    }
+
+    bool visit(Luau::AstStatLocalFunction* node) override
+    {
+        if (on(node->keywordLocation) || on(node->name->location))
+        {
+            result = node;
+            return false;
+        }
+        return true;
+    }
+};
+
+// Luwu: `const` <-> `local` on any binding. Switching a reassigned `local` to `const` is allowed on purpose: the errors it
+// produces show what reassigns it, and switching back undoes it.
+void generateBindingKeywordToggle(const lsp::DocumentUri& uri, Luau::AstStat* stat, const TextDocument& textDocument,
+    std::vector<lsp::CodeAction>& result)
+{
+    bool isConst = false;
+    if (auto local = stat->as<Luau::AstStatLocal>())
+        isConst = local->isConst;
+    else if (auto function = stat->as<Luau::AstStatLocalFunction>())
+        isConst = function->isConst;
+
+    const char* from = isConst ? "const" : "local";
+    const char* to = isConst ? "local" : "const";
+    if (auto edit = switchBindingKeywordEdit(textDocument, stat, from, to))
+        addSingleEditAction(uri, std::string("Switch to '") + to + "'", lsp::CodeActionKind::RefactorRewrite, false, {*edit}, std::nullopt,
+            result);
 }
 } // namespace
 
@@ -684,6 +986,12 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             case Luau::LintWarning::Code_RedundantNativeAttribute:
                 generateRedundantNativeAttributeFix(params.textDocument.uri, lint, diagnostic, result);
                 break;
+            case Luau::LintWarning::Code_ConstLocal:
+                generateConstLocalFix(params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, result);
+                break;
+            case Luau::LintWarning::Code_LuaAndOr:
+                generateLuaAndOrFix(params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, result);
+                break;
             default:
                 break;
             }
@@ -770,7 +1078,8 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             if (lint.code == Luau::LintWarning::Code_LocalUnused || lint.code == Luau::LintWarning::Code_FunctionUnused ||
                 lint.code == Luau::LintWarning::Code_ImportUnused)
             {
-                if (auto statement = findStatementContainingLocal(sourceModule->root, lint.location))
+                auto statement = findStatementContainingLocal(sourceModule->root, lint.location);
+                if (statement && locationOwnsItsLines(*textDocument, statement->location))
                 {
                     size_t startLine = statement->location.begin.line;
                     if (deletedLines.find(startLine) == deletedLines.end())
@@ -783,7 +1092,7 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                     }
                 }
             }
-            else if (lint.code == Luau::LintWarning::Code_UnreachableCode)
+            else if (lint.code == Luau::LintWarning::Code_UnreachableCode && locationOwnsItsLines(*textDocument, lint.location))
             {
                 size_t startLine = lint.location.begin.line;
                 if (deletedLines.find(startLine) == deletedLines.end())
@@ -808,6 +1117,35 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             removeUnusedAction.edit = workspaceEdit;
 
             result.emplace_back(removeUnusedAction);
+        }
+
+        // Luwu: fix every ConstLocal and every LuaAndOr in the module
+        {
+            std::vector<lsp::TextEdit> constEdits;
+            std::vector<Luau::Location> andOrLocations;
+            for (const auto& lint : cr.lintResult.warnings)
+            {
+                if (lint.code == Luau::LintWarning::Code_ConstLocal)
+                {
+                    if (auto stat = findStatementContainingLocal(sourceModule->root, lint.location))
+                        if (auto edit = switchBindingKeywordEdit(*textDocument, stat, "local", "const"))
+                            constEdits.push_back(*edit);
+                }
+                else if (lint.code == Luau::LintWarning::Code_LuaAndOr)
+                    andOrLocations.push_back(lint.location);
+            }
+
+            if (!constEdits.empty())
+                addSingleEditAction(params.textDocument.uri, "Make all never-reassigned locals 'const'", lsp::CodeActionKind::Source, false,
+                    std::move(constEdits), std::nullopt, result);
+
+            if (!andOrLocations.empty())
+            {
+                std::vector<lsp::TextEdit> andOrEdits = computeAndOrEdits(*textDocument, sourceModule->root, andOrLocations);
+                if (!andOrEdits.empty())
+                    addSingleEditAction(params.textDocument.uri, "Rewrite all 'a and b or c' as 'if a then b else c'",
+                        lsp::CodeActionKind::Source, false, std::move(andOrEdits), std::nullopt, result);
+            }
         }
 
         // Add "Add all missing requires" source action
@@ -858,6 +1196,12 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
 
         if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, requestRange.begin))
             generateClassAccessSpecifierToggle(params.textDocument.uri, classStat, *textDocument, result);
+
+        // Luwu: `local` <-> `const` on the binding under the cursor
+        FindBindingStatementAt bindingFinder(requestRange.begin);
+        sourceModule->root->visit(&bindingFinder);
+        if (bindingFinder.result)
+            generateBindingKeywordToggle(params.textDocument.uri, bindingFinder.result, *textDocument, result);
     }
 
     platform->handleCodeAction(params, result);

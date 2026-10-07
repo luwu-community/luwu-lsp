@@ -157,6 +157,36 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
 
     Luau::AstNode* node = ancestry.back();
 
+    // Luwu If Local: the `when` between a condition's clauses
+    auto whenIn = [&](const Luau::AstArray<Luau::AstIfClause>& clauses) -> std::optional<Luau::Location>
+    {
+        for (const Luau::AstIfClause& clause : clauses)
+        {
+            if (clause.whenLocation && contains(*clause.whenLocation))
+                return clause.whenLocation;
+        }
+        return std::nullopt;
+    };
+
+    if (auto stat = node->as<Luau::AstStatIf>(); stat && whenIn(stat->clauses))
+        return match("when", *whenIn(stat->clauses));
+    if (auto expr = node->as<Luau::AstExprIfElse>(); expr && whenIn(expr->clauses))
+        return match("when", *whenIn(expr->clauses));
+
+    // Luwu Do Expressions: `do` starting a do expression (not the `x or return` shorthand), and `give`
+    if (auto expr = node->as<Luau::AstExprDo>(); expr && !expr->shorthand)
+    {
+        Luau::Location doKeyword{expr->location.begin, Luau::Position{expr->location.begin.line, expr->location.begin.column + 2}};
+        if (contains(doKeyword))
+            return match("do_expr", doKeyword);
+    }
+    if (auto stat = node->as<Luau::AstStatGive>())
+    {
+        Luau::Location giveKeyword{stat->location.begin, Luau::Position{stat->location.begin.line, stat->location.begin.column + 4}};
+        if (contains(giveKeyword))
+            return match("give", giveKeyword);
+    }
+
     if (auto stat = node->as<Luau::AstStatIf>())
     {
         if (contains(stat->ifLocation))

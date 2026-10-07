@@ -201,10 +201,23 @@ const Luau::Config& WorkspaceFileResolver::getConfig(const Luau::ModuleName& nam
     if (base && isInitLuauFile(uri))
         base = base->parent();
 
-    if (!base)
-        return defaultConfig;
+    const Luau::Config& directoryConfig = base ? readConfigRec(*base, limits) : defaultConfig;
 
-    return readConfigRec(*base, limits);
+    // A module's language is its file extension's; anything that isn't a Luau or Lua file is Luwu.
+    Luau::Language language = Luau::Language::Luwu;
+    if (uri.extension() == ".luau")
+        language = Luau::Language::Luau;
+    else if (uri.extension() == ".lua")
+        language = Luau::Language::Lua;
+
+    if (directoryConfig.language == language)
+        return directoryConfig;
+
+    std::string directory = base ? base->fsPath() : "";
+    auto [it, inserted] = languageConfigCache.try_emplace({directory, language}, directoryConfig);
+    if (inserted)
+        it->second.language = language;
+    return it->second;
 }
 
 std::optional<std::string> WorkspaceFileResolver::parseConfig(const Uri& configPath, const std::string& contents, Luau::Config& result, bool compat)
@@ -352,6 +365,7 @@ const Luau::Config& WorkspaceFileResolver::readConfigRec(const Uri& uri, const L
 void WorkspaceFileResolver::clearConfigCache()
 {
     configCache.clear();
+    languageConfigCache.clear();
 }
 
 bool WorkspaceFileResolver::isPluginFile(const Luau::ModuleName& name) const
