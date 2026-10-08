@@ -524,7 +524,7 @@ contexts:
 
   # This copy picks the list up when it starts a line of its own, below the header.
   implements-list-continuation:
-    - match: '^\s*\b(implements)\b(?=\s+[a-zA-Z_])'
+    - match: '^\s*\b(implements)\b(?=\s+[a-zA-Z_]|\s*\()'
       captures:
         1: storage.modifier.implements.luwu
       push: implements-list-body
@@ -534,6 +534,7 @@ contexts:
     - match: '(?<=[a-zA-Z0-9_>)])(?<!\bimplements)(?!\s*[,<(.])'
       pop: true
     - include: comment
+    - include: trait-list-parenthesized
     - match: (<)
       captures:
         1: punctuation.definition.typeparameters.begin.luwu
@@ -559,7 +560,7 @@ contexts:
 
   # This copy picks the list up when it starts a line of its own, below the header.
   needs-list-continuation:
-    - match: '^\s*\b(needs)\b(?=\s+[a-zA-Z_])'
+    - match: '^\s*\b(needs)\b(?=\s+[a-zA-Z_]|\s*\()'
       captures:
         1: storage.modifier.needs.luwu
       push: needs-list-body
@@ -569,6 +570,7 @@ contexts:
     - match: '(?<=[a-zA-Z0-9_>)])(?<!\bneeds)(?!\s*[,<(.])'
       pop: true
     - include: comment
+    - include: trait-list-parenthesized
     - match: (<)
       captures:
         1: punctuation.definition.typeparameters.begin.luwu
@@ -583,6 +585,34 @@ contexts:
       scope: punctuation.separator.arguments.luwu
     - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
       scope: entity.name.type.luwu
+
+  # Luwu Traits: an `implements` or `needs` list in parentheses, so it can go one trait per line --
+  # `implements (Element(`h{level}`), Renderable)`. Only a parenthesis right after the keyword opens one;
+  # `implements Element(...)` passes trait arguments.
+  trait-list-parenthesized:
+    - match: '(?<=\bimplements|\bneeds)\s*(\()'
+      captures:
+        1: punctuation.definition.parameters.begin.luwu
+      push:
+        - match: (\))
+          captures:
+            1: punctuation.definition.parameters.end.luwu
+          pop: true
+        - include: comment
+        - match: (<)
+          captures:
+            1: punctuation.definition.typeparameters.begin.luwu
+          push:
+            - match: (>)
+              captures:
+                1: punctuation.definition.typeparameters.end.luwu
+              pop: true
+            - include: type_literal
+        - include: parentheses
+        - match: ','
+          scope: punctuation.separator.arguments.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: entity.name.type.luwu
 
   generics-declaration:
     - match: (<)

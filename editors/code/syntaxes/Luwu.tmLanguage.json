@@ -743,6 +743,9 @@
               "include": "#comment"
             },
             {
+              "include": "#trait-list-parenthesized"
+            },
+            {
               "begin": "(<)",
               "beginCaptures": {
                 "1": {
@@ -956,6 +959,9 @@
               "include": "#comment"
             },
             {
+              "include": "#trait-list-parenthesized"
+            },
+            {
               "begin": "(<)",
               "beginCaptures": {
                 "1": {
@@ -995,7 +1001,7 @@
     },
     "implements-list-continuation": {
       "comment": "Luwu Traits: the traits a class implements, after its header -- `class Heading(level: number) implements Element(`h{level}`), Renderable`. An entry may take generic arguments and trait arguments. This copy picks the list up when it starts a line of its own, below the header.",
-      "begin": "^\\s*\\b(implements)\\b(?=\\s+[a-zA-Z_])",
+      "begin": "^\\s*\\b(implements)\\b(?=\\s+[a-zA-Z_]|\\s*\\()",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.implements.luwu"
@@ -1006,6 +1012,9 @@
       "patterns": [
         {
           "include": "#comment"
+        },
+        {
+          "include": "#trait-list-parenthesized"
         },
         {
           "begin": "(<)",
@@ -1041,7 +1050,7 @@
     },
     "needs-list-continuation": {
       "comment": "Luwu Traits: the supertraits a trait needs its implementers to also implement -- `trait Enemy needs Npc<Character>`. This copy picks the list up when it starts a line of its own, below the header.",
-      "begin": "^\\s*\\b(needs)\\b(?=\\s+[a-zA-Z_])",
+      "begin": "^\\s*\\b(needs)\\b(?=\\s+[a-zA-Z_]|\\s*\\()",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.needs.luwu"
@@ -1049,6 +1058,59 @@
       },
       "end": "(?<=[a-zA-Z0-9_>)])(?<!\\bneeds)(?!\\s*[,<(.])",
       "name": "meta.needs.luwu",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#trait-list-parenthesized"
+        },
+        {
+          "begin": "(<)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.typeparameters.begin.luwu"
+            }
+          },
+          "end": "(>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.typeparameters.end.luwu"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#type_literal"
+            }
+          ]
+        },
+        {
+          "include": "#parentheses"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.arguments.luwu"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "name": "entity.name.type.luwu"
+        }
+      ]
+    },
+    "trait-list-parenthesized": {
+      "comment": "Luwu Traits: an `implements` or `needs` list in parentheses, so it can go one trait per line -- `implements (Element(`h{level}`), Renderable)`. Only a parenthesis right after the keyword opens one; `implements Element(...)` passes trait arguments.",
+      "begin": "(?<=\\bimplements|\\bneeds)\\s*(\\()",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.parameters.begin.luwu"
+        }
+      },
+      "end": "(\\))",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.parameters.end.luwu"
+        }
+      },
       "patterns": [
         {
           "include": "#comment"
