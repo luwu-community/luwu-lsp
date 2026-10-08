@@ -61,6 +61,16 @@ static Luau::AstStatClass* findClassStatByName(Luau::AstStatBlock* root, const L
     return nullptr;
 }
 
+static std::vector<lsp::Location> findAllReferencesForRenaming(
+    WorkspaceFolder* workspaceFolder, const lsp::RenameParams& params, const LSPCancellationToken& cancellationToken)
+{
+    lsp::ReferenceParams referenceParams{};
+    referenceParams.textDocument = params.textDocument;
+    referenceParams.position = params.position;
+    referenceParams.context.includeDeclaration = true;
+    return workspaceFolder->references(referenceParams, cancellationToken).value_or(std::vector<lsp::Location>{});
+}
+
 std::vector<lsp::Location> getReferencesForRenaming(
     WorkspaceFolder* workspaceFolder, const lsp::RenameParams& params, const LSPCancellationToken& cancellationToken)
 {
@@ -120,6 +130,11 @@ std::vector<lsp::Location> getReferencesForRenaming(
         }
     }
 
+    // Renaming a type function, from its declaration or a call from another type function's body (which parses as a
+    // global). Its type usages (`Name<T>`) fall through to find all references below.
+    if (findTypeFunctionAtPosition(*sourceModule, position))
+        return findAllReferencesForRenaming(workspaceFolder, params, cancellationToken);
+
     if (auto binding = getBinding(workspaceFolder, moduleName, position); binding && isGlobalBinding(*binding))
         throw JsonRpcException(lsp::ErrorCode::RequestFailed, "Cannot rename a global variable");
 
@@ -163,14 +178,7 @@ std::vector<lsp::Location> getReferencesForRenaming(
         return toLspLocations(params.textDocument.uri, *textDocument, references);
     }
     else
-    {
-        // Use findAllReferences to determine locations
-        lsp::ReferenceParams referenceParams{};
-        referenceParams.textDocument = params.textDocument;
-        referenceParams.position = params.position;
-        referenceParams.context.includeDeclaration = true;
-        return workspaceFolder->references(referenceParams, cancellationToken).value_or(std::vector<lsp::Location>{});
-    }
+        return findAllReferencesForRenaming(workspaceFolder, params, cancellationToken);
 }
 
 /// Checks if the given location refers to a quoted string literal that needs range adjustment during rename.

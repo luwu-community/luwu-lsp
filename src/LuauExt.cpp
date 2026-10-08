@@ -1443,6 +1443,76 @@ std::vector<Luau::Location> findTypeReferences(const Luau::SourceModule& source,
     return std::move(finder.result);
 }
 
+Luau::AstStatTypeFunction* findTypeFunctionStat(Luau::AstStatBlock* root, const Luau::Name& name)
+{
+    for (Luau::AstStat* stat : root->body)
+        if (auto* typeFunction = stat->as<Luau::AstStatTypeFunction>())
+            if (typeFunction->name.value == name)
+                return typeFunction;
+    return nullptr;
+}
+
+Luau::AstStatTypeFunction* findTypeFunctionAtPosition(const Luau::SourceModule& source, Luau::Position pos)
+{
+    for (Luau::AstStat* stat : source.root->body)
+        if (auto* typeFunction = stat->as<Luau::AstStatTypeFunction>())
+            if (typeFunction->nameLocation.containsClosed(pos))
+                return typeFunction;
+
+    auto ancestry = Luau::findAstAncestryOfPosition(source, pos, /* includeTypes= */ false);
+    if (ancestry.empty())
+        return nullptr;
+    auto* global = ancestry.back()->as<Luau::AstExprGlobal>();
+    if (!global)
+        return nullptr;
+    for (Luau::AstNode* node : ancestry)
+        if (node->is<Luau::AstStatTypeFunction>())
+            return findTypeFunctionStat(source.root, global->name.value);
+    return nullptr;
+}
+
+namespace
+{
+struct FindTypeFunctionCalls : public Luau::AstVisitor
+{
+    Luau::AstName name;
+    bool inTypeFunction = false;
+    std::vector<Luau::Location> result{};
+
+    explicit FindTypeFunctionCalls(Luau::AstName name)
+        : name(name)
+    {
+    }
+
+    bool visit(Luau::AstStatTypeFunction* node) override
+    {
+        inTypeFunction = true;
+        node->body->visit(this);
+        inTypeFunction = false;
+        return false;
+    }
+
+    bool visit(Luau::AstExprGlobal* node) override
+    {
+        if (inTypeFunction && node->name == name)
+            result.push_back(node->location);
+        return true;
+    }
+};
+} // namespace
+
+std::vector<Luau::Location> findTypeFunctionReferences(const Luau::SourceModule& source, Luau::AstStatTypeFunction* typeFunction)
+{
+    std::vector<Luau::Location> result = findTypeReferences(source, typeFunction->name.value, std::nullopt);
+    result.push_back(typeFunction->nameLocation);
+
+    FindTypeFunctionCalls finder(typeFunction->name);
+    source.root->visit(&finder);
+    result.insert(result.end(), finder.result.begin(), finder.result.end());
+
+    return result;
+}
+
 std::optional<Luau::Location> getLocation(Luau::TypeId type)
 {
     type = follow(type);

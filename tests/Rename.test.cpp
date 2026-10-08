@@ -814,4 +814,78 @@ local u = Unrelated():speak()
         });
 }
 
+TEST_CASE_FIXTURE(Fixture, "rename_type_function")
+{
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+type function wrap(t)
+    return t
+end
+type function rewrap(t)
+    return wrap(t)
+end
+type X = wrap<string>
+local y: wrap<number> = 1
+)";
+    std::string expected = R"(
+type function box(t)
+    return t
+end
+type function rewrap(t)
+    return box(t)
+end
+type X = box<string>
+local y: box<number> = 1
+)";
+    auto uri = newDocument("foo.luau", source);
+
+    // From the declaration, a call from another type function, and type usages
+    for (size_t occurrence : {0, 2, 3, 4}) // occurrence 1 is inside `rewrap`
+    {
+        CAPTURE(occurrence);
+        lsp::RenameParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = positionOf(source, "wrap", occurrence);
+        params.newName = "box";
+
+        auto result = workspace.rename(params, nullptr);
+        REQUIRE(result);
+        REQUIRE(result->changes.size() == 1);
+        CHECK_EQ(applyEdit(source, result->changes.begin()->second), expected);
+    }
+}
+
+TEST_CASE_FIXTURE(Fixture, "rename_exported_type_function_across_modules")
+{
+    ENABLE_NEW_SOLVER();
+
+    std::string libSource = R"(
+export type function wrap(t)
+    return t
+end
+return {}
+)";
+    std::string userSource = R"(
+local lib = require("lib.luau")
+local x: lib.wrap<string> = "hi"
+)";
+    auto lib = newDocument("lib.luau", libSource);
+    auto user = newDocument("user.luau", userSource);
+    workspace.checkStrict(workspace.fileResolver.getModuleName(user), nullptr);
+
+    for (bool fromUser : {false, true})
+    {
+        CAPTURE(fromUser);
+        lsp::RenameParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{fromUser ? user : lib};
+        params.position = positionOf(fromUser ? userSource : libSource, "wrap");
+        params.newName = "box";
+
+        auto result = workspace.rename(params, nullptr);
+        CHECK_EQ(renamedPositions(result, lib), std::vector{positionOf(libSource, "wrap")});
+        CHECK_EQ(renamedPositions(result, user), std::vector{positionOf(userSource, "wrap")});
+    }
+}
+
 TEST_SUITE_END();

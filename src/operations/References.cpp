@@ -372,6 +372,26 @@ std::vector<Reference> WorkspaceFolder::findAllTypeReferences(
     return result;
 }
 
+std::vector<Reference> WorkspaceFolder::findAllTypeFunctionReferences(
+    const Luau::ModuleName& moduleName, Luau::AstStatTypeFunction* typeFunction, const LSPCancellationToken& cancellationToken)
+{
+    auto sourceModule = frontend.getSourceModule(moduleName);
+    if (!sourceModule)
+        return {};
+
+    std::vector<Reference> result;
+    for (const auto& location : findTypeFunctionReferences(*sourceModule, typeFunction))
+        result.emplace_back(Reference{moduleName, location});
+
+    // Other modules can only use it as a prefixed type (`Module.Name<T>`)
+    if (typeFunction->exported)
+        for (auto& reference : findAllTypeReferences(moduleName, typeFunction->name.value, cancellationToken))
+            if (reference.moduleName != moduleName)
+                result.emplace_back(std::move(reference));
+
+    return result;
+}
+
 namespace
 {
 struct FindClassMemberReferences : public Luau::AstVisitor
@@ -743,6 +763,9 @@ lsp::ReferenceResult WorkspaceFolder::references(const lsp::ReferenceParams& par
     if (!sourceModule)
         throw JsonRpcException(lsp::ErrorCode::RequestFailed, "Unable to read source code");
 
+    if (auto* typeFunction = findTypeFunctionAtPosition(*sourceModule, position))
+        return processReferences(fileResolver, findAllTypeFunctionReferences(moduleName, typeFunction, cancellationToken));
+
     auto exprOrLocal = findExprOrLocalAtPositionClosed(*sourceModule, position);
     Luau::Symbol symbol;
     if (exprOrLocal.getLocal())
@@ -880,6 +903,11 @@ lsp::ReferenceResult WorkspaceFolder::references(const lsp::ReferenceParams& par
             if (auto importedModuleName = module->getModuleScope()->importedModules.find(prefix.value().value);
                 importedModuleName != module->getModuleScope()->importedModules.end())
             {
+                if (auto importedSourceModule = frontend.getSourceModule(importedModuleName->second))
+                    if (auto* typeFunction = findTypeFunctionStat(importedSourceModule->root, reference->name.value))
+                        return processReferences(
+                            fileResolver, findAllTypeFunctionReferences(importedModuleName->second, typeFunction, cancellationToken));
+
                 auto references = findAllTypeReferences(importedModuleName->second, reference->name.value, cancellationToken);
                 return processReferences(fileResolver, references);
             }
@@ -917,25 +945,31 @@ lsp::ReferenceResult WorkspaceFolder::references(const lsp::ReferenceParams& par
                 }
             }
 
+            // Find the actual declaration location
+            std::optional<Luau::Location> declarationLocation;
+            for (auto scope = Luau::findScopeAtPosition(*module, position); scope; scope = scope->parent)
+            {
+                if (auto location = scope->typeAliasNameLocations.find(reference->name.value); location != scope->typeAliasNameLocations.end())
+                {
+                    declarationLocation = location->second;
+                    break;
+                }
+            }
+
+            // Type functions aren't recorded as type alias names
+            if (!declarationLocation)
+                if (auto* typeFunction = findTypeFunctionStat(sourceModule->root, reference->name.value))
+                    return processReferences(fileResolver, findAllTypeFunctionReferences(moduleName, typeFunction, cancellationToken));
+
             auto references = findTypeReferences(*sourceModule, reference->name.value, std::nullopt);
             result.reserve(references.size() + 1);
             for (auto& location : references)
                 result.emplace_back(lsp::Location{
                     params.textDocument.uri, {textDocument->convertPosition(location.begin), textDocument->convertPosition(location.end)}});
 
-            // Find the actual declaration location
-            auto scope = Luau::findScopeAtPosition(*module, position);
-            while (scope)
-            {
-                if (auto location = scope->typeAliasNameLocations.find(reference->name.value); location != scope->typeAliasNameLocations.end())
-                {
-                    result.emplace_back(lsp::Location{params.textDocument.uri,
-                        {textDocument->convertPosition(location->second.begin), textDocument->convertPosition(location->second.end)}});
-                    break;
-                }
-
-                scope = scope->parent;
-            }
+            if (declarationLocation)
+                result.emplace_back(lsp::Location{params.textDocument.uri,
+                    {textDocument->convertPosition(declarationLocation->begin), textDocument->convertPosition(declarationLocation->end)}});
 
             return result;
         }

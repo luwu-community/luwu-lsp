@@ -153,6 +153,9 @@ public:
     std::vector<Reference> findAllFunctionReferences(const Luau::TypeId ty, const LSPCancellationToken& cancellationToken);
     std::vector<Reference> findAllTypeReferences(
         const Luau::ModuleName& moduleName, const Luau::Name& typeName, const LSPCancellationToken& cancellationToken);
+    // Every reference to the type function `typeFunction` declared in `moduleName`, across modules if it's exported.
+    std::vector<Reference> findAllTypeFunctionReferences(
+        const Luau::ModuleName& moduleName, Luau::AstStatTypeFunction* typeFunction, const LSPCancellationToken& cancellationToken);
     // Every declaration and `.name`/`:name` access of the class or trait member declared at `origin`, across modules.
     // Includes the members it's tied to through traits: the trait members it overrides or fulfills, and the members
     // of implementing classes that override or fulfill it.

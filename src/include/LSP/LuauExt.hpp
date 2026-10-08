@@ -103,6 +103,15 @@ Luau::ExprOrLocal findExprOrLocalAtPositionClosed(const Luau::SourceModule& sour
 std::vector<Luau::Location> findSymbolReferences(const Luau::SourceModule& source, Luau::Symbol symbol);
 std::vector<Luau::Location> findTypeReferences(const Luau::SourceModule& source, const Luau::Name& typeName, std::optional<const Luau::Name> prefix);
 
+// The top-level `type function` statement in `root` named `name`, if any.
+Luau::AstStatTypeFunction* findTypeFunctionStat(Luau::AstStatBlock* root, const Luau::Name& name);
+// The type function named under the cursor: at its declaration, or at a call to it from inside a type function body
+// (where other type functions are in scope as values, and parse as globals). Type usages (`Name<T>`) aren't included.
+Luau::AstStatTypeFunction* findTypeFunctionAtPosition(const Luau::SourceModule& source, Luau::Position pos);
+// Every reference to `typeFunction` within `source`: its declared name, its type usages, and calls to it from type
+// function bodies.
+std::vector<Luau::Location> findTypeFunctionReferences(const Luau::SourceModule& source, Luau::AstStatTypeFunction* typeFunction);
+
 std::optional<Luau::Location> getLocation(Luau::TypeId type);
 
 std::optional<Luau::Location> lookupTypeLocation(const Luau::Scope& deepScope, const Luau::Name& name);
