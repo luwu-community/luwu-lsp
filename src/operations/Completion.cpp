@@ -991,6 +991,11 @@ std::vector<lsp::CompletionItem> WorkspaceFolder::completion(const lsp::Completi
                 item.insertText = entry.insertText;
         }
 
+        // Luwu Traits (rfcs/classes/traits.md): a member a class's traits expect, offered in the class body, inserts its
+        // whole declaration (`public name: string`, or a `function ... end`)
+        if (entry.kind == Luau::AutocompleteEntryKind::Property && entry.insertText && result.context == Luau::AutocompleteContext::Keyword)
+            item.insertText = entry.insertText;
+
         if (entry.kind == Luau::AutocompleteEntryKind::RequirePath)
         {
             if (entry.insertText)
