@@ -1566,6 +1566,46 @@ TEST_CASE_FIXTURE(Fixture, "autocomplete_end_after_multiline_trait_parameters")
     CHECK_EQ(edits[0].newText, "        end\n");
 }
 
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_after_multiline_parenthesized_implements_list")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        class Person implements (
+            Named,
+            Aged
+        )
+            |
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+    triggerEndAutocompletion(*this, uri, marker);
+    auto edits = requireEndAutocompletionEdits(client.get(), uri);
+    REQUIRE_EQ(edits.size(), 1);
+    CHECK_EQ(edits[0].range, lsp::Range{{marker.line + 1, 0}, {marker.line + 1, 0}});
+    CHECK_EQ(edits[0].newText, "        end\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_not_inserted_inside_parenthesized_implements_list")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        class Person implements (
+            Named,
+            |
+        )
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+    triggerEndAutocompletion(*this, uri, marker);
+    CHECK(client->requestQueue.empty());
+}
+
 TEST_CASE_FIXTURE(Fixture, "autocomplete_end_for_incomplete_function")
 {
     client->globalConfig.completion.autocompleteEnd = true;

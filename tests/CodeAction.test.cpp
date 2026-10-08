@@ -3,6 +3,9 @@
 #include "RobloxTestConstants.h"
 #include "Platform/RobloxPlatform.hpp"
 
+LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(LuwuTraits)
+
 TEST_SUITE_BEGIN("CodeAction");
 
 TEST_CASE_FIXTURE(Fixture, "organise_imports_action_is_returned")
@@ -906,6 +909,133 @@ TEST_CASE_FIXTURE(RobloxFixture, "sourcemap_unknown_symbol_fix_suggests_string_r
         local ModuleB = require("./ModuleB")
         local x = ModuleB
     )"));
+}
+
+static std::vector<lsp::CodeAction> codeActionsAt(Fixture& fixture, const Uri& uri, size_t line, size_t column, std::vector<lsp::CodeActionKind> only = {})
+{
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{line, column}, {line, column}};
+    params.context.only = std::move(only);
+    return fixture.workspace.codeAction(params, nullptr).value_or(std::vector<lsp::CodeAction>{});
+}
+
+TEST_CASE_FIXTURE(Fixture, "parameter_list_layout_is_the_first_quick_fix_inside_the_parameters")
+{
+    auto uri = newDocument("test.luau", R"(
+local function foo(a: number, b: { x: number, y: number })
+    return a
+end
+)");
+
+    auto actions = codeActionsAt(*this, uri, 1, 22);
+    REQUIRE(!actions.empty());
+    CHECK_EQ(actions[0].title, "Put each parameter on its own line");
+    CHECK_EQ(actions[0].kind, lsp::CodeActionKind::QuickFix);
+    REQUIRE(actions[0].edit);
+    auto edits = actions[0].edit->changes.at(uri);
+    REQUIRE_EQ(edits.size(), 1);
+    CHECK_EQ(edits[0].range, lsp::Range{{1, 18}, {1, 58}});
+    CHECK_EQ(edits[0].newText, "(\n    a: number,\n    b: { x: number, y: number }\n)");
+
+    // A client asking only for refactorings still gets it, as a rewrite
+    auto rewrites = codeActionsAt(*this, uri, 1, 22, {lsp::CodeActionKind::RefactorRewrite});
+    auto rewrite = findCodeAction(rewrites, "Put each parameter on its own line");
+    REQUIRE(rewrite);
+    CHECK_EQ(rewrite->kind, lsp::CodeActionKind::RefactorRewrite);
+
+    // Outside the parameters there's nothing to lay out
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 2, 5), "Put each parameter on its own line"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "parameter_list_layout_puts_a_multiline_list_on_one_line")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("test.luau", R"(
+trait Element(
+    tag: string,
+    id: number
+)
+end
+)");
+
+    auto actions = codeActionsAt(*this, uri, 2, 5);
+    REQUIRE(!actions.empty());
+    CHECK_EQ(actions[0].title, "Put parameters on one line");
+    CHECK_EQ(actions[0].edit->changes.at(uri)[0].newText, "(tag: string, id: number)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "trait_list_layout_puts_each_trait_on_its_own_line")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("test.luau", R"(
+trait Named
+    name = "x"
+end
+trait Aged end
+class Person implements Named, Aged
+end
+trait Both needs Named, Aged end
+)");
+
+    for (auto [line, column] : std::vector<std::pair<size_t, size_t>>{{5, 15}, {5, 25}, {5, 34}})
+    {
+        auto actions = codeActionsAt(*this, uri, line, column);
+        REQUIRE(!actions.empty());
+        CHECK_EQ(actions[0].title, "Put each trait on its own line");
+        CHECK_EQ(actions[0].kind, lsp::CodeActionKind::QuickFix);
+        auto edits = actions[0].edit->changes.at(uri);
+        REQUIRE_EQ(edits.size(), 1);
+        CHECK_EQ(edits[0].range, lsp::Range{{5, 24}, {5, 35}});
+        CHECK_EQ(edits[0].newText, "(\n    Named,\n    Aged\n)");
+    }
+
+    auto needs = codeActionsAt(*this, uri, 7, 12);
+    REQUIRE(!needs.empty());
+    CHECK_EQ(needs[0].title, "Put each trait on its own line");
+    CHECK_EQ(needs[0].edit->changes.at(uri)[0].range, lsp::Range{{7, 17}, {7, 28}});
+
+    // The class name isn't part of the list
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 5, 8), "Put each trait on its own line"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "trait_list_layout_puts_a_parenthesized_list_on_one_line")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("test.luau", R"(
+trait Named end
+trait Aged end
+class Person implements (
+    Named,
+    Aged
+)
+end
+class Single implements (Named, Aged) end
+)");
+
+    auto actions = codeActionsAt(*this, uri, 4, 6);
+    REQUIRE(!actions.empty());
+    CHECK_EQ(actions[0].title, "Put traits on one line");
+    auto edits = actions[0].edit->changes.at(uri);
+    REQUIRE_EQ(edits.size(), 1);
+    CHECK_EQ(edits[0].range, lsp::Range{{3, 24}, {6, 1}});
+    CHECK_EQ(edits[0].newText, "Named, Aged");
+
+    // A parenthesized list on one line goes one trait per line, keeping its parentheses
+    auto single = codeActionsAt(*this, uri, 8, 30);
+    REQUIRE(!single.empty());
+    CHECK_EQ(single[0].title, "Put each trait on its own line");
+    CHECK_EQ(single[0].edit->changes.at(uri)[0].range, lsp::Range{{8, 24}, {8, 37}});
+    CHECK_EQ(single[0].edit->changes.at(uri)[0].newText, "(\n    Named,\n    Aged\n)");
 }
 
 TEST_SUITE_END();

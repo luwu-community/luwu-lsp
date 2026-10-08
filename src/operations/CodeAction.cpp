@@ -189,10 +189,49 @@ std::string detectIndentUnit(const TextDocument& textDocument)
     return "    ";
 }
 
-// Rewrites a parameter list between one-per-line (Rust style, closing paren back at the function's
-// own indentation) and all-on-one-line. Offered on any function, method or primary constructor.
-void generateParameterListWrapAction(const lsp::DocumentUri& uri, const Luau::Location& argLocation, const TextDocument& textDocument,
-    std::vector<lsp::CodeAction>& result)
+// A code action rewriting the layout of a comma-separated list. Offered first and as a quick fix when the client
+// takes quick fixes, so it heads the menu whenever the cursor is in a list; a client asking only for refactorings
+// gets it as a rewrite.
+void addListLayoutAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, std::string title, const lsp::Range& range,
+    std::string newText, std::vector<lsp::CodeAction>& result)
+{
+    lsp::CodeAction action;
+    action.title = std::move(title);
+    action.kind = context.wants(lsp::CodeActionKind::QuickFix) ? lsp::CodeActionKind::QuickFix : lsp::CodeActionKind::RefactorRewrite;
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::vector{lsp::TextEdit{range, std::move(newText)}});
+    action.edit = workspaceEdit;
+
+    result.push_back(action);
+}
+
+// `elements` one per line inside parentheses (Rust style, the closing paren back at the indentation of the line the
+// list starts on), with no trailing comma
+std::string layOutOnePerLine(const std::vector<std::string>& elements, const TextDocument& textDocument, size_t line)
+{
+    std::string baseIndent = getLineIndentation(textDocument, line);
+    std::string elementIndent = baseIndent + detectIndentUnit(textDocument);
+
+    std::string text = "(\n";
+    for (size_t i = 0; i < elements.size(); ++i)
+        text += elementIndent + elements[i] + (i + 1 == elements.size() ? "\n" : ",\n");
+    text += baseIndent + ")";
+    return text;
+}
+
+std::string layOutOnOneLine(const std::vector<std::string>& elements)
+{
+    std::string text;
+    for (size_t i = 0; i < elements.size(); ++i)
+        text += (i == 0 ? "" : ", ") + elements[i];
+    return text;
+}
+
+// Rewrites a parameter list between one-per-line and all-on-one-line. Offered on any function, method, or class or
+// trait primary constructor.
+void generateParameterListWrapAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const Luau::Location& argLocation,
+    const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
 {
     lsp::Range range = textDocument.convertLocation(argLocation);
     std::string text = textDocument.getText(range);
@@ -203,41 +242,103 @@ void generateParameterListWrapAction(const lsp::DocumentUri& uri, const Luau::Lo
     if (parameters.empty() || (parameters.size() == 1 && parameters[0].empty()))
         return;
 
-    const bool isMultiline = text.find('\n') != std::string::npos;
+    if (text.find('\n') != std::string::npos)
+        addListLayoutAction(uri, context, "Put parameters on one line", range, "(" + layOutOnOneLine(parameters) + ")", result);
+    else
+        addListLayoutAction(
+            uri, context, "Put each parameter on its own line", range, layOutOnePerLine(parameters, textDocument, argLocation.begin.line), result);
+}
 
-    std::string newText;
-    std::string title;
+// Luwu Traits (rfcs/classes/traits.md): a class's `implements` list or a trait's `needs` list, as written in the
+// source. The AST doesn't record the parentheses an `implements (A, B)` list may be wrapped in, so they're found here.
+struct TraitList
+{
+    Luau::Location keyword;
+    // From the first trait (or the opening paren) to the last trait (or the closing paren)
+    Luau::Location list;
+    // The traits themselves, without parentheses or surrounding whitespace
+    Luau::Location contents;
+};
 
-    if (isMultiline)
+std::optional<TraitList> findTraitList(
+    const std::optional<Luau::Location>& keyword, const Luau::AstArray<Luau::AstClassTraitRef>& refs, const TextDocument& textDocument)
+{
+    if (!keyword || refs.size == 0)
+        return std::nullopt;
+
+    const std::string text = textDocument.getText();
+    auto offsetOf = [&](const Luau::Position& position)
     {
-        title = "Put parameters on one line";
-        newText = "(";
-        for (size_t i = 0; i < parameters.size(); ++i)
-            newText += (i == 0 ? "" : ", ") + parameters[i];
-        newText += ")";
+        return textDocument.offsetAt(textDocument.convertPosition(position));
+    };
+    auto positionOf = [&](size_t offset)
+    {
+        return textDocument.convertPosition(textDocument.positionAt(offset));
+    };
+
+    TraitList traitList;
+    traitList.keyword = *keyword;
+    traitList.contents = Luau::Location{refs.data[0].location.begin, refs.data[refs.size - 1].location.end};
+    traitList.list = traitList.contents;
+
+    size_t open = skipWhitespaceAndComments(text, offsetOf(keyword->end));
+    if (open < text.size() && text[open] == '(' && open < offsetOf(traitList.contents.begin))
+    {
+        size_t close = skipWhitespaceAndComments(text, offsetOf(traitList.contents.end));
+        if (close >= text.size() || text[close] != ')')
+            return std::nullopt;
+
+        traitList.list = Luau::Location{positionOf(open), positionOf(close + 1)};
     }
+
+    return traitList;
+}
+
+// Rewrites an `implements` or `needs` list between one trait per line, in parentheses, and all on one line without
+// them.
+void generateTraitListWrapAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const TraitList& traitList,
+    const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    lsp::Range range = textDocument.convertLocation(traitList.list);
+    auto traits = splitParameters(textDocument.getText(textDocument.convertLocation(traitList.contents)));
+
+    if (textDocument.getText(range).find('\n') != std::string::npos)
+        addListLayoutAction(uri, context, "Put traits on one line", range, layOutOnOneLine(traits), result);
     else
     {
-        title = "Put each parameter on its own line";
-        std::string baseIndent = getLineIndentation(textDocument, argLocation.begin.line);
-        std::string parameterIndent = baseIndent + detectIndentUnit(textDocument);
+        // Only the list is replaced, so `implements A, B` keeps its space and becomes `implements (`
+        std::string newText = layOutOnePerLine(traits, textDocument, traitList.keyword.begin.line);
+        addListLayoutAction(uri, context, "Put each trait on its own line", range, newText, result);
+    }
+}
 
-        newText = "(\n";
-        for (size_t i = 0; i < parameters.size(); ++i)
-            newText += parameterIndent + parameters[i] + (i + 1 == parameters.size() ? "\n" : ",\n");
-        newText += baseIndent + ")";
+// The `implements` or `needs` list `position` sits in, keyword included
+struct FindTraitListAtPosition : Luau::AstVisitor
+{
+    Luau::Position targetPosition;
+    const TextDocument& textDocument;
+    std::optional<TraitList> result;
+
+    FindTraitListAtPosition(const Luau::Position& position, const TextDocument& textDocument)
+        : targetPosition(position)
+        , textDocument(textDocument)
+    {
     }
 
-    lsp::CodeAction action;
-    action.title = title;
-    action.kind = lsp::CodeActionKind::RefactorRewrite;
+    bool visit(Luau::AstStatClass* node) override
+    {
+        if (!node->location.containsClosed(targetPosition))
+            return false;
 
-    lsp::WorkspaceEdit workspaceEdit;
-    workspaceEdit.changes.emplace(uri, std::vector{lsp::TextEdit{range, newText}});
-    action.edit = workspaceEdit;
-
-    result.push_back(action);
-}
+        for (auto traitList : {findTraitList(node->implementsLocation, node->implements, textDocument),
+                 findTraitList(node->needsLocation, node->needs, textDocument)})
+        {
+            if (traitList && Luau::Location{traitList->keyword.begin, traitList->list.end}.containsClosed(targetPosition))
+                result = traitList;
+        }
+        return true;
+    }
+};
 
 // True when `position` sits inside the body of some function within `classStat` -- a method body, or
 // a function expression used as a field's default value. Statements live there, so refactorings that
@@ -953,6 +1054,20 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
 
     auto requestRange = textDocument->convertRange(params.range);
 
+    // Laying out the parameter or trait list under the cursor goes first, so it heads the menu
+    if (params.context.wants(lsp::CodeActionKind::QuickFix) || params.context.wants(lsp::CodeActionKind::RefactorRewrite))
+    {
+        FindParameterListAtPosition parameterListFinder(requestRange.begin);
+        sourceModule->root->visit(&parameterListFinder);
+        if (parameterListFinder.result)
+            generateParameterListWrapAction(params.textDocument.uri, params.context, *parameterListFinder.result, *textDocument, result);
+
+        FindTraitListAtPosition traitListFinder(requestRange.begin, *textDocument);
+        sourceModule->root->visit(&traitListFinder);
+        if (traitListFinder.result)
+            generateTraitListWrapAction(params.textDocument.uri, params.context, *traitListFinder.result, *textDocument, result);
+    }
+
     // Quick fixes from lint warnings
     if (params.context.wants(lsp::CodeActionKind::QuickFix))
     {
@@ -1189,11 +1304,6 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
 
     if (params.context.wants(lsp::CodeActionKind::RefactorRewrite))
     {
-        FindParameterListAtPosition parameterListFinder(requestRange.begin);
-        sourceModule->root->visit(&parameterListFinder);
-        if (parameterListFinder.result)
-            generateParameterListWrapAction(params.textDocument.uri, *parameterListFinder.result, *textDocument, result);
-
         if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, requestRange.begin))
             generateClassAccessSpecifierToggle(params.textDocument.uri, classStat, *textDocument, result);
 

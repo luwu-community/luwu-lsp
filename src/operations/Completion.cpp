@@ -141,6 +141,16 @@ void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
         for (const auto& ref : statClass->needs)
             headerEnd = std::max(headerEnd, ref.location.end);
 
+        // A parenthesized `implements (A, B)` or `needs (A, B)` list ends at its closing paren, which the AST doesn't
+        // record. Nothing in a class body starts with `)`, so one right after the last trait closes the list.
+        if (statClass->implements.size > 0 || statClass->needs.size > 0)
+        {
+            const std::string text = document->getText();
+            size_t next = skipWhitespaceAndComments(text, document->offsetAt(document->convertPosition(headerEnd)));
+            if (next < text.size() && text[next] == ')')
+                headerEnd = document->convertPosition(document->positionAt(next + 1));
+        }
+
         if (position < headerEnd)
             return;
         bodyStartLine = headerEnd.line;

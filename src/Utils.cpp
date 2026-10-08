@@ -207,6 +207,45 @@ void trim(std::string& str)
     trim_end(str);
 }
 
+// The offset of the first character at or after `offset` that isn't whitespace or part of a comment
+size_t skipWhitespaceAndComments(const std::string& text, size_t offset)
+{
+    while (offset < text.size())
+    {
+        if (isspace(static_cast<unsigned char>(text[offset])))
+        {
+            ++offset;
+            continue;
+        }
+
+        if (text.compare(offset, 2, "--") != 0)
+            break;
+
+        offset += 2;
+
+        // A long comment, `--[[ ]]` or `--[==[ ]==]`
+        if (offset < text.size() && text[offset] == '[')
+        {
+            size_t level = offset + 1;
+            while (level < text.size() && text[level] == '=')
+                ++level;
+
+            if (level < text.size() && text[level] == '[')
+            {
+                std::string closing = "]" + std::string(level - offset - 1, '=') + "]";
+                size_t end = text.find(closing, level + 1);
+                offset = end == std::string::npos ? text.size() : end + closing.size();
+                continue;
+            }
+        }
+
+        size_t newline = text.find('\n', offset);
+        offset = newline == std::string::npos ? text.size() : newline + 1;
+    }
+
+    return offset;
+}
+
 std::string toLower(std::string str)
 {
     std::transform(str.begin(), str.end(), str.begin(),
