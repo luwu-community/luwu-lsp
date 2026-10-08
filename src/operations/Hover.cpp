@@ -8,6 +8,7 @@
 #include "Luau/BuiltinDefinitions.h"
 #include "Luau/Module.h"
 #include "Luau/ToString.h"
+#include "Luau/TypeUtils.h"
 #include "LSP/LuauExt.hpp"
 #include "LSP/DocumentationParser.hpp"
 #include "LSP/Hovers.hpp"
@@ -1453,6 +1454,29 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             typeName = ref->name.value;
             typeFun = scope->lookupType(ref->name.value);
         }
+
+        // `literal<T>` isn't bound in any scope: the type checker resolves it by name
+        if (!typeFun && Luau::isLiteralTypeReference(*scope, ref))
+        {
+            std::string base = "T";
+            if (ref->parameters.size == 1 && ref->parameters.data[0].type)
+                if (auto baseTy = module->astResolvedTypes.find(ref->parameters.data[0].type))
+                    base = Luau::toString(Luau::follow(*baseTy));
+
+            std::string docs =
+                "A literal of `" + base + "`: the value as written, like `\"-f\"` or `true`, rather than any `" + base + "`."
+                " Literals exist for strings and booleans.\n\n"
+                "On a parameter, callers have to pass a literal, and the function body sees `" + base + "`; on a local, the local has"
+                " the literal's own type. Write `literal<S>` with a generic `S` to infer `S` as the literal (`sym(\"foo\")` gives"
+                " `Symbol<\"foo\">`).\n\n"
+                "Passed to a type function (`Validate<literal<string>>`), the type function checks each argument as written and can"
+                " reject it with `types.error(message)`. A type alias can name either form for use in parameters.";
+            return lsp::Hover{
+                {lsp::MarkupKind::Markdown, codeBlock(codeLanguage, "literal<" + base + ">") + "\n" + kDocumentationBreaker + docs},
+                textDocument->convertLocation(ref->location)
+            };
+        }
+
         if (!typeFun)
             return std::nullopt;
         typeAliasInformation = std::make_pair(typeName, *typeFun);
