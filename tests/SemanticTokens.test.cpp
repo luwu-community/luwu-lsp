@@ -7,7 +7,7 @@ LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuIfLocal)
 LUAU_FASTFLAG(LuwuTableComprehensions)
-LUAU_FASTFLAG(DebugLuwuDoExpr)
+LUAU_FASTFLAG(LuwuDoExpr)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -312,7 +312,7 @@ TEST_CASE_FIXTURE(Fixture, "if_local_when_has_keyword_semantic_token")
 
 TEST_CASE_FIXTURE(Fixture, "do_expression_give_has_keyword_semantic_token")
 {
-    ScopedFastFlag doExpr{FFlag::DebugLuwuDoExpr, true};
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
     ENABLE_NEW_SOLVER();
 
     std::string source = "local a = do\n"
@@ -328,7 +328,7 @@ TEST_CASE_FIXTURE(Fixture, "variables_named_give_and_when_are_not_keywords")
 {
     ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};
     ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
-    ScopedFastFlag doExpr{FFlag::DebugLuwuDoExpr, true};
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
     ENABLE_NEW_SOLVER();
 
     std::string source = "local give = 1\n"
@@ -339,6 +339,32 @@ TEST_CASE_FIXTURE(Fixture, "variables_named_give_and_when_are_not_keywords")
     checkNotKeywordToken(tokens, wordPosition(source, 0, "give"));
     checkNotKeywordToken(tokens, wordPosition(source, 1, "when"));
     checkNotKeywordToken(tokens, wordPosition(source, 1, "give"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "moonwave_tags_at_the_start_of_doc_lines")
+{
+    auto source = R"(
+        --- Adds things
+        --- @param count how many
+        --- reads @std/fs, which isn't a tag
+        -- @param not a doc comment
+        local function add(count: number) end
+    )";
+
+    auto uri = newDocument("foo.luau", source);
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+    workspace.checkStrict(moduleName, nullptr);
+
+    std::vector<SemanticToken> tokens;
+    addMoonwaveTagTokens(tokens, workspace.frontend.getSourceModule(moduleName), workspace.fileResolver.getTextDocument(uri));
+
+    REQUIRE_EQ(tokens.size(), 2);
+    CHECK_EQ(tokens[0].start.line, 2);
+    CHECK_EQ(tokens[0].start.column, 12);
+    CHECK_EQ(tokens[0].end.column, 18);
+    CHECK_EQ(tokens[0].tokenType, lsp::SemanticTokenTypes::Decorator);
+    CHECK_EQ(tokens[1].start.column, 19);
+    CHECK_EQ(tokens[1].tokenType, lsp::SemanticTokenTypes::Parameter);
 }
 
 TEST_SUITE_END();

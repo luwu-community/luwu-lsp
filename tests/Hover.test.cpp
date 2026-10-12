@@ -7,6 +7,7 @@
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FASTFLAG(LuwuTraits)
+LUAU_FASTFLAG(LuwuTableFunctionFields)
 LUAU_FASTFLAG(DebugLuwuUserDefinedRefinements)
 LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
 
@@ -134,6 +135,31 @@ TEST_CASE_FIXTURE(Fixture, "show_string_utf8_characters_on_hover")
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
     CHECK_EQ(result->contents.value, codeBlock("luwu", "string (22 bytes, 19 characters)"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "named_function_in_a_table_literal_hovers_as_the_function")
+{
+    ScopedFastFlag luwuTableFunctionFields{FFlag::LuwuTableFunctionFields, true};
+
+    // `function twice(...)` here means `twice = function(...)`, and the key `twice` lies inside the function's span
+    auto source = R"(
+        local t = {
+            function twice(n: number): number
+                return n * 2
+            end,
+        }
+    )";
+
+    auto uri = newDocument("foo.luwu", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{2, 23};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_MESSAGE(result->contents.value.find("string") == std::string::npos, result->contents.value);
+    CHECK_MESSAGE(result->contents.value.find("number") != std::string::npos, result->contents.value);
 }
 
 TEST_CASE_FIXTURE(Fixture, "basic_type_alias_declaration")
@@ -313,6 +339,180 @@ TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_a_type_table"
     auto result = workspace.hover(params, nullptr);
     REQUIRE(result);
     CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kHoverDocumentationBreaker + "This is a member bar\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "documentation_to_the_right_of_a_property")
+{
+    auto source = R"(
+        type Foo = {
+            bar: string, --- This is a member bar
+            baz: number, -- not documentation
+        }
+        local x: Foo
+        local y = x.bar
+        local z = x.baz
+    )";
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{6, 21};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "string") + kHoverDocumentationBreaker + "This is a member bar\n");
+
+    params.position = lsp::Position{7, 21};
+    result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_EQ(result->contents.value, codeBlock("luwu", "number"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "documentation_a_type_function_put_in_metadata")
+{
+    // a rebuilt type keeps its source's docs; a type function can set its own, and only `---` and block comments count
+    auto source = R"(
+        type function Redoc(t)
+            local out = types.copy(t)
+            out:setmetadata({ comments = {
+                { prefix = "--", message = "not documentation", location = "above" },
+                { prefix = "---", message = "Rewritten by Redoc", location = "above" },
+            } })
+            return out
+        end
+
+        --- The original
+        type Foo = { bar: string }
+        type Redone = Redoc<Foo>
+        local x: Redone
+        local y = x
+    )";
+
+    auto uri = newDocument("foo.luwu", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{14, 18};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    bool documented = result->contents.value.find("Rewritten by Redoc") != std::string::npos;
+    bool notTheComment = result->contents.value.find("not documentation") == std::string::npos;
+    CHECK_MESSAGE(documented, result->contents.value);
+    CHECK_MESSAGE(notTheComment, result->contents.value);
+}
+
+TEST_CASE_FIXTURE(Fixture, "doc_references_a_type_function_writes_link_in_the_hover")
+{
+    // resolved where the type function was called, and the binding line isn't shown
+    auto source = R"(
+        local fs = { read = 1 }
+
+        type function Documented(t)
+            t:setmetadata({ comments = {
+                { prefix = "---", message = "Read with [reader]." },
+                { prefix = "---", message = "[reader = fs.read]" },
+            } })
+            return t
+        end
+
+        type Doc = Documented<{ x: number }>
+        local x: Doc
+        local y = x
+    )";
+
+    auto uri = newDocument("foo.luwu", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{14, 18};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+    // `fs.read`'s declaration, line 2 column 22 (the comma may come out percent-encoded)
+    bool linked = hover.find("Read with [reader](" + uri.toString() + "#L2") != std::string::npos;
+    bool bindingHidden = hover.find("reader = fs.read") == std::string::npos;
+    CHECK_MESSAGE(linked, hover);
+    CHECK_MESSAGE(bindingHidden, hover);
+}
+
+TEST_CASE_FIXTURE(Fixture, "a_method_on_a_union_shows_one_signature")
+{
+    // each member has its own copy of `check`; the hover shows the one signature the call is checked against
+    auto source = R"(
+        type A = { tag: "a", check: (self: A, arg: number) -> boolean }
+        type B = { tag: "b", check: (self: B, arg: number) -> boolean }
+        local v: A | B = nil :: any
+        local ok = v:check(1)
+    )";
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{4, 22};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+    size_t first = hover.find("arg: number");
+    bool once = first != std::string::npos && hover.find("arg: number", first + 1) == std::string::npos;
+    CHECK_MESSAGE(once, hover);
+}
+
+TEST_CASE_FIXTURE(Fixture, "an_aliases_own_docs_come_above_its_types")
+{
+    auto source = R"(
+        type function Same(t)
+            return t
+        end
+
+        --- The base
+        type Base = { x: number }
+        --- The library
+        type SomeLibrary = Same<Base>
+    )";
+
+    auto uri = newDocument("foo.luwu", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{8, 16};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+    size_t library = hover.find("The library");
+    size_t base = hover.find("The base");
+    CHECK_MESSAGE(library != std::string::npos, hover);
+    CHECK_MESSAGE(base != std::string::npos, hover);
+    CHECK_MESSAGE(library < base, hover);
+}
+
+TEST_CASE_FIXTURE(Fixture, "doc_references_to_builtins_link_to_the_library_docs")
+{
+    // a builtin has no source to link to, so its library's docs; a reference that doesn't resolve reads as code
+    auto source = R"(
+        --- Splits with [string.split], prints with [print], not [nope]. See [the docs][table].
+        local function f() end
+        f()
+    )";
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{3, 8};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    const std::string& hover = result->contents.value;
+    CHECK_MESSAGE(hover.find("[string.split](https://luau.org/library#string-library)") != std::string::npos, hover);
+    CHECK_MESSAGE(hover.find("[print](https://luau.org/library#global-functions)") != std::string::npos, hover);
+    CHECK_MESSAGE(hover.find("not `nope`.") != std::string::npos, hover);
+    CHECK_MESSAGE(hover.find("[the docs](https://luau.org/library#table-library)") != std::string::npos, hover);
 }
 
 TEST_CASE_FIXTURE(Fixture, "includes_documentation_for_a_member_of_a_type_table_when_hovering_over_property")

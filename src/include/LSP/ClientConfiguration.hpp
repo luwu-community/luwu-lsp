@@ -126,9 +126,21 @@ struct ClientHoverConfiguration
     lsp::HoverVerbosity verbosity = lsp::HoverVerbosity::Medium;
     // Luwu Traits: whether a hover expands the traits of what it's about, rather than only naming them
     bool showTraits = false;
+    // Luwu: how a hover prints types, as the options `types.format` takes (`{ "expand": "all", "comments": 60 }`), over
+    // the hover's own defaults (multiline, property comments 80 wide)
+    nlohmann::json typeFormat = nlohmann::json::object();
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
-    ClientHoverConfiguration, enabled, showTableKinds, multilineFunctionDefinitions, strictDatamodelTypes, includeStringLength, verbosity, showTraits);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientHoverConfiguration, enabled, showTableKinds, multilineFunctionDefinitions,
+    strictDatamodelTypes, includeStringLength, verbosity, showTraits, typeFormat);
+
+// Luwu: how doc comments read in the editor
+struct ClientDocumentationConfiguration
+{
+    // Colour Moonwave's tags (`--- @param name ...`) in Luau files, through semantic tokens; the grammar doesn't colour
+    // `@` at all, so `@std/fs` in prose isn't mistaken for a tag. Never in Luwu files: Moonwave can't parse Luwu.
+    bool highlightMoonwaveTags = true;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientDocumentationConfiguration, highlightMoonwaveTags);
 
 enum struct ImportRequireStyle
 {
@@ -338,6 +350,7 @@ struct ClientConfiguration
     ClientTypesConfiguration types{};
     ClientInlayHintsConfiguration inlayHints{};
     ClientHoverConfiguration hover{};
+    ClientDocumentationConfiguration documentation{};
     ClientCompletionConfiguration completion{};
     ClientSignatureHelpConfiguration signatureHelp{};
     ClientRequireConfiguration require{};
@@ -348,4 +361,4 @@ struct ClientConfiguration
     ClientPluginConfiguration plugins{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientConfiguration, autocompleteEnd, fileExtensions, ignoreGlobs, platform, sourcemap, diagnostics,
-    types, inlayHints, hover, completion, signatureHelp, require, index, fflags, bytecode, format, plugins);
+    types, inlayHints, hover, documentation, completion, signatureHelp, require, index, fflags, bytecode, format, plugins);

@@ -1758,6 +1758,57 @@ TEST_CASE_FIXTURE(Fixture, "autocomplete_do_in_while_statement_with_condition")
     CHECK_EQ(edits[1].newText, "        end\n");
 }
 
+TEST_CASE_FIXTURE(Fixture, "autocomplete_do_after_a_while_loops_when_chain")
+{
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        while ready when ok
+        |
+    )");
+
+    auto uri = newDocument("foo.luwu", source);
+
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    params.context = lsp::CompletionContext{};
+    params.context->triggerCharacter = "\n";
+
+    auto result = workspace.completion(params, nullptr);
+    auto edits = requireEndAutocompletionEdits(client.get(), uri);
+    REQUIRE_EQ(edits.size(), 2);
+    CHECK_EQ(edits[0].range, lsp::Range{{1, 27}, {1, 27}});
+    CHECK_EQ(edits[0].newText, " do");
+    CHECK_EQ(edits[1].newText, "        end\n");
+}
+
+// A `for` loop's `when` chain is stored as an `if` around its body, but what follows the chain is still `do`
+TEST_CASE_FIXTURE(Fixture, "autocomplete_do_after_a_for_loops_when_chain")
+{
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        for _, v in t when v.ok
+        |
+    )");
+
+    auto uri = newDocument("foo.luwu", source);
+
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    params.context = lsp::CompletionContext{};
+    params.context->triggerCharacter = "\n";
+
+    auto result = workspace.completion(params, nullptr);
+    auto edits = requireEndAutocompletionEdits(client.get(), uri);
+    REQUIRE_EQ(edits.size(), 2);
+    CHECK_EQ(edits[0].range, lsp::Range{{1, 31}, {1, 31}});
+    CHECK_EQ(edits[0].newText, " do");
+    CHECK_EQ(edits[1].newText, "        end\n");
+}
+
 TEST_CASE_FIXTURE(Fixture, "autocomplete_do_in_for_loop")
 {
     client->globalConfig.completion.autocompleteEnd = true;

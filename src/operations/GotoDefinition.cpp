@@ -94,6 +94,17 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
     if (!sourceModule || !module)
         return result;
 
+    // Luwu doc references: a name in a doc comment's reference (`[fs.file.read]`) goes to where it's declared
+    for (const Luau::DocRefTarget& target : module->docRefTargets)
+    {
+        if (target.location.containsClosed(position))
+        {
+            if (auto location = docRefTargetLocation(target))
+                result.push_back(*location);
+            return result;
+        }
+    }
+
     // Luwu Attributes (rfcs/attributes-for-types-variables-fields-classes.md): `use = "dog"` in a
     // `@[deprecated]` goes to `dog`.
     if (auto attribute = findAttributeAtPosition(*sourceModule, position); attribute && attribute->field == "use" && attribute->fieldValue)

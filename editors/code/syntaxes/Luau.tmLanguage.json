@@ -3,7 +3,8 @@
     "Luau grammar for .luau files and ```luau code blocks. It is Luwu.tmLanguage.json with the Luwu-only syntax taken out,",
     "so keyword-like names that are plain identifiers in Luau (`none`, `const` class fields, ...) and Luwu-only directives (`--!trust`) are not highlighted.",
     "Keep it in sync with Luwu.tmLanguage.json by hand: a change to shared syntax goes in both files.",
-    "The shared rules originally come from https://github.com/JohnnyMorganz/Luau.tmLanguage/blob/main/Luau.YAML-tmLanguage"
+    "The shared rules originally come from https://github.com/JohnnyMorganz/Luau.tmLanguage/blob/main/Luau.YAML-tmLanguage",
+    "Luwu has since made edits to make the grammar more accurate, so it no longer reflects that repository: change it here, not upstream."
   ],
   "name": "Luau",
   "scopeName": "source.luau",
@@ -682,27 +683,27 @@
       "patterns": [
         {
           "name": "support.function.luau",
-          "match": "(?<![^.]\\.|:)\\b(assert|collectgarbage|error|gcinfo|getfenv|getmetatable|ipairs|loadstring|newproxy|next|pairs|pcall|print|rawequal|rawset|require|select|setfenv|setmetatable|tonumber|tostring|type|typeof|unpack|xpcall)\\b"
+          "match": "(?<![^.]\\.|:)\\b(assert|collectgarbage|error|gcinfo|getfenv|getmetatable|ipairs|loadstring|newproxy|next|pairs|pcall|print|rawequal|rawset|require|select|setfenv|setmetatable|tonumber|tostring|type|typeof|unpack|xpcall)\\b(?!\\s*=(?!=))"
         },
         {
           "name": "constant.language.luau",
-          "match": "(?<![^.]\\.|:)\\b(_G|_VERSION)\\b"
+          "match": "(?<![^.]\\.|:)\\b(_G|_VERSION)\\b(?!\\s*=(?!=))"
         },
         {
           "name": "support.function.luau",
-          "match": "(?<![^.]\\.|:)\\b(bit32\\.(?:arshift|band|bnot|bor|btest|bxor|extract|lrotate|lshift|replace|rrotate|rshift|countlz|countrz|byteswap)|coroutine\\.(?:create|isyieldable|resume|running|status|wrap|yield|close)|debug\\.(?:info|loadmodule|profilebegin|profileend|traceback)|integer\\.(?:add|arshift|band|bnot|bor|bswap|btest|bxor|clamp|countlz|countrz|create|div|extract|fromstring|ge|gt|idiv|le|lrotate|lshift|lt|max|min|mod|mul|neg|rem|replace|rrotate|rshift|sub|tonumber|udiv|uge|ugt|ule|ult|urem)|math\\.(?:abs|acos|asin|atan|atan2|ceil|clamp|cos|cosh|deg|exp|floor|fmod|frexp|isfinite|isinf|isnan|ldexp|lerp|log|log10|map|max|min|modf|noise|pow|rad|random|randomseed|round|sign|sin|sinh|sqrt|tan|tanh)|os\\.(?:clock|date|difftime|time)|string\\.(?:byte|char|find|format|gmatch|gsub|len|lower|match|pack|packsize|rep|reverse|split|sub|unpack|upper)|table\\.(?:concat|create|find|foreach|foreachi|getn|insert|maxn|move|pack|remove|sort|unpack|clear|freeze|isfrozen|clone)|task\\.(?:spawn|synchronize|desynchronize|wait|defer|delay)|utf8\\.(?:char|codepoint|codes|graphemes|len|nfcnormalize|nfdnormalize|offset)|buffer\\.(?:create|fromstring|tostring|len|readbits|readi8|readu8|readi16|readu16|readi32|readu32|readinteger|readf32|readf64|writebits|writei8|writeu8|writei16|writeu16|writei32|writeu32|writeinteger|writef32|writef64|readstring|writestring|copy|fill)|vector\\.(?:abs|angle|ceil|clamp|create|cross|dot|floor|lerp|magnitude|max|min|normalize|sign))\\b"
+          "match": "(?<![^.]\\.|:)\\b(bit32\\.(?:arshift|band|bnot|bor|btest|bxor|extract|lrotate|lshift|replace|rrotate|rshift|countlz|countrz|byteswap)|coroutine\\.(?:create|isyieldable|resume|running|status|wrap|yield|close)|debug\\.(?:info|loadmodule|profilebegin|profileend|traceback)|integer\\.(?:add|arshift|band|bnot|bor|bswap|btest|bxor|clamp|countlz|countrz|create|div|extract|fromstring|ge|gt|idiv|le|lrotate|lshift|lt|max|min|mod|mul|neg|rem|replace|rrotate|rshift|sub|tonumber|udiv|uge|ugt|ule|ult|urem)|math\\.(?:abs|acos|asin|atan|atan2|ceil|clamp|cos|cosh|deg|exp|floor|fmod|frexp|isfinite|isinf|isnan|ldexp|lerp|log|log10|map|max|min|modf|noise|pow|rad|random|randomseed|round|sign|sin|sinh|sqrt|tan|tanh)|os\\.(?:clock|date|difftime|time)|string\\.(?:byte|char|find|format|gmatch|gsub|len|lower|match|pack|packsize|rep|reverse|split|sub|unpack|upper)|table\\.(?:concat|create|find|foreach|foreachi|getn|insert|maxn|move|pack|remove|sort|unpack|clear|freeze|isfrozen|clone)|task\\.(?:spawn|synchronize|desynchronize|wait|defer|delay)|utf8\\.(?:char|codepoint|codes|graphemes|len|nfcnormalize|nfdnormalize|offset)|buffer\\.(?:create|fromstring|tostring|len|readbits|readi8|readu8|readi16|readu16|readi32|readu32|readinteger|readf32|readf64|writebits|writei8|writeu8|writei16|writeu16|writei32|writeu32|writeinteger|writef32|writef64|readstring|writestring|copy|fill)|vector\\.(?:abs|angle|ceil|clamp|create|cross|dot|floor|lerp|magnitude|max|min|normalize|sign))\\b(?!\\s*=(?!=))"
         },
         {
           "name": "support.constant.luau",
-          "match": "(?<![^.]\\.|:)\\b(bit32|buffer|coroutine|debug|integer(\\.(maxsigned|minsigned))?|math(\\.(huge|pi|nan|e|phi|sqrt2|tau))?|os|string|table|task|utf8(\\.charpattern)?|vector(\\.(one|zero))?)\\b"
+          "match": "(?<![^.]\\.|:)\\b(bit32|buffer|coroutine|debug|integer(\\.(maxsigned|minsigned))?|math(\\.(huge|pi|nan|e|phi|sqrt2|tau))?|os|string|table|task|utf8(\\.charpattern)?|vector(\\.(one|zero))?)\\b(?!\\s*=(?!=))"
         },
         {
           "name": "support.function.luau",
-          "match": "(?<![^.]\\.|:)\\b(delay|DebuggerManager|elapsedTime|PluginManager|printidentity|settings|spawn|stats|tick|time|UserSettings|version|wait|warn)\\b"
+          "match": "(?<![^.]\\.|:)\\b(delay|DebuggerManager|elapsedTime|PluginManager|printidentity|settings|spawn|stats|tick|time|UserSettings|version|wait|warn)\\b(?!\\s*=(?!=))"
         },
         {
           "name": "constant.language.luau",
-          "match": "(?<![^.]\\.|:)\\b(game|plugin|shared|script|workspace|Enum(?:\\.\\w+){0,2})\\b"
+          "match": "(?<![^.]\\.|:)\\b(game|plugin|shared|script|workspace|Enum(?:\\.\\w+){0,2})\\b(?!\\s*=(?!=))"
         }
       ]
     },
@@ -896,10 +897,7 @@
               }
             },
             {
-              "include": "#doc_comment_tags"
-            },
-            {
-              "comment": "Comment prose. Stops at `]`, a backtick and `@` so the end delimiter, fences and doc tags can still match.",
+              "comment": "Comment prose. Stops at `]`, a backtick and `@` so the end delimiter and fences can still match. `@` isn't coloured: Moonwave tags are semantic tokens, behind `documentation.highlightMoonwaveTags`, so `@std/fs` in prose isn't one.",
               "match": "[^\\]`@]+",
               "name": "comment.block.luau"
             },
@@ -948,38 +946,38 @@
           ]
         },
         {
-          "name": "comment.line.double-dash.documentation.luau",
-          "begin": "---",
-          "end": "\\n",
+          "comment": "A code fence across `---` doc lines, highlighted as Luau like one in a `--[=[ ]=]` block. Each line's `---` stays a comment; the fence ends at a `---` line that starts with ```.",
+          "begin": "^\\s*(---)\\s*(```(?:luau?)?)\\s*$",
+          "while": "^\\s*(---)(?!\\s*```)",
+          "beginCaptures": {
+            "1": {
+              "name": "comment.line.double-dash.documentation.luau"
+            },
+            "2": {
+              "name": "comment.block.luau"
+            }
+          },
+          "whileCaptures": {
+            "1": {
+              "name": "comment.line.double-dash.documentation.luau"
+            }
+          },
+          "contentName": "meta.embedded.block.luau",
           "patterns": [
             {
-              "include": "#doc_comment_tags"
+              "include": "source.luau"
             }
           ]
+        },
+        {
+          "name": "comment.line.double-dash.documentation.luau",
+          "begin": "---",
+          "end": "\\n"
         },
         {
           "name": "comment.line.double-dash.luau",
           "begin": "--",
           "end": "\\n"
-        }
-      ]
-    },
-    "doc_comment_tags": {
-      "patterns": [
-        {
-          "name": "storage.type.class.luadoc.luau",
-          "match": "@\\w+"
-        },
-        {
-          "match": "((?<=[\\s*!\\/])[\\\\@]param)(?:\\s)+(\\b\\w+\\b)",
-          "captures": {
-            "1": {
-              "name": "storage.type.class.luadoc.luau"
-            },
-            "2": {
-              "name": "variable.parameter.luau"
-            }
-          }
         }
       ]
     },

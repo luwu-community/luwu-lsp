@@ -14,6 +14,7 @@
 #include <unordered_set>
 
 LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuwuDoExpr)
 
 namespace
 {
@@ -961,6 +962,154 @@ void generateBindingKeywordToggle(const lsp::DocumentUri& uri, Luau::AstStat* st
         addSingleEditAction(uri, std::string("Switch to '") + to + "'", lsp::CodeActionKind::RefactorRewrite, false, {*edit}, std::nullopt,
             result);
 }
+
+// Luwu Do Expressions: the keyword of a statement that leaves the block, or null
+const char* leaveKeyword(Luau::AstStat* stat)
+{
+    if (stat->is<Luau::AstStatReturn>())
+        return "return";
+    if (stat->is<Luau::AstStatBreak>())
+        return "break";
+    if (stat->is<Luau::AstStatContinue>())
+        return "continue";
+    return nullptr;
+}
+
+// The innermost guard `if <condition> then return/break/continue end` around `position`
+struct FindGuardAt : Luau::AstVisitor
+{
+    Luau::Position position;
+    Luau::AstStatIf* result = nullptr;
+
+    explicit FindGuardAt(const Luau::Position& position)
+        : position(position)
+    {
+    }
+
+    bool visit(Luau::AstStatIf* node) override
+    {
+        if (!node->location.containsClosed(position))
+            return false;
+
+        bool guardShape = !node->elsebody && node->clauses.size == 0 && !node->isWhenGuard && node->thenbody->body.size == 1 &&
+                          leaveKeyword(node->thenbody->body.data[0]);
+        if (guardShape)
+            result = node;
+        return true;
+    }
+};
+
+Luau::AstExpr* stripGroups(Luau::AstExpr* expr)
+{
+    while (auto group = expr->as<Luau::AstExprGroup>())
+        expr = group->expr;
+    return expr;
+}
+
+// A statement has to start with a name, or a call or index on one, for `x or return` to parse as one: `not` can't start
+// a statement, and a `(` would continue the line before it as a call
+bool startsWithName(Luau::AstExpr* expr)
+{
+    while (true)
+    {
+        if (auto binary = expr->as<Luau::AstExprBinary>())
+            expr = binary->left;
+        else if (auto call = expr->as<Luau::AstExprCall>())
+            expr = call->func;
+        else if (auto index = expr->as<Luau::AstExprIndexName>())
+            expr = index->expr;
+        else if (auto index = expr->as<Luau::AstExprIndexExpr>())
+            expr = index->expr;
+        else if (auto instantiate = expr->as<Luau::AstExprInstantiate>())
+            expr = instantiate->expr;
+        else
+            return expr->is<Luau::AstExprLocal>() || expr->is<Luau::AstExprGlobal>();
+    }
+}
+
+// An if-then-else expression at the end would take the `or return` into its `else` branch
+bool endsWithIfElse(Luau::AstExpr* expr)
+{
+    while (true)
+    {
+        if (auto binary = expr->as<Luau::AstExprBinary>())
+            expr = binary->right;
+        else if (auto unary = expr->as<Luau::AstExprUnary>())
+            expr = unary->expr;
+        else
+            return expr->is<Luau::AstExprIfElse>();
+    }
+}
+
+// The condition `x or return` needs in place of the guard's: `not x` gives `x`, and `==` and `~=` swap. Anything else
+// would need a `not` in front, which can't start a statement.
+std::optional<std::string> guardCondition(const TextDocument& textDocument, Luau::AstExpr* condition)
+{
+    auto text = [&](Luau::AstExpr* expr)
+    {
+        return textDocument.getText(textDocument.convertLocation(expr->location));
+    };
+
+    condition = stripGroups(condition);
+
+    Luau::AstExpr* guard = nullptr;
+    std::string guardText;
+    if (auto unary = condition->as<Luau::AstExprUnary>(); unary && unary->op == Luau::AstExprUnary::Op::Not)
+    {
+        // `or` binds loosest, so whatever was in the parentheses needs none now
+        guard = stripGroups(unary->expr);
+        guardText = text(guard);
+    }
+    else if (auto binary = condition->as<Luau::AstExprBinary>();
+             binary && (binary->op == Luau::AstExprBinary::CompareEq || binary->op == Luau::AstExprBinary::CompareNe))
+    {
+        guard = binary;
+        guardText = text(binary->left) + (binary->op == Luau::AstExprBinary::CompareEq ? " ~= " : " == ") + text(binary->right);
+    }
+
+    if (!guard || !startsWithName(guard) || endsWithIfElse(guard))
+        return std::nullopt;
+    return guardText;
+}
+
+// Luwu Do Expressions: `if not x then return y end` -> `x` with `or return y` on the next line, one level in
+void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* node, const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    // an `elseif` is part of the `if` before it
+    if (textDocument.getText(textDocument.convertLocation(node->ifLocation)) != "if")
+        return;
+    if (!locationOwnsItsLines(textDocument, node->location))
+        return;
+
+    // the rewrite is rebuilt from the condition and the leave, so a comment anywhere else in it would be lost
+    for (const auto& comment : sourceModule.commentLocations)
+    {
+        if (node->location.encloses(comment.location))
+            return;
+    }
+
+    std::optional<std::string> condition = guardCondition(textDocument, node->condition);
+    if (!condition)
+        return;
+
+    Luau::AstStat* leave = node->thenbody->body.data[0];
+    std::string leaveText = textDocument.getText(textDocument.convertLocation(leave->location));
+    // a bare `return` needs a `;` and several values need parentheses, or the parser would read on past them
+    if (auto ret = leave->as<Luau::AstStatReturn>())
+    {
+        if (ret->list.size == 0)
+            leaveText = "return;";
+        else if (ret->list.size > 1)
+            leaveText = "(" + leaveText + ")";
+    }
+
+    std::string indent = getLineIndentation(textDocument, node->location.begin.line);
+    std::string newText = *condition + "\n" + indent + detectIndentUnit(textDocument) + "or " + leaveText;
+
+    addSingleEditAction(uri, std::string("Rewrite as 'or ") + leaveKeyword(leave) + "' guard", lsp::CodeActionKind::RefactorRewrite, false,
+        {{textDocument.convertLocation(node->location), newText}}, std::nullopt, result);
+}
 } // namespace
 
 lsp::WorkspaceEdit WorkspaceFolder::computeOrganiseRequiresEdit(const lsp::DocumentUri& uri)
@@ -1312,6 +1461,15 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         sourceModule->root->visit(&bindingFinder);
         if (bindingFinder.result)
             generateBindingKeywordToggle(params.textDocument.uri, bindingFinder.result, *textDocument, result);
+
+        // Luwu: `if not x then return end` -> `x or return`
+        if (FFlag::LuwuDoExpr)
+        {
+            FindGuardAt guardFinder(requestRange.begin);
+            sourceModule->root->visit(&guardFinder);
+            if (guardFinder.result)
+                generateOrLeaveGuardRewrite(params.textDocument.uri, guardFinder.result, *sourceModule, *textDocument, result);
+        }
     }
 
     platform->handleCodeAction(params, result);

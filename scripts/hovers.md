@@ -20,6 +20,36 @@ A `do` expression runs its block and evaluates to the value its `give` gives.
 Exits the enclosing `do` expression with this value.
 <!-- /keyword -->
 
+<!-- keyword: push_operator -->
+Pushes values onto the end of a container: `container <+ value`.
+
+```luwu
+const cats = {}
+cats <+ "meow"
+cats <+ "mrrp", "nya" -- pushes both
+cats <+ get_cats() -- pushes every value get_cats returns
+cats <+ maybe_cat -- pushes nothing if maybe_cat is nil
+```
+
+On a table, it works like `table.insert`. A value whose metatable has `__push` gets every non-nil value in one call instead.
+Pushing to a `const` variable is fine: it changes the table, not the variable.
+<!-- /keyword -->
+
+<!-- keyword: pop_operator -->
+Removes the last element of a container and evaluates to it: `<-container`. An empty table pops `nil`.
+
+```luwu
+const stack = { 1, 2, 3 }
+const top = <-stack -- 3; stack is now { 1, 2 }
+
+while local job = <-queue do
+    run(job)
+end
+```
+
+On a table, it works like `table.remove`. A value whose metatable has `__pop` returns what that returns instead.
+<!-- /keyword -->
+
 <!-- keyword: when -->
 Separates the clauses of an `if` condition; the branch runs only when every clause passes.
 <!-- /keyword -->

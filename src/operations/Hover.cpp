@@ -6,8 +6,10 @@
 
 #include "Luau/AstQuery.h"
 #include "Luau/BuiltinDefinitions.h"
+#include "Luau/DocRefs.h"
 #include "Luau/Module.h"
 #include "Luau/ToString.h"
+#include "Luau/TypeFormat.h"
 #include "Luau/TypeUtils.h"
 #include "LSP/LuauExt.hpp"
 #include "LSP/DocumentationParser.hpp"
@@ -1209,6 +1211,8 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     std::optional<Luau::TypeId> type = std::nullopt;
     std::optional<std::string> documentationSymbol = getDocumentationSymbolAtPosition(*sourceModule, *module, position);
     std::optional<DocumentationLocation> documentationLocation = std::nullopt;
+    // Luwu doc references: a hovered property's own doc comments (Property::metadata), rendered
+    std::string propertyDocs;
     std::optional<std::string> classMemberPrefix = std::nullopt;
     std::optional<std::string> classMemberName = std::nullopt;
 
@@ -1539,21 +1543,27 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
         // Special case, we want to check if there is a parent in the ancestry, and if it is an AstTable
         // If so, and we are hovering over a prop, we want to give type info for the assigned expression to the prop
         // rather than just "string"
-        if (ancestry.size() >= 2 && ancestry.at(ancestry.size() - 2)->is<Luau::AstExprTable>())
+        // Luwu: in `{ function foo() end }` the key `foo` lies inside the function's span, so the ancestry ends
+        // table, key, function rather than table, key; the table is the innermost one with a key at the position.
+        for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
         {
-            auto parent = ancestry.at(ancestry.size() - 2)->as<Luau::AstExprTable>();
+            auto parent = (*it)->as<Luau::AstExprTable>();
+            if (!parent)
+                continue;
+
             for (const auto& item : parent->items)
             {
                 if (item.key && item.key->location.contains(position))
                 {
                     // Return type type of the value
-                    if (auto it = module->astTypes.find(item.value))
+                    if (auto valueType = module->astTypes.find(item.value))
                     {
-                        type = *it;
+                        type = *valueType;
                     }
                     break;
                 }
             }
+            break;
         }
 
         // Handle table properties (so that we can get documentation info)
@@ -1568,6 +1578,13 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
                     auto [baseTy, prop] = propInformation[0];
                     if (propInformation.size() == 1 && prop.readTy)
                         type = prop.readTy;
+                    if (prop.metadata)
+                    {
+                        std::vector<std::string> lines = Luau::metadataDocLines(*prop.metadata);
+                        linkMetadataDocRefs(lines, *prop.metadata);
+                        if (!lines.empty())
+                            propertyDocs = printMoonwaveDocumentation(lines);
+                    }
                     if (auto definitionModuleName = Luau::getDefinitionModuleName(baseTy))
                     {
                         if (prop.location)
@@ -1609,6 +1626,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     if (!documentationSymbol)
         documentationSymbol = type.value()->documentationSymbol;
 
+    // Luwu: a method read off a union whose members each have it (`t:issubtypeof` on the type function API's `type`) is
+    // one function per member. Show the one signature a call is checked against, as the checker merges it.
+    Luau::TypeArena mergedMethodArena;
+    if (std::optional<Luau::TypeId> merged = Luau::mergeUnionMethods(frontend.builtinTypes, Luau::NotNull{&mergedMethodArena}, *type))
+        type = *merged;
+
     Luau::ToStringOptions opts;
     opts.exhaustive = false;
     opts.useLineBreaks = true;
@@ -1630,6 +1653,42 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     // it needs to expand the alias. otherwise you hover over the variable 'fs' and get 'type fs = fs'
     // which is completely useless.
     opts.alwaysExpandRootAlias = true;
+    // Luwu: the user's `hover.typeFormat` (the options `types.format` takes) over the hover's defaults, and the first
+    // line of each property's doc comment above it
+    {
+        Luau::TypeFormatOptions format;
+        format.multiline = true;
+        format.commentWidth = Luau::kDefaultTypeFormatCommentWidth;
+        if (config.hover.typeFormat.is_object())
+        {
+            for (const auto& [key, value] : config.hover.typeFormat.items())
+            {
+                std::optional<Luau::TypeFormatValue> option;
+                if (value.is_boolean())
+                    option = value.get<bool>();
+                else if (value.is_number())
+                    option = value.get<double>();
+                else if (value.is_string())
+                    option = value.get<std::string>();
+                if (!option)
+                {
+                    client->sendLogMessage(lsp::MessageType::Warning, "hover.typeFormat: '" + key + "' should be a boolean, number or string");
+                    continue;
+                }
+                if (std::optional<std::string> error = Luau::setTypeFormatOption(format, key, *option))
+                    client->sendLogMessage(lsp::MessageType::Warning, "hover.typeFormat: " + *error);
+            }
+        }
+        // the hover's own limits stand unless the user set one
+        size_t maxTableLength = opts.maxTableLength;
+        size_t maxTypeLength = opts.maxTypeLength;
+        Luau::applyTypeFormatOptions(format, opts);
+        if (format.maxLength == 0)
+        {
+            opts.maxTableLength = maxTableLength;
+            opts.maxTypeLength = maxTypeLength;
+        }
+    }
     Luau::ToStringResult typeResult = Luau::toStringDetailed(*type, opts);
     std::string typeString = typeResult.name;
 
@@ -2257,22 +2316,41 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
         typeString += "\n" + kDocumentationBreaker;
         typeString += *docs;
     }
-    else if (auto documentation = getDocumentationForType(*type); documentation && !documentation->empty())
+    else
     {
-        typeString += "\n" + kDocumentationBreaker;
-        typeString += *documentation;
-    }
-    else if (auto documentation = getDocumentationForAstNode(moduleName, node, scope); documentation && !documentation->empty())
-    {
-        typeString += "\n" + kDocumentationBreaker;
-        typeString += *documentation;
-    }
-    else if (documentationLocation)
-    {
-        if (auto text = printMoonwaveDocumentation(getComments(documentationLocation->moduleName, documentationLocation->location)); !text.empty())
+        // Luwu: the docs on what's hovered (`type SomeLibrary = ...`, a local) come first, and the docs of its type under
+        // them. Often they're the same comments, the declaration's carried in its type's metadata; then once.
+        std::string bindingDocs = propertyDocs;
+        if (bindingDocs.empty())
+            bindingDocs = getDocumentationForAstNode(moduleName, node, scope).value_or("");
+        if (bindingDocs.empty() && documentationLocation)
+            bindingDocs = printMoonwaveDocumentation(getComments(documentationLocation->moduleName, documentationLocation->location));
+        std::string typeDocs = getDocumentationForType(*type).value_or("");
+
+        // Comments a type carries that a type function didn't write are the comments above some declaration. When it's
+        // the declaration whose docs are already shown (`type fs = Library<...>` returning the literal it was given),
+        // they're the same comments, rendered from a different place: once is enough.
+        if (!bindingDocs.empty() && !typeDocs.empty())
+        {
+            const Luau::TypeMetadataTable* metadata = Luau::docMetadataOf(*type);
+            if (metadata && metadata->docContext && !metadata->docContext->generated)
+            {
+                const Luau::MetadataDocContext& context = *metadata->docContext;
+                if (printMoonwaveDocumentation(getComments(context.module, context.location)) == bindingDocs)
+                    typeDocs.clear();
+            }
+        }
+
+        std::string documentation = typeDocs;
+        if (typeDocs.empty() || bindingDocs.find(typeDocs) != std::string::npos)
+            documentation = bindingDocs;
+        else if (!bindingDocs.empty() && typeDocs.find(bindingDocs) == std::string::npos)
+            documentation = bindingDocs + "\n\n" + typeDocs;
+
+        if (!documentation.empty())
         {
             typeString += "\n" + kDocumentationBreaker;
-            typeString += text;
+            typeString += documentation;
         }
     }
 

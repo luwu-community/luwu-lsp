@@ -30,6 +30,33 @@ struct FindRequireVisitor : public Luau::AstVisitor
     }
 };
 
+std::optional<lsp::Location> WorkspaceFolder::docRefTargetLocation(const Luau::DocRefTarget& target)
+{
+    // a type from a definitions file (`@seal`) names its package, which the file resolver doesn't know, but whose
+    // document is kept loaded
+    if (auto definitionsFile = definitionsFileState.find(target.module); definitionsFile != definitionsFileState.end())
+    {
+        const TextDocument& document = definitionsFile->second.textDocument;
+        return lsp::Location{document.uri(), {document.convertPosition(target.definition.begin), document.convertPosition(target.definition.end)}};
+    }
+
+    auto document = fileResolver.getOrCreateTextDocumentFromModuleName(target.module);
+    if (!document)
+        return std::nullopt;
+    return lsp::Location{document->uri(), {document->convertPosition(target.definition.begin), document->convertPosition(target.definition.end)}};
+}
+
+std::optional<Uri> WorkspaceFolder::docRefTargetLink(const Luau::DocRefTarget& target)
+{
+    auto location = docRefTargetLocation(target);
+    if (!location)
+        return std::nullopt;
+    // VS Code opens `#L<line>,<column>` (1-based) at that position
+    const Uri& uri = location->uri;
+    return Uri(uri.scheme, uri.authority, uri.path, uri.query,
+        "L" + std::to_string(location->range.start.line + 1) + "," + std::to_string(location->range.start.character + 1));
+}
+
 std::vector<lsp::DocumentLink> WorkspaceFolder::documentLink(const lsp::DocumentLinkParams& params)
 {
     auto moduleName = fileResolver.getModuleName(params.textDocument.uri);
@@ -57,6 +84,22 @@ std::vector<lsp::DocumentLink> WorkspaceFolder::documentLink(const lsp::Document
                 Luau::Position endPos{require.location.end.line, require.location.end.column - 1};
                 link.range = {textDocument->convertPosition(require.location.begin), textDocument->convertPosition(endPos)};
                 result.push_back(link);
+            }
+        }
+    }
+
+    // Luwu doc references: each name in a doc comment's reference links to where it's declared (`fs`, `file` and `read` in
+    // `[fs.file.read]` separately). Needs the module checked, which the diagnostics after an edit do.
+    if (auto module = getModule(moduleName))
+    {
+        for (const Luau::DocRefTarget& target : module->docRefTargets)
+        {
+            if (auto link = docRefTargetLink(target))
+            {
+                lsp::DocumentLink documentLink;
+                documentLink.target = *link;
+                documentLink.range = {textDocument->convertPosition(target.location.begin), textDocument->convertPosition(target.location.end)};
+                result.push_back(documentLink);
             }
         }
     }

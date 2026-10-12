@@ -923,6 +923,11 @@ lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::Fi
         if (syntaxError->message.find("Class contains a 'private' member") != std::string::npos)
             message += " (quick fix available)";
     }
+    // Luwu doc references: errors in doc comments are labeled apart, so they don't read as broken code
+    else if (Luau::get_if<Luau::DocSyntaxError>(&error.data))
+        message = "DocSyntaxError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
+    else if (error.inDocComment)
+        message = "DocTypeError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
     else
         message = "TypeError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
 

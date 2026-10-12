@@ -3,6 +3,7 @@
 #include "LSP/LuauExt.hpp"
 #include "LuauFileUtils.hpp"
 #include <regex>
+#include <unordered_set>
 #include <algorithm>
 
 Luau::FunctionParameterDocumentation parseDocumentationParameter(const json& j)
@@ -462,7 +463,205 @@ std::vector<Luau::Comment> getCommentLocations(const Luau::SourceModule* module,
 
     AttachCommentsVisitor visitor{node, module->commentLocations};
     visitor.visit(module->root);
-    return visitor.attachComments();
+    std::vector<Luau::Comment> comments = visitor.attachComments();
+
+    // Luwu: a comment to the right of the node's first line belongs to it too (`bar: string, --- the bar`). Only the
+    // first one: anything after it on the line isn't next to the node.
+    for (const Luau::Comment& comment : module->commentLocations)
+    {
+        if (comment.location.begin.line == node.begin.line && comment.location.begin > node.begin)
+        {
+            comments.push_back(comment);
+            break;
+        }
+    }
+
+    return comments;
+}
+
+// Luwu doc references: (offset, length to replace, text) edits that link references in doc text
+using DocLinkEdits = std::vector<std::tuple<size_t, size_t, std::string>>;
+
+// Luau's library docs for a reference to a builtin (`[string]`, `[string.split]`, `[print]`), which has no source to
+// link to
+static std::optional<std::string> builtinDocsLink(std::string_view reference)
+{
+    static const std::unordered_set<std::string_view> libraries{
+        "string", "table", "math", "os", "bit32", "utf8", "coroutine", "debug", "buffer", "vector",
+    };
+    static const std::unordered_set<std::string_view> globals{
+        "assert", "error", "gcinfo", "getfenv", "getmetatable", "ipairs", "next", "newproxy", "pairs", "pcall", "print", "rawequal",
+        "rawget", "rawlen", "rawset", "require", "select", "setfenv", "setmetatable", "tonumber", "tostring", "type", "typeof", "unpack",
+        "xpcall",
+    };
+
+    std::string_view root = reference.substr(0, reference.find_first_of(".:"));
+    if (libraries.count(root))
+        return "https://luau.org/library#" + std::string(root) + "-library";
+    if (root.size() == reference.size() && globals.count(root))
+        return "https://luau.org/library#global-functions";
+    return std::nullopt;
+}
+
+// A reference's rendering. `open` and `close` are the target's brackets in `text`. With a link: `[target]` ->
+// `[target](link)`, `[text][target]` -> `[text](link)`. Without one, the brackets go: `[target]` -> `` `target` ``,
+// `[text][target]` -> `text`.
+static void addDocLinkEdit(
+    DocLinkEdits& edits,
+    const std::string& text,
+    bool displayText,
+    size_t open,
+    size_t close,
+    std::optional<std::string> link
+)
+{
+    std::string_view target = std::string_view(text).substr(open + 1, close - open - 1);
+    if (!link)
+        link = builtinDocsLink(target);
+
+    if (link && displayText)
+        edits.emplace_back(open, close - open + 1, "(" + *link + ")");
+    else if (link)
+        edits.emplace_back(close + 1, 0, "(" + *link + ")");
+    else if (displayText)
+    {
+        // the display text's own brackets, `]` right before `open`
+        size_t textOpen = text.rfind('[', open - 1);
+        if (textOpen != std::string::npos)
+            edits.emplace_back(textOpen, close - textOpen + 1, text.substr(textOpen + 1, open - 1 - textOpen - 1));
+    }
+    else
+        edits.emplace_back(open, close - open + 1, "`" + std::string(target) + "`");
+}
+
+// Applies the edits, and drops binding lines (`[json = require("@std/json")]`), which only matter to the references
+static void applyDocLinkEdits(std::string& text, DocLinkEdits& edits)
+{
+    std::sort(
+        edits.begin(),
+        edits.end(),
+        [](const auto& a, const auto& b)
+        {
+            return std::get<0>(a) > std::get<0>(b);
+        }
+    );
+    for (const auto& [offset, length, replacement] : edits)
+        text.replace(offset, length, replacement);
+
+    static const std::regex binding(R"(^[ \t]*(---)?[ \t]*\[[ \t]*[A-Za-z_]\w*[ \t]*=[^=].*\][ \t]*$)");
+    std::string kept;
+    bool firstLine = true;
+    for (std::string_view line : Luau::split(text, '\n'))
+    {
+        if (std::regex_match(line.begin(), line.end(), binding))
+            continue;
+        if (!firstLine)
+            kept += '\n';
+        kept += line;
+        firstLine = false;
+    }
+    text = std::move(kept);
+}
+
+// Luwu doc references: turns each reference in a source comment's text (`[fs.file.read]`, `[text][fs.file.read]`) into a
+// markdown link to where it's declared
+void WorkspaceFolder::linkDocRefs(
+    std::string& commentText,
+    const Luau::Location& commentLocation,
+    const Luau::SourceModule& sourceModule,
+    const Luau::Module& module,
+    const TextDocument& textDocument
+)
+{
+    // most doc comments have no references; don't look for them (this runs for every completion item shown)
+    if (commentText.find('[') == std::string::npos)
+        return;
+
+    // a byte offset into `commentText`
+    auto offsetOf = [&](Luau::Position position)
+    {
+        return textDocument.getText(lsp::Range{textDocument.convertPosition(commentLocation.begin), textDocument.convertPosition(position)}).size();
+    };
+
+    DocLinkEdits edits;
+    for (const Luau::DocComment& doc : sourceModule.docComments)
+    {
+        if (!commentLocation.encloses(doc.location) && !doc.location.encloses(commentLocation))
+            continue;
+
+        for (const Luau::DocRef& ref : doc.refs)
+        {
+            if (!commentLocation.encloses(ref.location))
+                continue;
+
+            // the reference points where its last name does
+            Luau::Position end = ref.methodLocation.end;
+            if (!ref.method)
+                end = ref.expr ? ref.expr->location.end : ref.type->location.end;
+            std::optional<std::string> link;
+            for (const Luau::DocRefTarget& candidate : module.docRefTargets)
+            {
+                if (candidate.location.end != end)
+                    continue;
+                if (auto uri = docRefTargetLink(candidate))
+                    link = uri->toString();
+            }
+
+            size_t open = commentText.rfind('[', offsetOf(ref.location.begin));
+            size_t close = commentText.find(']', offsetOf(ref.location.end));
+            if (open == std::string::npos || close == std::string::npos)
+                continue;
+            addDocLinkEdit(edits, commentText, open > 0 && commentText[open - 1] == ']', open, close, link);
+        }
+    }
+
+    applyDocLinkEdits(commentText, edits);
+}
+
+// Luwu doc references: links the references in the doc comments a type's metadata holds, resolved where they were
+// written (a type function's call, or the declaration)
+void WorkspaceFolder::linkMetadataDocRefs(std::vector<std::string>& lines, const Luau::TypeMetadataTable& metadata)
+{
+    if (!metadata.docContext)
+        return;
+
+    std::string text;
+    for (const std::string& line : lines)
+        text += line + "\n";
+
+    // most docs have no references; resolving them is the costly part, and this runs for every completion item shown
+    if (text.find('[') == std::string::npos)
+        return;
+
+    const Luau::MetadataDocContext& context = *metadata.docContext;
+    const Luau::SourceModule* sourceModule = frontend.getSourceModule(context.module);
+    Luau::ModulePtr module = getModule(context.module);
+    if (!sourceModule || !module)
+        return;
+
+    Luau::TypeCheckLimits limits;
+    std::vector<Luau::DocTextLink> links = Luau::resolveDocText(text, *sourceModule, *module, context.location, frontend.builtinTypes,
+        Luau::NotNull{frontend.fileResolver}, Luau::NotNull<Luau::ModuleResolver>{&frontend.moduleResolver}, limits, nullptr);
+
+    DocLinkEdits edits;
+    for (const Luau::DocTextLink& link : links)
+    {
+        std::optional<std::string> destination;
+        if (link.target)
+        {
+            if (auto uri = docRefTargetLink(*link.target))
+                destination = uri->toString();
+        }
+        addDocLinkEdit(edits, text, link.displayText, link.open, link.close, destination);
+    }
+    applyDocLinkEdits(text, edits);
+
+    lines.clear();
+    for (std::string_view line : Luau::split(text, '\n'))
+        lines.emplace_back(line);
+    // the text ended with a newline
+    if (!lines.empty() && lines.back().empty())
+        lines.pop_back();
 }
 
 /// Get all moonwave-style documentation comments
@@ -492,6 +691,9 @@ std::vector<std::string> WorkspaceFolder::getComments(const Luau::ModuleName& mo
     if (commentLocations.empty())
         return {};
 
+    // Luwu doc references: the module's checked references, to link them in the rendered docs
+    Luau::ModulePtr checkedModule = definitionsFileState.count(moduleName) ? nullptr : getModule(moduleName);
+
     std::vector<std::string> comments{};
     for (auto& comment : commentLocations)
     {
@@ -500,6 +702,8 @@ std::vector<std::string> WorkspaceFolder::getComments(const Luau::ModuleName& mo
 
         auto commentText = textDocument->getText(
             lsp::Range{textDocument->convertPosition(comment.location.begin), textDocument->convertPosition(comment.location.end)});
+        if (checkedModule)
+            linkDocRefs(commentText, comment.location, *sourceModule, *checkedModule, **textDocument);
 
         // Trim whitespace
         trim(commentText);
@@ -565,6 +769,19 @@ std::vector<std::string> WorkspaceFolder::getComments(const Luau::ModuleName& mo
 std::optional<std::string> WorkspaceFolder::getDocumentationForType(const Luau::TypeId ty)
 {
     auto followedTy = Luau::follow(ty);
+
+    // Luwu: docs a type carries in its metadata come first: a type a type function made has no source to read them from,
+    // and one it changed may have new ones
+    // (from `ty`, not `followedTy`: `Cat` in `type Cat = Explain<CatBase>` has docs of its own on the way to CatBase)
+    if (const Luau::TypeMetadataTable* metadata = Luau::docMetadataOf(ty))
+    {
+        if (std::vector<std::string> metadataDocs = Luau::metadataDocLines(*metadata); !metadataDocs.empty())
+        {
+            linkMetadataDocRefs(metadataDocs, *metadata);
+            return printMoonwaveDocumentation(metadataDocs);
+        }
+    }
+
     if (auto ftv = Luau::get<Luau::FunctionType>(followedTy); ftv && ftv->definition && ftv->definition->definitionModuleName)
     {
         return printMoonwaveDocumentation(getComments(ftv->definition->definitionModuleName.value(), ftv->definition->definitionLocation));

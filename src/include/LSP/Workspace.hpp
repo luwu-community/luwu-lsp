@@ -142,6 +142,15 @@ private:
 
 public:
     std::vector<std::string> getComments(const Luau::ModuleName& moduleName, const Luau::Location& node);
+    /// Luwu doc references: where a reference in a doc comment (`[fs.file.read]`) points
+    std::optional<lsp::Location> docRefTargetLocation(const Luau::DocRefTarget& target);
+    /// Luwu doc references: the same, as a link to put in markdown or a document link (`file:///...#L12,5`)
+    std::optional<Uri> docRefTargetLink(const Luau::DocRefTarget& target);
+    /// Luwu doc references: links the references in a doc comment's text, for rendering (hover, completion)
+    void linkDocRefs(std::string& commentText, const Luau::Location& commentLocation, const Luau::SourceModule& sourceModule,
+        const Luau::Module& module, const TextDocument& textDocument);
+    /// Luwu doc references: links the references in a type's metadata doc lines, for rendering
+    void linkMetadataDocRefs(std::vector<std::string>& lines, const Luau::TypeMetadataTable& metadata);
     std::optional<std::string> getDocumentationForType(const Luau::TypeId ty);
     std::optional<std::string> getDocumentationForTypeReference(const Luau::ModuleName& moduleName, const Luau::ScopePtr& scope,
         const std::optional<Luau::AstName>& prefix, const Luau::Name& typeName, bool forAutocomplete);

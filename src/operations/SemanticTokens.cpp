@@ -2,7 +2,11 @@
 #include "LSP/Workspace.hpp"
 
 #include "Luau/AstQuery.h"
+#include "Luau/StringUtils.h"
 #include "LSP/LuauExt.hpp"
+
+#include <string_view>
+#include <unordered_set>
 
 static void fillBuiltinGlobals(std::unordered_map<Luau::AstName, Luau::TypeId>& builtins, const Luau::AstNameTable& names, const Luau::ScopePtr& env)
 {
@@ -532,6 +536,89 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     }
 };
 
+// Luwu: Moonwave's tags, as luwu-lsp's hover reads them (printMoonwaveDocumentation)
+static const std::unordered_set<std::string_view> kMoonwaveTags{
+    "param", "return", "error", "field", "private", "yields", "unreleased", "server", "client", "plugin", "readonly", "deprecated", "since",
+    "ignore", "tag", "within", "class", "function", "method", "prop", "interface", "type", "__index", "external",
+};
+
+// Luwu: a Moonwave tag starting a doc line (`--- @param name ...`, or a line of a block comment), coloured as a decorator,
+// and the name a `@param`/`@field`/`@prop` names. Luau files only, with `documentation.highlightMoonwaveTags` on (the
+// default); the grammar doesn't colour `@`, so a tag anywhere else (`@std/fs` in prose) is left as comment text.
+void addMoonwaveTagTokens(std::vector<SemanticToken>& tokens, const Luau::SourceModule* sourceModule, const TextDocument* textDocument)
+{
+    auto isWordChar = [](char c)
+    {
+        return isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+
+    for (const Luau::Comment& comment : sourceModule->commentLocations)
+    {
+        bool block = comment.type == Luau::Lexeme::BlockComment;
+        if (!block && comment.type != Luau::Lexeme::Comment)
+            continue;
+
+        std::string text = textDocument->getText(
+            lsp::Range{textDocument->convertPosition(comment.location.begin), textDocument->convertPosition(comment.location.end)}
+        );
+        bool docLine = Luau::startsWith(text, "---") && !Luau::startsWith(text, "----");
+        if (!block && !docLine)
+            continue;
+
+        std::vector<std::string_view> lines = Luau::split(text, '\n');
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            std::string_view line = lines[i];
+
+            // past the comment's opener on its first line: `---`, or `--[==[`
+            size_t at = 0;
+            if (i == 0)
+            {
+                size_t opener = block ? line.find('[', 3) : 2;
+                at = opener == std::string_view::npos ? line.size() : opener + 1;
+            }
+
+            while (at < line.size() && (line[at] == ' ' || line[at] == '\t'))
+                ++at;
+            if (at >= line.size() || line[at] != '@')
+                continue;
+
+            size_t tagEnd = at + 1;
+            while (tagEnd < line.size() && isWordChar(line[tagEnd]))
+                ++tagEnd;
+            std::string_view tag = line.substr(at + 1, tagEnd - at - 1);
+            if (!kMoonwaveTags.count(tag))
+                continue;
+
+            unsigned lineNumber = comment.location.begin.line + unsigned(i);
+            unsigned column = i == 0 ? comment.location.begin.column : 0;
+            tokens.emplace_back(SemanticToken{
+                Luau::Position{lineNumber, column + unsigned(at)},
+                Luau::Position{lineNumber, column + unsigned(tagEnd)},
+                lsp::SemanticTokenTypes::Decorator,
+                lsp::SemanticTokenModifiers::None
+            });
+
+            bool namesSomething = tag == "param" || tag == "field" || tag == "prop";
+            size_t nameStart = tagEnd;
+            while (nameStart < line.size() && (line[nameStart] == ' ' || line[nameStart] == '\t'))
+                ++nameStart;
+            size_t nameEnd = nameStart;
+            while (nameEnd < line.size() && isWordChar(line[nameEnd]))
+                ++nameEnd;
+            if (!namesSomething || nameEnd == nameStart)
+                continue;
+
+            tokens.emplace_back(SemanticToken{
+                Luau::Position{lineNumber, column + unsigned(nameStart)},
+                Luau::Position{lineNumber, column + unsigned(nameEnd)},
+                tag == "param" ? lsp::SemanticTokenTypes::Parameter : lsp::SemanticTokenTypes::Property,
+                lsp::SemanticTokenModifiers::None
+            });
+        }
+    }
+}
+
 std::vector<SemanticToken> getSemanticTokens(
     const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule, bool grammarHighlightsNone)
 {
@@ -605,6 +692,9 @@ std::optional<lsp::SemanticTokens> WorkspaceFolder::semanticTokens(
         return std::nullopt;
 
     auto tokens = getSemanticTokens(frontend, module, sourceModule, /* grammarHighlightsNone= */ isLuwuFile(*textDocument));
+    // Luwu: Moonwave can't parse Luwu, so its tags are only coloured in Luau files
+    if (!isLuwuFile(*textDocument) && client->getConfiguration(rootUri).documentation.highlightMoonwaveTags)
+        addMoonwaveTagTokens(tokens, sourceModule, textDocument);
     lsp::SemanticTokens result;
     result.data = packTokens(textDocument, tokens);
     return result;

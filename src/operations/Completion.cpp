@@ -70,6 +70,21 @@ static Luau::AstNode* getParentNode(const std::vector<Luau::AstNode*> ancestry)
     return nullptr;
 }
 
+// Luwu If Local (rfcs/if-local.md): whether the loop whose `when` chain is `guard` has its `do`. A guard with no loop
+// above it in `ancestry` doesn't happen; it counts as having one, so nothing is inserted.
+static bool whenGuardLoopHasDo(const std::vector<Luau::AstNode*>& ancestry, const Luau::AstStatIf* guard)
+{
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+    {
+        if (auto* loop = (*it)->as<Luau::AstStatFor>(); loop && loop->whenGuard == guard)
+            return loop->hasDo;
+        if (auto* loop = (*it)->as<Luau::AstStatForIn>(); loop && loop->whenGuard == guard)
+            return loop->hasDo;
+    }
+
+    return true;
+}
+
 void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
 {
     auto moduleName = fileResolver.getModuleName(params.textDocument.uri);
@@ -206,7 +221,17 @@ void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
 
     if (parentNode)
     {
-        if (auto* statIf = parentNode->as<Luau::AstStatIf>(); statIf && statIf->condition && !statIf->thenLocation)
+        if (auto* guard = parentNode->as<Luau::AstStatIf>(); guard && guard->isWhenGuard)
+        {
+            // Luwu If Local (rfcs/if-local.md): a loop's `when` chain is stored as an `if` around its body, and the keyword
+            // after the chain is the loop's `do`, not `then`
+            if (!whenGuardLoopHasDo(ancestry, guard))
+            {
+                lsp::Position doLocation = document->convertPosition(guard->thenbody->location.begin);
+                edits.emplace_back(lsp::TextEdit{{doLocation, doLocation}, " do"});
+            }
+        }
+        else if (auto* statIf = parentNode->as<Luau::AstStatIf>(); statIf && statIf->condition && !statIf->thenLocation)
         {
             lsp::Position thenLocation = document->convertPosition(statIf->thenbody->location.begin);
             edits.emplace_back(lsp::TextEdit{{thenLocation, thenLocation}, " then"});
@@ -701,6 +726,15 @@ std::optional<std::string> WorkspaceFolder::getDocumentationForAutocompleteEntry
 
     if (entry.prop)
     {
+        // Luwu doc references: a property's own doc comments, which a type function may have written
+        if (const auto& metadata = entry.prop.value()->metadata)
+        {
+            std::vector<std::string> lines = Luau::metadataDocLines(*metadata);
+            linkMetadataDocRefs(lines, *metadata);
+            if (!lines.empty())
+                return printMoonwaveDocumentation(lines);
+        }
+
         std::optional<Luau::ModuleName> definitionModuleName;
 
         if (entry.containingExternType)

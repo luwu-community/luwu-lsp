@@ -187,6 +187,16 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
             return match("give", giveKeyword);
     }
 
+    // Luwu Push and Pop Operators: `<+`, and the `<-` a pop starts with
+    if (auto stat = node->as<Luau::AstStatPush>(); stat && contains(stat->opLocation))
+        return match("push_operator", stat->opLocation);
+    if (auto expr = node->as<Luau::AstExprPop>())
+    {
+        Luau::Location popOperator{expr->location.begin, Luau::Position{expr->location.begin.line, expr->location.begin.column + 2}};
+        if (contains(popOperator))
+            return match("pop_operator", popOperator);
+    }
+
     if (auto stat = node->as<Luau::AstStatIf>())
     {
         if (contains(stat->ifLocation))
@@ -307,7 +317,7 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
         if (contains(stat->declareLocation))
             return match("declare", stat->declareLocation);
         if (contains(stat->shape->keywordLocation))
-            return match("class", stat->shape->keywordLocation);
+            return match(stat->shape->isTrait ? "trait" : "class", stat->shape->keywordLocation);
     }
     else if (auto stat = node->as<Luau::AstStatClass>())
     {

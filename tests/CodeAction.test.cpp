@@ -5,6 +5,7 @@
 
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
+LUAU_FASTFLAG(LuwuDoExpr)
 
 TEST_SUITE_BEGIN("CodeAction");
 
@@ -1036,6 +1037,131 @@ class Single implements (Named, Aged) end
     CHECK_EQ(single[0].title, "Put each trait on its own line");
     CHECK_EQ(single[0].edit->changes.at(uri)[0].range, lsp::Range{{8, 24}, {8, 37}});
     CHECK_EQ(single[0].edit->changes.at(uri)[0].newText, "(\n    Named,\n    Aged\n)");
+}
+
+static std::optional<lsp::TextEdit> orLeaveGuardRewrite(Fixture& fixture, const lsp::DocumentUri& uri, size_t line, size_t column)
+{
+    auto actions = codeActionsAt(fixture, uri, line, column, {lsp::CodeActionKind::RefactorRewrite});
+    for (const auto& action : actions)
+    {
+        if (action.title.rfind("Rewrite as 'or ", 0) == 0)
+        {
+            REQUIRE(action.edit);
+            auto edits = action.edit->changes.at(uri);
+            REQUIRE_EQ(edits.size(), 1);
+            return edits[0];
+        }
+    }
+    return std::nullopt;
+}
+
+TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_if_not_return")
+{
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
+
+    auto uri = newDocument("test.luau", R"(
+local function f(value)
+    if not value:is("singleton") then
+        return error("Library name must be a stringleton")
+    end
+    return 1
+end
+)");
+
+    auto actions = codeActionsAt(*this, uri, 2, 8, {lsp::CodeActionKind::RefactorRewrite});
+    auto action = findCodeAction(actions, "Rewrite as 'or return' guard");
+    REQUIRE(action);
+    CHECK_EQ(action->kind, lsp::CodeActionKind::RefactorRewrite);
+
+    auto edit = orLeaveGuardRewrite(*this, uri, 3, 12);
+    REQUIRE(edit);
+    CHECK_EQ(edit->range, lsp::Range{{2, 4}, {4, 7}});
+    CHECK_EQ(edit->newText, "value:is(\"singleton\")\n        or return error(\"Library name must be a stringleton\")");
+}
+
+TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_conditions_and_leaves")
+{
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
+
+    auto uri = newDocument("test.luau", R"(
+for _, v in {} do
+    if typeof(v) ~= "string" then continue end
+    if v == nil then break end
+    if not (v.a and v.b) then
+        return
+    end
+    if not v then return 1, 2 end
+end
+)");
+
+    auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "typeof(v) == \"string\"\n        or continue");
+
+    edit = orLeaveGuardRewrite(*this, uri, 3, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "v ~= nil\n        or break");
+
+    edit = orLeaveGuardRewrite(*this, uri, 4, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "v.a and v.b\n        or return;");
+
+    edit = orLeaveGuardRewrite(*this, uri, 7, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "v\n        or (return 1, 2)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "or_leave_guard_not_offered_when_it_would_not_parse_or_lose_code")
+{
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
+
+    auto uri = newDocument("test.luau", R"(
+local function f(a, b, c)
+    if a < b then return end
+    if not (a)(b) then return end
+    if not #a then return end
+    if a == (if b then c else nil) then return end
+    if a ~= if b then c else nil then return end
+    if not a then
+        -- why
+        return
+    end
+    if not a then
+        print(a)
+        return
+    end
+    if not a then return else print(b) end
+    if b then
+    elseif not a then return
+    end
+end
+)");
+
+    for (size_t line = 2; line <= 18; ++line)
+    {
+        INFO("line " << line);
+        if (line == 5)
+            continue;
+        CHECK_FALSE(orLeaveGuardRewrite(*this, uri, line, 6));
+    }
+
+    // a parenthesized if-then-else is its own operand
+    auto edit = orLeaveGuardRewrite(*this, uri, 5, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "a ~= (if b then c else nil)\n        or return;");
+}
+
+TEST_CASE_FIXTURE(Fixture, "or_leave_guard_needs_the_do_expression_flag")
+{
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, false};
+
+    auto uri = newDocument("test.luau", R"(
+local function f(a)
+    if not a then return end
+end
+)");
+
+    CHECK_FALSE(orLeaveGuardRewrite(*this, uri, 2, 6));
 }
 
 TEST_SUITE_END();
