@@ -5,6 +5,7 @@
 #include "Luau/StringUtils.h"
 #include "LSP/LuauExt.hpp"
 
+#include <algorithm>
 #include <string_view>
 #include <unordered_set>
 
@@ -349,6 +350,28 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // A builtin global's token: `name` is one of `builtinGlobals`, and `ty` its type
+    void addBuiltinGlobalToken(Luau::AstName name, const Luau::Location& location, Luau::TypeId ty)
+    {
+        // SPECIAL CASE: if name is "Enum", classify it as an enum
+        if (name == "Enum")
+        {
+            tokens.emplace_back(SemanticToken{location.begin, location.end, lsp::SemanticTokenTypes::Enum, lsp::SemanticTokenModifiers::DefaultLibrary});
+        }
+        // If it starts with an uppercase letter, flag it as a class
+        // Otherwise, flag it as a builtin
+        else if (isupper(name.value[0]))
+        {
+            tokens.emplace_back(SemanticToken{location.begin, location.end, lsp::SemanticTokenTypes::Class, lsp::SemanticTokenModifiers::DefaultLibrary});
+        }
+        else
+        {
+            auto type = inferTokenType(ty, lsp::SemanticTokenTypes::Variable, builtinTypes);
+            tokens.emplace_back(
+                SemanticToken{location.begin, location.end, type, lsp::SemanticTokenModifiers::DefaultLibrary | lsp::SemanticTokenModifiers::Readonly});
+        }
+    }
+
     bool visit(Luau::AstExprGlobal* global) override
     {
         auto it = builtinGlobals.find(global->name);
@@ -358,25 +381,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             if (grammarHighlightsNone && global->name == "none")
                 return true;
 
-            // SPECIAL CASE: if name is "Enum", classify it as an enum
-            if (global->name == "Enum")
-            {
-                tokens.emplace_back(SemanticToken{
-                    global->location.begin, global->location.end, lsp::SemanticTokenTypes::Enum, lsp::SemanticTokenModifiers::DefaultLibrary});
-            }
-            // If it starts with an uppercase letter, flag it as a class
-            // Otherwise, flag it as a builtin
-            else if (isupper(global->name.value[0]))
-            {
-                tokens.emplace_back(SemanticToken{
-                    global->location.begin, global->location.end, lsp::SemanticTokenTypes::Class, lsp::SemanticTokenModifiers::DefaultLibrary});
-            }
-            else
-            {
-                auto type = inferTokenType(it->second, lsp::SemanticTokenTypes::Variable, builtinTypes);
-                tokens.emplace_back(SemanticToken{global->location.begin, global->location.end, type,
-                    lsp::SemanticTokenModifiers::DefaultLibrary | lsp::SemanticTokenModifiers::Readonly});
-            }
+            addBuiltinGlobalToken(global->name, global->location, it->second);
         }
         else
         {
@@ -619,6 +624,349 @@ void addMoonwaveTagTokens(std::vector<SemanticToken>& tokens, const Luau::Source
     }
 }
 
+// Luwu doc references: the code in a doc comment (`[str.startswith]`, `[Parser:advance]`, `[type Options]`,
+// `[json = require("@std/json")]`) is coloured like the same code outside one, resolved the way Luwu's DocChecker
+// resolves it. What the docref parser didn't take as code (markdown links, `[optional]` prose) stays comment text.
+struct DocRefTokens
+{
+    SemanticTokensVisitor& visitor;
+    const Luau::Frontend& frontend;
+    const Luau::SourceModule& sourceModule;
+
+    using Bindings = std::unordered_map<std::string, Luau::AstExpr*>;
+    Bindings moduleBindings;
+
+    // What one doc comment's code can name
+    struct Names
+    {
+        Luau::ScopePtr scope;
+        Bindings own;
+    };
+
+    // A binding that names another is resolved through it; this bounds `[a = b]` `[b = a]`
+    static constexpr int kMaxDepth = 16;
+
+    void run()
+    {
+        for (const Luau::DocComment& doc : sourceModule.docComments)
+        {
+            if (doc.moduleDoc)
+            {
+                for (const Luau::DocBinding& binding : doc.bindings)
+                    moduleBindings[binding.name.value] = binding.value;
+            }
+        }
+
+        for (const Luau::DocComment& doc : sourceModule.docComments)
+        {
+            Names names{scopeFor(doc), {}};
+            if (!doc.moduleDoc)
+            {
+                for (const Luau::DocBinding& binding : doc.bindings)
+                    names.own[binding.name.value] = binding.value;
+            }
+
+            for (const Luau::DocBinding& binding : doc.bindings)
+            {
+                size_t first = visitor.tokens.size();
+                auto type = lsp::SemanticTokenTypes::Variable;
+                if (auto ty = typeOf(binding.value, names, 0))
+                    type = inferTokenType(*ty, type, visitor.builtinTypes);
+                visitor.tokens.emplace_back(
+                    SemanticToken{binding.nameLocation.begin, binding.nameLocation.end, type, lsp::SemanticTokenModifiers::Declaration});
+                addExprTokens(binding.value, names);
+                finishSpan(first, Luau::Location{binding.nameLocation.begin, binding.value->location.end});
+            }
+
+            for (const Luau::DocRef& ref : doc.refs)
+            {
+                size_t first = visitor.tokens.size();
+                if (ref.type)
+                {
+                    addTypeTokens(ref, names);
+                    finishSpan(first, ref.location);
+                    continue;
+                }
+
+                addExprTokens(ref.expr, names);
+                if (ref.method)
+                {
+                    auto type = lsp::SemanticTokenTypes::Method;
+                    if (auto ty = memberType(typeOf(ref.expr, names, 0), ref.method->value))
+                        type = inferTokenType(*ty, type, visitor.builtinTypes);
+                    visitor.tokens.emplace_back(
+                        SemanticToken{ref.methodLocation.begin, ref.methodLocation.end, type, lsp::SemanticTokenModifiers::None});
+                }
+                finishSpan(first, ref.location);
+            }
+        }
+    }
+
+    // The tokens from `first` on are the code in `[...]`, `code` being what's inside the brackets. They're marked
+    // `documentation`, which the extension un-italicises (a comment's italics outlast a semantic token's colour), and
+    // the brackets and what's between the tokens (`.`, `:`, parentheses) become punctuation, so the whole `[...]`
+    // reads as one piece of code rather than code with comment bits in it.
+    void finishSpan(size_t first, const Luau::Location& code)
+    {
+        std::vector<std::pair<unsigned, unsigned>> covered;
+        for (size_t i = first; i < visitor.tokens.size(); ++i)
+        {
+            SemanticToken& token = visitor.tokens[i];
+            token.tokenModifiers = token.tokenModifiers | lsp::SemanticTokenModifiers::Documentation;
+            if (token.start.line == code.begin.line && token.end.line == code.begin.line)
+                covered.emplace_back(token.start.column, token.end.column);
+        }
+
+        // a doc reference is on one line
+        if (code.begin.line != code.end.line || code.begin.column == 0)
+            return;
+
+        std::sort(covered.begin(), covered.end());
+        unsigned line = code.begin.line;
+        unsigned at = code.begin.column - 1;
+        // past the `]`
+        unsigned end = code.end.column + 1;
+        auto addPunctuation = [&](unsigned from, unsigned to)
+        {
+            if (from < to)
+                visitor.tokens.emplace_back(SemanticToken{
+                    Luau::Position{line, from}, Luau::Position{line, to}, lsp::SemanticTokenTypes::Punctuation,
+                    lsp::SemanticTokenModifiers::Documentation});
+        };
+        for (const auto& [begin, tokenEnd] : covered)
+        {
+            addPunctuation(at, std::min(begin, end));
+            at = std::max(at, tokenEnd);
+        }
+        addPunctuation(at, end);
+    }
+
+    Luau::ScopePtr scopeFor(const Luau::DocComment& doc) const
+    {
+        if (doc.functionBody)
+        {
+            if (auto scope = Luau::findScopeAtPosition(*visitor.module, *doc.functionBody))
+                return scope;
+        }
+        if (auto scope = Luau::findScopeAtPosition(*visitor.module, doc.location.begin))
+            return scope;
+        return visitor.module->getModuleScope();
+    }
+
+    Luau::AstExpr* boundValue(const std::string& name, const Names& names) const
+    {
+        if (auto it = names.own.find(name); it != names.own.end())
+            return it->second;
+        if (auto it = moduleBindings.find(name); it != moduleBindings.end())
+            return it->second;
+        return nullptr;
+    }
+
+    static std::optional<Luau::TypeId> memberType(std::optional<Luau::TypeId> parent, const char* name)
+    {
+        if (!parent)
+            return std::nullopt;
+        auto props = lookupProp(Luau::follow(*parent), name);
+        if (props.size() != 1 || !props[0].property.readTy)
+            return std::nullopt;
+        return Luau::follow(*props[0].property.readTy);
+    }
+
+    // `[@std/str]` stands for `require("@std/str")`, a call the parser made up: all of it is the path
+    static bool isRequirePath(const Luau::AstExprCall* call)
+    {
+        return call->func->location == call->location;
+    }
+
+    std::optional<Luau::TypeId> requireType(const Luau::AstExprCall* call) const
+    {
+        if (call->args.size != 1 || !call->args.data[0]->is<Luau::AstExprConstantString>())
+            return std::nullopt;
+        Luau::ModuleInfo context{sourceModule.name};
+        Luau::TypeCheckLimits limits;
+        auto info = frontend.fileResolver->resolveModule(&context, call->args.data[0], limits);
+        if (!info)
+            return std::nullopt;
+        auto required = frontend.moduleResolverForAutocomplete.getModule(info->name);
+        if (!required || !required->returnType)
+            return std::nullopt;
+        return Luau::first(required->returnType);
+    }
+
+    std::optional<Luau::TypeId> typeOf(Luau::AstExpr* expr, const Names& names, int depth) const
+    {
+        if (depth > kMaxDepth)
+            return std::nullopt;
+        if (auto global = expr->as<Luau::AstExprGlobal>())
+        {
+            if (auto value = boundValue(global->name.value, names))
+                return typeOf(value, names, depth + 1);
+            if (auto binding = names.scope->linearSearchForBindingPair(global->name.value, true))
+                return Luau::follow(binding->second.typeId);
+            return std::nullopt;
+        }
+        if (auto index = expr->as<Luau::AstExprIndexName>())
+            return memberType(typeOf(index->expr, names, depth + 1), index->index.value);
+        if (auto call = expr->as<Luau::AstExprCall>())
+        {
+            auto func = call->func->as<Luau::AstExprGlobal>();
+            if (func && func->name == "require")
+                return requireType(call);
+            return std::nullopt;
+        }
+        if (auto group = expr->as<Luau::AstExprGroup>())
+            return typeOf(group->expr, names, depth + 1);
+        return std::nullopt;
+    }
+
+    void addToken(const Luau::Location& location, lsp::SemanticTokenTypes type, lsp::SemanticTokenModifiers modifiers = lsp::SemanticTokenModifiers::None)
+    {
+        visitor.tokens.emplace_back(SemanticToken{location.begin, location.end, type, modifiers});
+    }
+
+    void addNameToken(Luau::AstExprGlobal* global, const Names& names)
+    {
+        if (auto value = boundValue(global->name.value, names))
+        {
+            auto type = lsp::SemanticTokenTypes::Variable;
+            if (auto ty = typeOf(value, names, 1))
+                type = inferTokenType(*ty, type, visitor.builtinTypes);
+            addToken(global->location, type);
+            return;
+        }
+
+        if (auto binding = names.scope->linearSearchForBindingPair(global->name.value, true))
+        {
+            Luau::AstLocal* local = binding->first.local;
+            if (!local)
+            {
+                if (auto it = visitor.builtinGlobals.find(global->name); it != visitor.builtinGlobals.end())
+                {
+                    visitor.addBuiltinGlobalToken(global->name, global->location, it->second);
+                    return;
+                }
+            }
+
+            auto base = lsp::SemanticTokenTypes::Variable;
+            if (auto it = visitor.localMap.find(local); local && it != visitor.localMap.end())
+            {
+                if (it->second == AstLocalInfo::Self)
+                {
+                    addToken(global->location, lsp::SemanticTokenTypes::Property, lsp::SemanticTokenModifiers::DefaultLibrary);
+                    return;
+                }
+                base = lsp::SemanticTokenTypes::Parameter;
+            }
+            addToken(global->location, inferTokenType(binding->second.typeId, base, visitor.builtinTypes));
+            return;
+        }
+
+        // a type name is a reference too: `[Pathlike]`
+        if (auto typeFun = names.scope->lookupType(global->name.value))
+        {
+            addToken(global->location, typeNameTokenType(typeFun->type));
+            return;
+        }
+
+        addToken(global->location, lsp::SemanticTokenTypes::Variable);
+    }
+
+    lsp::SemanticTokenTypes typeNameTokenType(Luau::TypeId ty) const
+    {
+        if (namesTrait(ty))
+            return lsp::SemanticTokenTypes::Interface;
+        if (namesUserDefinedClass(ty, visitor.builtinTypes))
+            return lsp::SemanticTokenTypes::Class;
+        return lsp::SemanticTokenTypes::Type;
+    }
+
+    void addExprTokens(Luau::AstExpr* expr, const Names& names)
+    {
+        struct Walker : Luau::AstVisitor
+        {
+            DocRefTokens& self;
+            const Names& names;
+
+            Walker(DocRefTokens& self, const Names& names)
+                : self(self)
+                , names(names)
+            {
+            }
+
+            bool visit(Luau::AstExprGlobal* global) override
+            {
+                self.addNameToken(global, names);
+                return false;
+            }
+
+            bool visit(Luau::AstExprIndexName* index) override
+            {
+                auto parent = self.typeOf(index->expr, names, 0);
+                auto type = lsp::SemanticTokenTypes::Property;
+                auto modifiers = lsp::SemanticTokenModifiers::None;
+                if (auto ty = memberType(parent, index->index.value))
+                    type = inferTokenType(*ty, type, self.visitor.builtinTypes);
+                if (auto global = index->expr->as<Luau::AstExprGlobal>(); global && !self.boundValue(global->name.value, names))
+                {
+                    auto binding = names.scope->linearSearchForBindingPair(global->name.value, true);
+                    if ((!binding || !binding->first.local) && self.visitor.builtinGlobals.count(global->name))
+                        modifiers = lsp::SemanticTokenModifiers::DefaultLibrary | lsp::SemanticTokenModifiers::Readonly;
+                }
+                self.addToken(index->indexLocation, type, modifiers);
+                return true;
+            }
+
+            bool visit(Luau::AstExprCall* call) override
+            {
+                if (isRequirePath(call))
+                {
+                    self.addToken(call->location, lsp::SemanticTokenTypes::String);
+                    return false;
+                }
+                return true;
+            }
+
+            bool visit(Luau::AstExprConstantString* string) override
+            {
+                self.addToken(string->location, lsp::SemanticTokenTypes::String);
+                return false;
+            }
+
+            bool visit(Luau::AstExprConstantNumber* number) override
+            {
+                self.addToken(number->location, lsp::SemanticTokenTypes::Number);
+                return false;
+            }
+        };
+
+        Walker walker{*this, names};
+        expr->visit(&walker);
+    }
+
+    // `[type T]`, `[type mod.T]`
+    void addTypeTokens(const Luau::DocRef& ref, const Names& names)
+    {
+        auto reference = ref.type->as<Luau::AstTypeReference>();
+        if (!reference)
+            return;
+
+        Luau::Position keywordEnd{ref.location.begin.line, ref.location.begin.column + 4};
+        addToken(Luau::Location{ref.location.begin, keywordEnd}, lsp::SemanticTokenTypes::Keyword);
+
+        std::optional<Luau::TypeFun> typeFun;
+        if (reference->prefix)
+        {
+            if (reference->prefixLocation)
+                addToken(*reference->prefixLocation, lsp::SemanticTokenTypes::Namespace);
+            typeFun = names.scope->lookupImportedType(reference->prefix->value, reference->name.value);
+        }
+        else
+            typeFun = names.scope->lookupType(reference->name.value);
+
+        addToken(reference->nameLocation, typeFun ? typeNameTokenType(typeFun->type) : lsp::SemanticTokenTypes::Type);
+    }
+};
+
 std::vector<SemanticToken> getSemanticTokens(
     const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule, bool grammarHighlightsNone)
 {
@@ -627,6 +975,10 @@ std::vector<SemanticToken> getSemanticTokens(
 
     SemanticTokensVisitor visitor{module, builtinGlobals, frontend.builtinTypes, grammarHighlightsNone};
     visitor.visit(sourceModule->root);
+
+    DocRefTokens docRefs{visitor, frontend, *sourceModule};
+    docRefs.run();
+
     return visitor.tokens;
 }
 

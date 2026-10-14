@@ -110,6 +110,12 @@
         }
       }
     ],
+    "semanticTokenTypes": [
+      {
+        "id": "punctuation",
+        "description": "Punctuation in code: the brackets around Luwu code in a doc comment, and the dots, colons and parentheses in it"
+      }
+    ],
     "semanticTokenScopes": [
       {
         "language": "luwu",
@@ -227,6 +233,10 @@
         "command": "luwu.toggleHoverTraits",
         "title": "Luwu: Show or Hide Traits in Hovers",
         "enablement": "resourceLangId == luwu || resourceLangId == luau || resourceLangId == lua"
+      },
+      {
+        "command": "luwu.toggleDiagnosticHelp",
+        "title": "Luwu: Show or Hide Help in Diagnostics"
       }
     ],
     "keybindings": [
@@ -345,7 +355,9 @@
               "type": "string"
             },
             "default": [
-              "**/_Index/**"
+              "**/_Index/**",
+              "**/luau_packages/**",
+              "**/.pesde/**"
             ],
             "scope": "resource"
           },
@@ -476,6 +488,12 @@
             "markdownDescription": "Use strict DataModel types in diagnostics. When on, this is equivalent to the more expressive autocompletion types. When this is off, `game`/`script`/`workspace` (and their members) are all typed as `any`, and helps to prevent false positives. [Read More](https://github.com/JohnnyMorganz/luau-lsp/issues/83#issuecomment-1192865024)",
             "type": "boolean",
             "default": false,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.showHelp": {
+            "markdownDescription": "Show the `Help (...)` paragraphs in diagnostics, and the diagnostics that are only help. Turn it off to see only what is wrong. `Luwu: Show or Hide Help in Diagnostics` toggles it.",
+            "type": "boolean",
+            "default": true,
             "scope": "resource"
           },
           "luwu.diagnostics.pullOnChange": {
@@ -1106,7 +1124,9 @@
               "type": "string"
             },
             "default": [
-              "**/_Index/**"
+              "**/_Index/**",
+              "**/luau_packages/**",
+              "**/.pesde/**"
             ],
             "scope": "resource"
           },
@@ -1237,6 +1257,12 @@
             "markdownDescription": "Use strict DataModel types in diagnostics. When on, this is equivalent to the more expressive autocompletion types. When this is off, `game`/`script`/`workspace` (and their members) are all typed as `any`, and helps to prevent false positives. [Read More](https://github.com/JohnnyMorganz/luau-lsp/issues/83#issuecomment-1192865024)",
             "type": "boolean",
             "default": false,
+            "scope": "resource"
+          },
+          "luau-lsp.diagnostics.showHelp": {
+            "markdownDescription": "Show the `Help (...)` paragraphs in diagnostics, and the diagnostics that are only help. Turn it off to see only what is wrong. `Luwu: Show or Hide Help in Diagnostics` toggles it.",
+            "type": "boolean",
+            "default": true,
             "scope": "resource"
           },
           "luau-lsp.diagnostics.pullOnChange": {
@@ -1805,6 +1831,13 @@
       },
       "[luau]": {
         "editor.formatOnType": true
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "rules": {
+          "*.documentation": {
+            "italic": false
+          }
+        }
       }
     },
     "walkthroughs": [

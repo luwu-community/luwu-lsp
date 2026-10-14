@@ -34,6 +34,8 @@ enum struct SemanticTokenTypes
     RegExp,
     Operator,
     Decorator,
+    // not a standard type: the extension declares it (`semanticTokenTypes`)
+    Punctuation,
 };
 const SemanticTokenTypes SemanticTokenTypesList[] = {
     SemanticTokenTypes::Namespace,
@@ -59,6 +61,7 @@ const SemanticTokenTypes SemanticTokenTypesList[] = {
     SemanticTokenTypes::RegExp,
     SemanticTokenTypes::Operator,
     SemanticTokenTypes::Decorator,
+    SemanticTokenTypes::Punctuation,
 };
 NLOHMANN_JSON_SERIALIZE_ENUM(SemanticTokenTypes, {
                                                      {SemanticTokenTypes::Namespace, "namespace"},
@@ -84,6 +87,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(SemanticTokenTypes, {
                                                      {SemanticTokenTypes::RegExp, "regexp"},
                                                      {SemanticTokenTypes::Operator, "operator"},
                                                      {SemanticTokenTypes::Decorator, "decorator"},
+                                                     {SemanticTokenTypes::Punctuation, "punctuation"},
                                                  })
 
 enum struct SemanticTokenModifiers : uint16_t

@@ -8,6 +8,7 @@ LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuIfLocal)
 LUAU_FASTFLAG(LuwuTableComprehensions)
 LUAU_FASTFLAG(LuwuDoExpr)
+LUAU_FASTFLAG(LuwuInLuwuDocs)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -365,6 +366,57 @@ TEST_CASE_FIXTURE(Fixture, "moonwave_tags_at_the_start_of_doc_lines")
     CHECK_EQ(tokens[0].tokenType, lsp::SemanticTokenTypes::Decorator);
     CHECK_EQ(tokens[1].start.column, 19);
     CHECK_EQ(tokens[1].tokenType, lsp::SemanticTokenTypes::Parameter);
+}
+
+TEST_CASE_FIXTURE(Fixture, "doc_reference_code_is_highlighted_like_code")
+{
+    ScopedFastFlag inLuwuDocs{FFlag::LuwuInLuwuDocs, true};
+
+    std::string source = "local lib = { go = function() end, count = 1 }\n"
+                         "type Options = { x: number }\n"
+                         "--- uses [lib.go] and [lib.count], see [type Options] and [Options]\n"
+                         "--- [fmt = lib]\n"
+                         "--- then [fmt.go] and [string.split], [@std/str] and [a link]\n"
+                         "---\n"
+                         "--- [a link]: https://example.com\n"
+                         "local function f(n: number) end\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    auto expect = [&](Luau::Position position, lsp::SemanticTokenTypes type)
+    {
+        auto token = getSemanticToken(tokens, position);
+        REQUIRE_MESSAGE(token, "no token at " << position.line << ":" << position.column);
+        CHECK_MESSAGE(token->tokenType == type, "at " << position.line << ":" << position.column << ": " << int(token->tokenType));
+    };
+
+    expect(wordPosition(source, 2, "lib"), lsp::SemanticTokenTypes::Variable);
+    expect(wordPosition(source, 2, "go"), lsp::SemanticTokenTypes::Function);
+    expect(wordPosition(source, 2, "count"), lsp::SemanticTokenTypes::Property);
+    expect(wordPosition(source, 2, "type"), lsp::SemanticTokenTypes::Keyword);
+    expect(wordPosition(source, 2, "Options"), lsp::SemanticTokenTypes::Type);
+    expect(wordPosition(source, 2, "Options", 1), lsp::SemanticTokenTypes::Type);
+    expect(wordPosition(source, 3, "fmt"), lsp::SemanticTokenTypes::Variable);
+    expect(wordPosition(source, 3, "lib"), lsp::SemanticTokenTypes::Variable);
+    // through the binding
+    expect(wordPosition(source, 4, "go"), lsp::SemanticTokenTypes::Function);
+    expect(wordPosition(source, 4, "string"), lsp::SemanticTokenTypes::Variable);
+    // the string library's functions take a `self`, so `string.split` is a method in code too
+    expect(wordPosition(source, 4, "split"), lsp::SemanticTokenTypes::Method);
+    expect(wordPosition(source, 4, "@std/str"), lsp::SemanticTokenTypes::String);
+
+    // the brackets and dots are punctuation, and all of it is marked as code in documentation
+    expect(wordPosition(source, 2, "[lib"), lsp::SemanticTokenTypes::Punctuation);
+    expect(wordPosition(source, 2, ".go"), lsp::SemanticTokenTypes::Punctuation);
+    expect(wordPosition(source, 2, "] and"), lsp::SemanticTokenTypes::Punctuation);
+    expect(wordPosition(source, 3, " = "), lsp::SemanticTokenTypes::Punctuation);
+    auto go = getSemanticToken(tokens, wordPosition(source, 2, "go"));
+    REQUIRE(go);
+    CHECK_EQ(go->tokenModifiers, lsp::SemanticTokenModifiers::Documentation);
+
+    // a markdown link is prose
+    CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 4, "a link")));
+    CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 2, "uses")));
 }
 
 TEST_SUITE_END();

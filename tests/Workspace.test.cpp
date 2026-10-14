@@ -112,6 +112,16 @@ TEST_CASE_FIXTURE(Fixture, "isIgnoredFile")
 #endif
 }
 
+TEST_CASE_FIXTURE(Fixture, "package_folders_are_ignored_by_default")
+{
+    client->globalConfig.ignoreGlobs = ClientConfiguration{}.ignoreGlobs;
+
+    CHECK_EQ(workspace.isIgnoredFile(workspace.rootUri.resolvePath("src/init.luau")), false);
+    CHECK_EQ(workspace.isIgnoredFile(workspace.rootUri.resolvePath("Packages/_Index/source.luau")), true);
+    CHECK_EQ(workspace.isIgnoredFile(workspace.rootUri.resolvePath("luau_packages/signal.luau")), true);
+    CHECK_EQ(workspace.isIgnoredFile(workspace.rootUri.resolvePath("luau_packages/.pesde/scope+signal/0.1.0/signal/init.luau")), true);
+}
+
 TEST_CASE_FIXTURE(Fixture, "isDefinitionsFile")
 {
     client->globalConfig.types.definitionFiles = {{"@roblox", "globalTypes.d.luau"}};

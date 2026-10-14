@@ -14,7 +14,11 @@
 /// which notation it used rather than explaining it. The editor shows every diagnostic under the cursor
 /// in one hover, so errors whose ranges overlap are grouped and the last of each group gets one legend
 /// for everything the group used.
-static void appendMismatchLegends(std::vector<lsp::Diagnostic>& items, const std::vector<std::pair<size_t, uint8_t>>& notations)
+static void appendMismatchLegends(
+    std::vector<lsp::Diagnostic>& items,
+    const std::vector<std::pair<size_t, uint8_t>>& notations,
+    const Luau::Helpifier& helpifier
+)
 {
     std::vector<std::pair<size_t, uint8_t>> ordered = notations;
     std::sort(
@@ -40,7 +44,7 @@ static void appendMismatchLegends(std::vector<lsp::Diagnostic>& items, const std
             ++end;
         }
 
-        std::string legend = Luau::mismatchNotationLegend(notation);
+        std::string legend = Luau::mismatchNotationLegend(notation, helpifier);
         if (!legend.empty())
             items[ordered[end - 1].first].message += "\n\n" + legend;
 
@@ -162,7 +166,14 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
         }
     }
 
-    appendMismatchLegends(report.items, mismatchNotations);
+    appendMismatchLegends(report.items, mismatchNotations, Luau::Helpifier{config.diagnostics.showHelp});
+
+    // Luwu: notes on code that an error elsewhere explains
+    if (Luau::ModulePtr module = frontend.moduleResolver.getModule(moduleName))
+    {
+        for (const Luau::DiagnosticNote& note : module->notes)
+            report.items.emplace_back(createNoteDiagnostic(note, *textDocument));
+    }
 
     // Convert the related diagnostics map into an equivalent report
     if (supportsRelatedDocuments(client->capabilities) && !relatedDiagnostics.empty())
@@ -270,6 +281,13 @@ lsp::WorkspaceDiagnosticReport WorkspaceFolder::workspaceDiagnostics(const lsp::
                 auto diagnostic = createTypeErrorDiagnostic(error, &fileResolver, document);
                 documentReport.items.emplace_back(diagnostic);
             }
+        }
+
+        // Luwu: notes on code that an error elsewhere explains
+        if (Luau::ModulePtr module = frontend.moduleResolver.getModule(moduleName))
+        {
+            for (const Luau::DiagnosticNote& note : module->notes)
+                documentReport.items.emplace_back(createNoteDiagnostic(note, document));
         }
 
         // Report Lint Warnings

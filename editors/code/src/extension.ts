@@ -47,6 +47,7 @@ import { registerLegacySettingsNotice } from "./legacySettingsNotice";
 import { registerRequireGraph } from "./requireGraph";
 import { registerMatchingKeyword } from "./matchingKeyword";
 import { hoverMiddleware, registerHoverVerbosity } from "./hoverVerbosity";
+import { registerDiagnosticHelp } from "./diagnosticHelp";
 
 import { registerViewInternalSource } from "./internalSource";
 
@@ -696,6 +697,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
   clientDisposables.push(...registerRequireGraph(context, client));
   clientDisposables.push(...registerMatchingKeyword(context, client));
   clientDisposables.push(...registerHoverVerbosity());
+  clientDisposables.push(...registerDiagnosticHelp());
   clientDisposables.push(...registerViewInternalSource(context, client));
   clientDisposables.push(
     vscode.commands.registerCommand("luwu.openWalkthrough", () => {

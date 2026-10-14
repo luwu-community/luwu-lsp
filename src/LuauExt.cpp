@@ -910,6 +910,11 @@ lsp::Position toUTF16(const TextDocument* textDocument, const Luau::Position& po
         return lsp::Position{static_cast<size_t>(position.line), static_cast<size_t>(position.column)};
 }
 
+static lsp::Range toUTF16Range(const TextDocument* textDocument, const Luau::Location& location)
+{
+    return {toUTF16(textDocument, location.begin), toUTF16(textDocument, location.end)};
+}
+
 lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::FileResolver* fileResolver, const TextDocument* textDocument)
 {
     std::string message;
@@ -928,6 +933,9 @@ lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::Fi
         message = "DocSyntaxError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
     else if (error.inDocComment)
         message = "DocTypeError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
+    // Luwu: a misspelled name is labeled as one, so it isn't read as a broken type
+    else if (Luau::get_if<Luau::Typo>(&error.data))
+        message = "Typo: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
     else
         message = "TypeError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
 
@@ -938,6 +946,24 @@ lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::Fi
     diagnostic.severity = lsp::DiagnosticSeverity::Error;
     diagnostic.range = {toUTF16(textDocument, error.location.begin), toUTF16(textDocument, error.location.end)};
     diagnostic.codeDescription = {Uri::parse("https://luau.org/types")};
+
+    // Luwu: a local with no type links to the error that left it without one
+    if (const auto* noType = Luau::get_if<Luau::NoTypeUse>(&error.data); noType && noType->origin && textDocument)
+        diagnostic.relatedInformation.push_back({{textDocument->uri(), toUTF16Range(textDocument, *noType->origin)}, "the error"});
+
+    return diagnostic;
+}
+
+lsp::Diagnostic createNoteDiagnostic(const Luau::DiagnosticNote& note, const TextDocument* textDocument)
+{
+    lsp::Diagnostic diagnostic;
+    diagnostic.source = "Luwu";
+    diagnostic.code = "Note";
+    diagnostic.message = "Note: " + note.message;
+    diagnostic.severity = lsp::DiagnosticSeverity::Information;
+    diagnostic.range = toUTF16Range(textDocument, note.location);
+    if (note.origin && textDocument)
+        diagnostic.relatedInformation.push_back({{textDocument->uri(), toUTF16Range(textDocument, *note.origin)}, "the error"});
     return diagnostic;
 }
 

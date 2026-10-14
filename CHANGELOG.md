@@ -12,10 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Hovers now print long function types and multi-line unions readably, and no longer summarize a class twice
 - Added a "Put each parameter on its own line" / "Put parameters on one line" refactor action, offered with the cursor in any function, method, or class primary constructor parameter list. The wrapped form puts one parameter per line and aligns the closing `)` with the function, using the document's own indentation (tabs or spaces)
 - Added "Make access specifiers explicit/implicit" refactor actions, offered anywhere inside a class with no syntax error required, to add `public` to every member and primary constructor field parameter or remove it from all of them. Not offered for a class with a `private` member, which has to qualify everything
+- Added `diagnostics.showHelp` (on by default) and the `Luwu: Show or Hide Help in Diagnostics` command: off, diagnostics leave out their `Help (...)` paragraphs and the diagnostics that are only help
+- Uses of a local left without a type by an error elsewhere get an information-level note linking to that error
 - Added a `blockEndHints` inlay hint (enabled by default) that labels the `end` of long functions, loops, `if`/`elseif`/`else` chains, and classes (e.g. `end function foo`, `end for k, v in pairs(t)`) once a block spans at least `blockEndHintsMinLines` lines (default 35), similar to rust-analyzer's closing brace hints
 
 ### Changed
 
+- `ignoreGlobs` now also ignores pesde's `**/luau_packages/**` and `**/.pesde/**` by default, alongside Wally's `**/_Index/**`
 - Luwu's own language features are now enabled by default: every `Luwu`-prefixed FFlag, including `LuwuClasses`, which gates classes. Pass `--luau-compat` (or set `luau-lsp.luauCompatibilityMode`) for Luau compatibility mode, which turns them all off
 - The new type solver (`LuauSolverV2`) is now enabled in every configuration, including Luau compatibility mode. `luau-lsp.fflags.enableNewSolver` now defaults to `true`. Both remain overridable via `--flag:LuauSolverV2=false` / `luau-lsp.fflags.override`
 - `platform.type` now defaults to `standard` instead of `roblox`; set it to `roblox` to enable Roblox support (sourcemaps, DataModel types, Roblox definitions)

@@ -152,6 +152,8 @@ std::optional<Luau::ModuleName> lookupImportedModule(const Luau::Scope& deepScop
 lsp::Position toUTF16(const TextDocument* textDocument, const Luau::Position& position);
 
 lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::FileResolver* fileResolver, const TextDocument* textDocument = nullptr);
+// Luwu: a note (Module::notes) on code an error elsewhere explains, shown less prominently than an error
+lsp::Diagnostic createNoteDiagnostic(const Luau::DiagnosticNote& note, const TextDocument* textDocument);
 lsp::Diagnostic createLintDiagnostic(const Luau::LintWarning& lint, const TextDocument* textDocument = nullptr);
 lsp::Diagnostic createParseErrorDiagnostic(const Luau::ParseError& error, const TextDocument* textDocument = nullptr);
 

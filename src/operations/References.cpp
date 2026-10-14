@@ -430,19 +430,66 @@ struct FindClassMemberReferences : public Luau::AstVisitor
 
     bool visit(Luau::AstStatClass* classStat) override
     {
+        bool restatedInFamily = false;
         for (const auto& member : classStat->members)
         {
             const Luau::Location* nameLocation = nullptr;
-            if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name == name.c_str())
+            const auto* prop = member.get_if<Luau::AstClassProperty>();
+            if (prop && prop->name == name.c_str())
                 nameLocation = &prop->nameLocation;
             else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == name.c_str())
                 nameLocation = &method->nameLocation;
 
             if (nameLocation && contains(family, types::ClassMemberOrigin{moduleName, *nameLocation}))
+            {
                 add(*nameLocation);
+                restatedInFamily = prop != nullptr;
+            }
         }
+
+        // Luwu Classes: a primary constructor parameter is the field it sets (`class Cat(name)` has `self.name`), which
+        // the parameter declares unless the body restates it. Renaming the field renames the parameter and its uses.
+        if (classStat->primaryConstructor)
+        {
+            for (Luau::AstLocal* param : classStat->primaryConstructor->args)
+            {
+                if (param->name != name.c_str())
+                    continue;
+                if (!restatedInFamily && !contains(family, types::ClassMemberOrigin{moduleName, param->location}))
+                    continue;
+
+                add(param->location);
+                addLocalUses(classStat, param);
+            }
+        }
+
         // methods may use the member through `self`
         return true;
+    }
+
+    void addLocalUses(Luau::AstStatClass* classStat, Luau::AstLocal* local)
+    {
+        struct Finder : Luau::AstVisitor
+        {
+            FindClassMemberReferences& self;
+            Luau::AstLocal* local;
+
+            Finder(FindClassMemberReferences& self, Luau::AstLocal* local)
+                : self(self)
+                , local(local)
+            {
+            }
+
+            bool visit(Luau::AstExprLocal* expr) override
+            {
+                if (expr->local == local)
+                    self.add(expr->location);
+                return true;
+            }
+        };
+
+        Finder finder{*this, local};
+        classStat->visit(&finder);
     }
 };
 
@@ -455,6 +502,14 @@ std::optional<Luau::Location> findOwnClassMember(Luau::AstStatClass* classStat, 
             return prop->nameLocation;
         else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == name.c_str())
             return method->nameLocation;
+    }
+
+    // a primary constructor parameter the body doesn't restate declares its field
+    if (classStat->primaryConstructor)
+    {
+        for (Luau::AstLocal* param : classStat->primaryConstructor->args)
+            if (param->name == name.c_str())
+                return param->location;
     }
     return std::nullopt;
 }

@@ -108,6 +108,8 @@ public:
     bool isPluginFile(const Uri& uri) const;
     /// Reload all plugins from disk and invalidate cached transformations
     void reloadPlugins();
+    // Marks every module dirty, so the next check of each runs again
+    void markAllDirty();
 
     lsp::DocumentDiagnosticReport documentDiagnostics(
         const lsp::DocumentDiagnosticParams& params, const LSPCancellationToken& cancellationToken, bool allowUnmanagedFiles = false);

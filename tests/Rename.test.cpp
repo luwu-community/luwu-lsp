@@ -814,6 +814,40 @@ local u = Unrelated():speak()
         });
 }
 
+TEST_CASE_FIXTURE(Fixture, "rename_primary_constructor_parameter_renames_its_field")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+class WrappedString(text: string)
+    function starts_with(self, what: string)
+        return string.find(self.text, what) == 1
+    end
+    function __tostring(self)
+        return self.text
+    end
+end
+local w = WrappedString("hi")
+print(w.text)
+)";
+    auto uri = newDocument("main.luau", source);
+    std::vector expected{
+        positionOf(source, "text"), positionOf(source, "text", 1), positionOf(source, "text", 2), positionOf(source, "text", 3)};
+
+    // from the parameter, from `self.text` in a method, and from a use outside the class
+    for (size_t occurrence : {0, 1, 3})
+    {
+        lsp::RenameParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = positionOf(source, "text", occurrence);
+        params.newName = "value";
+
+        auto result = workspace.rename(params, nullptr);
+        CHECK_EQ(renamedPositions(result, uri), expected);
+    }
+}
+
 TEST_CASE_FIXTURE(Fixture, "rename_type_function")
 {
     ENABLE_NEW_SOLVER();

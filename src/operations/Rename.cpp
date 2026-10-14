@@ -61,6 +61,34 @@ static Luau::AstStatClass* findClassStatByName(Luau::AstStatBlock* root, const L
     return nullptr;
 }
 
+// Luwu Classes: where the field a primary constructor parameter sets is declared (`class Cat(name)` has `self.name`): the
+// body's restatement of it if there is one, the parameter otherwise. None when `local` isn't such a parameter, or a
+// method of the same name means there is no field.
+static std::optional<types::ClassMemberOrigin> primaryConstructorFieldOrigin(
+    Luau::AstStatBlock* root, const Luau::ModuleName& moduleName, Luau::AstLocal* local)
+{
+    for (Luau::AstStat* stat : root->body)
+    {
+        auto* classStat = stat->as<Luau::AstStatClass>();
+        if (!classStat || !classStat->primaryConstructor)
+            continue;
+
+        const auto& args = classStat->primaryConstructor->args;
+        if (std::find(args.begin(), args.end(), local) == args.end())
+            continue;
+
+        for (const auto& member : classStat->members)
+        {
+            if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name == local->name)
+                return types::ClassMemberOrigin{moduleName, prop->nameLocation};
+            if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == local->name)
+                return std::nullopt;
+        }
+        return types::ClassMemberOrigin{moduleName, local->location};
+    }
+    return std::nullopt;
+}
+
 static std::vector<lsp::Location> findAllReferencesForRenaming(
     WorkspaceFolder* workspaceFolder, const lsp::RenameParams& params, const LSPCancellationToken& cancellationToken)
 {
@@ -102,6 +130,21 @@ std::vector<lsp::Location> getReferencesForRenaming(
                 return classMemberLocations(workspaceFolder, {moduleName, prop->nameLocation}, prop->name.value, cancellationToken);
             else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->nameLocation.containsClosed(position))
                 return classMemberLocations(workspaceFolder, {moduleName, method->nameLocation}, method->functionName.value, cancellationToken);
+        }
+    }
+
+    // Renaming a primary constructor parameter from its declaration, which renames its field
+    for (Luau::AstStat* stat : sourceModule->root->body)
+    {
+        auto* classStat = stat->as<Luau::AstStatClass>();
+        if (!classStat || !classStat->primaryConstructor)
+            continue;
+        for (Luau::AstLocal* param : classStat->primaryConstructor->args)
+        {
+            if (!param->location.containsClosed(position))
+                continue;
+            if (auto origin = primaryConstructorFieldOrigin(sourceModule->root, moduleName, param))
+                return classMemberLocations(workspaceFolder, *origin, param->name.value, cancellationToken);
         }
     }
 
@@ -172,6 +215,10 @@ std::vector<lsp::Location> getReferencesForRenaming(
         {
             if (auto* classStat = findClassStatByNameLocal(sourceModule->root, symbol.local))
                 return toLspLocations(params.textDocument.uri, *textDocument, types::findClassNameReferences(*sourceModule, classStat));
+
+            // A primary constructor parameter renames with its field, `self.name` included
+            if (auto origin = primaryConstructorFieldOrigin(sourceModule->root, moduleName, symbol.local))
+                return classMemberLocations(workspaceFolder, *origin, symbol.local->name.value, cancellationToken);
         }
 
         auto references = findSymbolReferences(*sourceModule, symbol);

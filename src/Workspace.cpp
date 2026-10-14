@@ -352,6 +352,11 @@ void WorkspaceFolder::reloadPlugins()
     fileResolver.clearPluginDocuments();
 
     // Any source node could have plugin transformations applied (including non-managed files), so mark all dirty
+    markAllDirty();
+}
+
+void WorkspaceFolder::markAllDirty()
+{
     for (const auto& [name, _] : frontend.sourceNodes)
         frontend.markDirty(name);
 }
@@ -738,6 +743,14 @@ void WorkspaceFolder::setupWithConfiguration(const ClientConfiguration& configur
     client->sendTrace("workspace: apply platform-specific configuration");
 
     platform->setupWithConfiguration(configuration);
+
+    // Luwu: help is written into an error when its module is checked, so a change rechecks every module
+    if (frontend.options.showHelp != configuration.diagnostics.showHelp)
+    {
+        frontend.options.showHelp = configuration.diagnostics.showHelp;
+        markAllDirty();
+        client->refreshWorkspaceDiagnostics();
+    }
 
     // Configure plugins
     if (configuration.plugins.enabled && !configuration.plugins.paths.empty())

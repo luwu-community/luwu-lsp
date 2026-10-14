@@ -11,8 +11,10 @@ struct ClientDiagnosticsConfiguration
     bool workspace = false;
     /// Whether to use expressive DM types in the diagnostics typechecker
     bool strictDatamodelTypes = false;
+    /// Luwu: whether diagnostics carry help: the `Help (...)` paragraphs, and the diagnostics that are only help
+    bool showHelp = true;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientDiagnosticsConfiguration, includeDependents, workspace, strictDatamodelTypes)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientDiagnosticsConfiguration, includeDependents, workspace, strictDatamodelTypes, showHelp)
 
 struct ClientRobloxSourcemapConfiguration
 {
@@ -343,7 +345,8 @@ struct ClientConfiguration
     /// does own it: we neither index it nor report diagnostics for it. Requires still resolve
     /// across extensions either way, so a `.luwu` module can require a `.luau` one.
     std::vector<std::string> fileExtensions{"luwu", "luau", "lua"};
-    std::vector<std::string> ignoreGlobs{"**/_Index/**"};
+    /// Wally's `_Index`, and pesde's `luau_packages` with the `.pesde` store under it: dependencies, not the user's code
+    std::vector<std::string> ignoreGlobs{"**/_Index/**", "**/luau_packages/**", "**/.pesde/**"};
     ClientPlatformConfiguration platform{};
     ClientRobloxSourcemapConfiguration sourcemap{};
     ClientDiagnosticsConfiguration diagnostics{};
