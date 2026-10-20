@@ -154,6 +154,9 @@ lsp::Position toUTF16(const TextDocument* textDocument, const Luau::Position& po
 lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::FileResolver* fileResolver, const TextDocument* textDocument = nullptr);
 // Luwu: a note (Module::notes) on code an error elsewhere explains, shown less prominently than an error
 lsp::Diagnostic createNoteDiagnostic(const Luau::DiagnosticNote& note, const TextDocument* textDocument);
+// Luwu: links an error's diagnostic to the notes about it (`notes` whose origin is the error's location), such as where
+// a mismatched property is declared
+void linkNotes(lsp::Diagnostic& diagnostic, const Luau::TypeError& error, const std::vector<Luau::DiagnosticNote>& notes, const TextDocument* textDocument);
 lsp::Diagnostic createLintDiagnostic(const Luau::LintWarning& lint, const TextDocument* textDocument = nullptr);
 lsp::Diagnostic createParseErrorDiagnostic(const Luau::ParseError& error, const TextDocument* textDocument = nullptr);
 

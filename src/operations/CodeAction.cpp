@@ -9,6 +9,7 @@
 #include "Platform/LSPPlatform.hpp"
 #include "Luau/Ast.h"
 #include "Luau/Error.h"
+#include "LSP/Destructure.hpp"
 
 #include <algorithm>
 #include <unordered_set>
@@ -18,6 +19,8 @@ LUAU_FASTFLAG(LuwuDoExpr)
 
 namespace
 {
+using namespace Luau::LanguageServer::Destructure;
+
 // Visitor to find the statement containing a local variable at a specific location
 struct FindStatementContainingLocal : Luau::AstVisitor
 {
@@ -60,42 +63,6 @@ Luau::AstStat* findStatementContainingLocal(Luau::AstStatBlock* root, const Luau
     return finder.result;
 }
 
-// Deleting a statement by deleting its lines is only safe when nothing else is on them. A binding in an `if local`
-// chain is a declaration inside the `if` line, and a statement in a one-line `do` (a block or an expression) shares its
-// line with the code around it: deleting their lines would delete that code too.
-bool locationOwnsItsLines(const TextDocument& textDocument, const Luau::Location& location)
-{
-    std::string first = textDocument.getLine(location.begin.line);
-    for (size_t i = 0; i < location.begin.column && i < first.size(); ++i)
-    {
-        if (!isspace(static_cast<unsigned char>(first[i])))
-            return false;
-    }
-
-    std::string last = textDocument.getLine(location.end.line);
-    for (size_t i = location.end.column; i < last.size(); ++i)
-    {
-        // a trailing comment goes with the statement
-        if (last.compare(i, 2, "--") == 0)
-            break;
-
-        if (!isspace(static_cast<unsigned char>(last[i])) && last[i] != ';')
-            return false;
-    }
-
-    return true;
-}
-
-// The leading whitespace of a source line, used to match the document's existing indentation
-std::string getLineIndentation(const TextDocument& textDocument, size_t line)
-{
-    std::string lineText = textDocument.getLine(line);
-    size_t indent = 0;
-    while (indent < lineText.size() && (lineText[indent] == ' ' || lineText[indent] == '\t'))
-        ++indent;
-    return lineText.substr(0, indent);
-}
-
 // The parameter list of whatever function (or class primary constructor) `position` sits in, as a
 // source location covering the parentheses themselves.
 struct FindParameterListAtPosition : Luau::AstVisitor
@@ -122,73 +89,6 @@ struct FindParameterListAtPosition : Luau::AstVisitor
         return true;
     }
 };
-
-// Splits a parameter list's contents on top-level commas, so commas inside a parameter's own type
-// (a table type, a generic argument list, a function type) don't split it.
-std::vector<std::string> splitParameters(const std::string& parameters)
-{
-    std::vector<std::string> result;
-    int depth = 0;
-    char stringDelimiter = '\0';
-    size_t start = 0;
-
-    for (size_t i = 0; i < parameters.size(); ++i)
-    {
-        char c = parameters[i];
-
-        if (stringDelimiter != '\0')
-        {
-            if (c == '\\')
-                ++i;
-            else if (c == stringDelimiter)
-                stringDelimiter = '\0';
-            continue;
-        }
-
-        if (c == '"' || c == '\'')
-            stringDelimiter = c;
-        else if (c == '(' || c == '{' || c == '[' || c == '<')
-            ++depth;
-        else if (c == ')' || c == '}' || c == ']' || c == '>')
-            --depth;
-        else if (c == ',' && depth == 0)
-        {
-            result.push_back(parameters.substr(start, i - start));
-            start = i + 1;
-        }
-    }
-
-    result.push_back(parameters.substr(start));
-
-    for (auto& parameter : result)
-        trim(parameter);
-
-    return result;
-}
-
-// One level of indentation, as the document already uses it: the leading whitespace of the first
-// indented line, falling back to four spaces.
-std::string detectIndentUnit(const TextDocument& textDocument)
-{
-    for (size_t line = 0; line < textDocument.lineCount(); ++line)
-    {
-        std::string lineText = textDocument.getLine(line);
-        size_t indent = 0;
-        while (indent < lineText.size() && (lineText[indent] == ' ' || lineText[indent] == '\t'))
-            ++indent;
-
-        // Skip blank (or whitespace-only) lines, and continuation lines of an already-wrapped construct
-        if (indent == 0 || indent == lineText.size())
-            continue;
-
-        if (lineText[0] == '\t')
-            return "\t";
-
-        return std::string(indent, ' ');
-    }
-
-    return "    ";
-}
 
 // A code action rewriting the layout of a comma-separated list. Offered first and as a quick fix when the client
 // takes quick fixes, so it heads the menu whenever the cursor is in a list; a client asking only for refactorings
@@ -218,14 +118,6 @@ std::string layOutOnePerLine(const std::vector<std::string>& elements, const Tex
     for (size_t i = 0; i < elements.size(); ++i)
         text += elementIndent + elements[i] + (i + 1 == elements.size() ? "\n" : ",\n");
     text += baseIndent + ")";
-    return text;
-}
-
-std::string layOutOnOneLine(const std::vector<std::string>& elements)
-{
-    std::string text;
-    for (size_t i = 0; i < elements.size(); ++i)
-        text += (i == 0 ? "" : ", ") + elements[i];
     return text;
 }
 
@@ -340,6 +232,292 @@ struct FindTraitListAtPosition : Luau::AstVisitor
         return true;
     }
 };
+
+// Luwu Destructuring (rfcs/destructuring.md): the innermost `.{...}` pattern `position` sits in, so a cursor in
+// `components.{ Card, Menu }` lays out that pattern rather than the one around it. `pattern` is unset for a
+// `type .{A, B} = m`, which has no nested patterns.
+struct DestructurePatternAt
+{
+    Luau::Location location;
+    const Luau::AstDestructurePattern* pattern = nullptr;
+};
+
+struct FindDestructurePatternAtPosition : Luau::AstVisitor
+{
+    Luau::Position targetPosition;
+    std::optional<DestructurePatternAt> result;
+
+    explicit FindDestructurePatternAtPosition(const Luau::Position& position)
+        : targetPosition(position)
+    {
+    }
+
+    void consider(const Luau::AstDestructurePattern& pattern)
+    {
+        if (!pattern.location || !pattern.closed || !pattern.location->containsClosed(targetPosition))
+            return;
+
+        result = DestructurePatternAt{*pattern.location, &pattern};
+        for (const auto& field : pattern.fields)
+            consider(field.target);
+    }
+
+    bool visit(Luau::AstStatLocal* node) override
+    {
+        if (node->destructure)
+            consider(*node->destructure);
+        return true;
+    }
+
+    bool visit(Luau::AstStatForIn* node) override
+    {
+        for (const auto* pattern : node->destructure)
+            if (pattern)
+                consider(*pattern);
+        return true;
+    }
+
+    bool visit(Luau::AstStatTypeAlias* node) override
+    {
+        if (node->destructure && node->destructure->closed && node->destructure->location.containsClosed(targetPosition))
+            result = DestructurePatternAt{node->destructure->location};
+        return true;
+    }
+};
+
+// Rewrites a destructuring pattern between one field per line and all on one line, like a parameter list
+void generateDestructureLayoutAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const DestructurePatternAt& at,
+    const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    lsp::Range range = textDocument.convertLocation(at.location);
+
+    if (at.location.begin.line != at.location.end.line)
+    {
+        if (auto text = layOutDestructureOnOneLine(at.location, at.pattern, textDocument))
+            addListLayoutAction(uri, context, "Put fields on one line", range, *text, result);
+    }
+    else if (auto text = layOutDestructureOnePerLine(at.location, textDocument))
+        addListLayoutAction(uri, context, "Put each field on its own line", range, *text, result);
+}
+
+void addEditsAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, std::string title, std::vector<lsp::TextEdit> edits,
+    std::vector<lsp::CodeAction>& result)
+{
+    lsp::CodeAction action;
+    action.title = std::move(title);
+    action.kind = context.wants(lsp::CodeActionKind::QuickFix) ? lsp::CodeActionKind::QuickFix : lsp::CodeActionKind::RefactorRewrite;
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::move(edits));
+    action.edit = workspaceEdit;
+
+    result.push_back(action);
+}
+
+// `components.Card` under the cursor: add `Card` to the pattern that binds `components` (or give `components` one),
+// and turn every `components.Card` in the file into `Card`
+void generateImportFieldAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const Luau::Position& position,
+    const Luau::SourceModule& sourceModule, const Luau::Module& module, Luau::NotNull<Luau::BuiltinTypes> builtinTypes,
+    const DestructureFacts& facts, const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    Luau::AstLocal* qualifier = nullptr;
+    std::string name;
+    for (auto* index : facts.indexes)
+        if (auto* object = index->expr->as<Luau::AstExprLocal>(); object && index->op == '.' && index->location.containsClosed(position))
+            qualifier = object->local, name = index->index.value;
+    for (auto* ref : facts.typeRefs)
+        if (ref->prefix && ref->prefixLocal && ref->location.containsClosed(position))
+            qualifier = ref->prefixLocal, name = ref->name.value;
+    if (!qualifier || isHiddenDestructureLocal(qualifier))
+        return;
+
+    bool withType = bringsAType(fieldType(typeOfLocal(qualifier, module, facts), name), builtinTypes);
+
+    std::optional<lsp::TextEdit> bind;
+    const Luau::AstLocal* alreadyBound = nullptr;
+
+    // a pattern `qualifier` is bound with (`components.{...}`), or one destructuring it (`const .{...} = chimera`)
+    // that runs at the top of the module, before anything could read through it
+    for (const auto& entry : facts.patterns)
+    {
+        const Luau::AstDestructurePattern* pattern = entry.first;
+        Luau::AstNode* holder = entry.second;
+        bool owns = pattern->local == qualifier;
+        bool reads = !owns && isHiddenDestructureLocal(pattern->local) && patternQualifier(*pattern, facts) == qualifier &&
+                     std::find(sourceModule.root->body.begin(), sourceModule.root->body.end(), holder) != sourceModule.root->body.end() &&
+                     std::none_of(facts.indexes.begin(), facts.indexes.end(),
+                         [&](Luau::AstExprIndexName* index)
+                         {
+                             auto* object = index->expr->as<Luau::AstExprLocal>();
+                             return object && object->local == qualifier && index->location.begin < holder->location.end;
+                         });
+        if (!owns && !reads)
+            continue;
+
+        for (const auto& field : pattern->fields)
+            if (name == field.key.value)
+            {
+                if (field.target.location || field.asLocation || !field.target.local)
+                    return;
+                alreadyBound = field.target.local;
+            }
+
+        if (!alreadyBound)
+        {
+            auto split = splitDestructurePattern(textDocument.getText(textDocument.convertLocation(*pattern->location)));
+            if (!split)
+                return;
+            split->second.push_back(name);
+            bind = lsp::TextEdit{textDocument.convertLocation(*pattern->location),
+                layOutFieldsLike(*pattern->location, split->first, split->second, textDocument)};
+        }
+        break;
+    }
+
+    if (!bind && !alreadyBound)
+    {
+        // `components` bound plainly, in a pattern or by its own `local`/`const`: it gets a pattern of its own
+        auto declaration = facts.declarations.find(qualifier);
+        bool plainField = std::any_of(facts.patterns.begin(), facts.patterns.end(),
+            [&](const auto& entry)
+            {
+                for (const auto& field : entry.first->fields)
+                    if (field.target.local == qualifier && !field.target.location && !field.asLocation)
+                        return true;
+                return false;
+            });
+        bool plainLocal = declaration != facts.declarations.end() && !declaration->second->isDesugaredField() && !declaration->second->destructure;
+        if (qualifier->annotation || (!plainField && !plainLocal))
+            return;
+
+        Luau::Location after{qualifier->location.end, qualifier->location.end};
+        bind = lsp::TextEdit{textDocument.convertLocation(after), ".{ " + name + " }"};
+    }
+
+    if (nameIsTaken(name, withType, alreadyBound, module, facts))
+        return;
+
+    auto edits = unqualifyEdits(qualifier, name, withType, facts, textDocument);
+    if (!edits)
+        return;
+    if (bind)
+        edits->push_back(*bind);
+    if (edits->empty())
+        return;
+
+    addEditsAction(uri, context, "Import '" + name + "' from '" + qualifier->name.value + "'", std::move(*edits), result);
+}
+
+// The pattern under the cursor gets every field its value has that it doesn't bind yet, without going into them, and
+// each `value.field` already in the file becomes `field`. Fields whose names are taken are left out.
+void generateImportAllFieldsAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const Luau::AstDestructurePattern& pattern,
+    const Luau::Module& module, Luau::NotNull<Luau::BuiltinTypes> builtinTypes, const DestructureFacts& facts, const TextDocument& textDocument,
+    std::vector<lsp::CodeAction>& result)
+{
+    const auto* table = [&]() -> const Luau::TableType*
+    {
+        auto ty = typeOfLocal(pattern.local, module, facts);
+        return ty ? Luau::get<Luau::TableType>(Luau::follow(*ty)) : nullptr;
+    }();
+    auto split = splitDestructurePattern(textDocument.getText(textDocument.convertLocation(*pattern.location)));
+    if (!table || !split)
+        return;
+
+    // in the order the value's fields are written, where that's known
+    std::vector<std::pair<std::string, const Luau::Property*>> props;
+    for (const auto& [name, prop] : table->props)
+        props.emplace_back(name, &prop);
+    std::stable_sort(props.begin(), props.end(),
+        [](const auto& a, const auto& b)
+        {
+            if (!a.second->location || !b.second->location)
+                return false;
+            return a.second->location->begin < b.second->location->begin;
+        });
+
+    Luau::AstLocal* qualifier = patternQualifier(pattern, facts);
+    std::vector<lsp::TextEdit> edits;
+    size_t added = 0;
+
+    for (const auto& entry : props)
+    {
+        const std::string& name = entry.first;
+        const Luau::Property* prop = entry.second;
+        bool bound = std::any_of(pattern.fields.begin(), pattern.fields.end(),
+            [&](const auto& field)
+            {
+                return name == field.key.value;
+            });
+        bool withType = bringsAType(prop->readTy, builtinTypes);
+        if (bound || nameIsTaken(name, withType, nullptr, module, facts))
+            continue;
+
+        if (qualifier)
+        {
+            auto uses = unqualifyEdits(qualifier, name, withType, facts, textDocument);
+            if (!uses)
+                continue;
+            edits.insert(edits.end(), uses->begin(), uses->end());
+        }
+
+        split->second.push_back(name);
+        ++added;
+    }
+
+    if (added == 0)
+        return;
+
+    edits.push_back({textDocument.convertLocation(*pattern.location), layOutFieldsLike(*pattern.location, split->first, split->second, textDocument)});
+    std::string of = qualifier ? " of '" + std::string(qualifier->name.value) + "'" : "";
+    addEditsAction(uri, context, "Import all fields" + of, std::move(edits), result);
+}
+
+// The reverse of importing: `Card` under the cursor in `components.{ Card }` leaves the pattern, and every use of it
+// becomes `components.Card`
+void generateQualifyFieldAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const Luau::Position& position,
+    const Luau::AstDestructurePattern& pattern, const Luau::Module& module, Luau::NotNull<Luau::BuiltinTypes> builtinTypes,
+    const DestructureFacts& facts, const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    size_t fieldIndex = pattern.fields.size;
+    for (size_t i = 0; i < pattern.fields.size; ++i)
+    {
+        const auto& field = pattern.fields.data[i];
+        if (field.target.local && !field.target.location &&
+            (field.keyLocation.containsClosed(position) || field.target.local->location.containsClosed(position)))
+            fieldIndex = i;
+    }
+    Luau::AstLocal* qualifier = patternQualifier(pattern, facts);
+    if (fieldIndex == pattern.fields.size || !qualifier || nameIsTaken(qualifier->name.value, false, qualifier, module, facts))
+        return;
+
+    const auto& field = pattern.fields.data[fieldIndex];
+    Luau::AstLocal* local = field.target.local;
+    std::string qualified = std::string(qualifier->name.value) + "." + field.key.value;
+    bool withType = bringsAType(typeOfLocal(local, module, facts), builtinTypes);
+
+    std::vector<lsp::TextEdit> edits;
+    for (auto* ref : facts.localRefs)
+    {
+        if (ref->local != local)
+            continue;
+        if (facts.assigned.count(ref))
+            return;
+        edits.push_back({textDocument.convertLocation(ref->location), qualified});
+    }
+    if (withType)
+        for (auto* ref : facts.typeRefs)
+            if (!ref->prefix && ref->name == local->name)
+                edits.push_back({textDocument.convertLocation(ref->nameLocation), qualified});
+
+    // `components` stays bound even when `Card` was all its pattern held, since the uses now read it
+    std::unordered_set<const Luau::AstLocal*> removed;
+    auto removal = removeFieldsEdits({local}, facts, textDocument, &removed, {qualifier});
+    if (!removed.count(local))
+        return;
+    edits.insert(edits.end(), removal.begin(), removal.end());
+
+    addEditsAction(uri, context, "Qualify '" + std::string(local->name.value) + "' as '" + qualified + "'", std::move(edits), result);
+}
 
 // True when `position` sits inside the body of some function within `classStat` -- a method body, or
 // a function expression used as a field's default value. Statements live there, so refactorings that
@@ -576,6 +754,15 @@ void generateGlobalUsedAsLocalFix(const lsp::DocumentUri& uri, const Luau::LintW
     result.push_back(action);
 }
 
+// Luwu Destructuring: the local a lint reports at `location`, when a field of a pattern binds it
+const Luau::AstLocal* destructuredLocalAt(const DestructureFacts& facts, const Luau::Location& location)
+{
+    for (const auto& [local, _] : facts.declarations)
+        if (local->location == location && isPatternField(local, facts))
+            return local;
+    return nullptr;
+}
+
 enum class UnusedCodeKind
 {
     Variable,
@@ -623,8 +810,28 @@ void generateUnusedCodeFixes(const lsp::DocumentUri& uri, const Luau::LintWarnin
         result.push_back(action);
     }
 
-    // Fix 2: Delete the declaration/statement
-    if (auto statement = findStatementContainingLocal(root, lint.location); statement && locationOwnsItsLines(textDocument, statement->location))
+    // Fix 2: Delete the declaration/statement. Luwu Destructuring: a field of a pattern leaves the pattern instead.
+    DestructureFacts facts;
+    root->visit(&facts);
+    if (const Luau::AstLocal* local = destructuredLocalAt(facts, lint.location))
+    {
+        auto edits = removeFieldsEdits({local}, facts, textDocument);
+        if (edits.empty())
+            return;
+
+        lsp::CodeAction action;
+        action.title = std::string("Remove unused ") + kindLabel + ": '" + name + "'";
+        action.kind = lsp::CodeActionKind::QuickFix;
+        if (diagnostic)
+            action.diagnostics.push_back(*diagnostic);
+
+        lsp::WorkspaceEdit workspaceEdit;
+        workspaceEdit.changes.emplace(uri, std::move(edits));
+        action.edit = workspaceEdit;
+        result.push_back(action);
+    }
+    else if (auto statement = findStatementContainingLocal(root, lint.location);
+             statement && locationOwnsItsLines(textDocument, statement->location))
     {
         lsp::CodeAction action;
         action.title = std::string("Remove unused ") + kindLabel + ": '" + name + "'";
@@ -1215,6 +1422,30 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         sourceModule->root->visit(&traitListFinder);
         if (traitListFinder.result)
             generateTraitListWrapAction(params.textDocument.uri, params.context, *traitListFinder.result, *textDocument, result);
+
+        FindDestructurePatternAtPosition destructureFinder(requestRange.begin);
+        sourceModule->root->visit(&destructureFinder);
+        if (destructureFinder.result)
+            generateDestructureLayoutAction(params.textDocument.uri, params.context, *destructureFinder.result, *textDocument, result);
+
+        // Luwu Destructuring: importing fields into a pattern and qualifying them back
+        if (auto module = getModule(moduleName))
+        {
+            DestructureFacts facts;
+            sourceModule->root->visit(&facts);
+            auto builtinTypes = frontend.builtinTypes;
+
+            generateImportFieldAction(params.textDocument.uri, params.context, requestRange.begin, *sourceModule, *module, builtinTypes, facts,
+                *textDocument, result);
+
+            if (destructureFinder.result && destructureFinder.result->pattern)
+            {
+                const Luau::AstDestructurePattern& pattern = *destructureFinder.result->pattern;
+                generateQualifyFieldAction(
+                    params.textDocument.uri, params.context, requestRange.begin, pattern, *module, builtinTypes, facts, *textDocument, result);
+                generateImportAllFieldsAction(params.textDocument.uri, params.context, pattern, *module, builtinTypes, facts, *textDocument, result);
+            }
+        }
     }
 
     // Quick fixes from lint warnings
@@ -1280,6 +1511,45 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
 
             if (const auto* unknownSymbol = Luau::get_if<Luau::UnknownSymbol>(&error.data))
             {
+                // Luwu: a misspelled variable is replaced by the name it was probably meant to be
+                if (unknownSymbol->unbound == Luau::UnknownSymbol::Unbound::Typo)
+                {
+                    lsp::CodeAction action;
+                    action.title = "Change '" + unknownSymbol->name + "' to '" + unknownSymbol->meant + "'";
+                    action.kind = lsp::CodeActionKind::QuickFix;
+                    action.isPreferred = true;
+                    if (diagnostic)
+                        action.diagnostics.push_back(*diagnostic);
+
+                    lsp::WorkspaceEdit workspaceEdit;
+                    workspaceEdit.changes.emplace(params.textDocument.uri, std::vector{lsp::TextEdit{errorRange, unknownSymbol->meant}});
+                    action.edit = workspaceEdit;
+                    result.push_back(action);
+                }
+
+                // Luwu Destructuring: a name a destructuring could bring in, by adding it to one
+                if (auto module = getModule(moduleName))
+                {
+                    bool typesOnly = unknownSymbol->context == Luau::UnknownSymbol::Type;
+                    for (auto& candidate : destructureImportCandidates(
+                             *sourceModule, *module, error.location.begin, unknownSymbol->name, typesOnly, config, *textDocument))
+                    {
+                        if (candidate.name != unknownSymbol->name)
+                            continue;
+
+                        lsp::CodeAction action;
+                        action.title = "Import '" + candidate.name + "' from '" + candidate.from + "'";
+                        action.kind = lsp::CodeActionKind::QuickFix;
+                        if (diagnostic)
+                            action.diagnostics.push_back(*diagnostic);
+
+                        lsp::WorkspaceEdit workspaceEdit;
+                        workspaceEdit.changes.emplace(params.textDocument.uri, std::vector{std::move(candidate.edit)});
+                        action.edit = workspaceEdit;
+                        result.push_back(action);
+                    }
+                }
+
                 platform->handleUnknownSymbolFix(unknownSymbolCtx, *unknownSymbol, diagnostic, result);
             }
             else if (const auto* misspelledProp = Luau::get_if<Luau::UnknownPropButFoundLikeProp>(&error.data))
@@ -1337,11 +1607,22 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         std::vector<lsp::TextEdit> edits;
         std::unordered_set<size_t> deletedLines;
 
+        // Luwu Destructuring: unused fields leave their patterns, a pattern's together in one edit
+        DestructureFacts facts;
+        sourceModule->root->visit(&facts);
+        std::unordered_set<const Luau::AstLocal*> unusedFields;
+
         for (const auto& lint : cr.lintResult.warnings)
         {
             if (lint.code == Luau::LintWarning::Code_LocalUnused || lint.code == Luau::LintWarning::Code_FunctionUnused ||
                 lint.code == Luau::LintWarning::Code_ImportUnused)
             {
+                if (const Luau::AstLocal* field = destructuredLocalAt(facts, lint.location))
+                {
+                    unusedFields.insert(field);
+                    continue;
+                }
+
                 auto statement = findStatementContainingLocal(sourceModule->root, lint.location);
                 if (statement && locationOwnsItsLines(*textDocument, statement->location))
                 {
@@ -1369,6 +1650,9 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                 }
             }
         }
+
+        auto fieldEdits = removeFieldsEdits(unusedFields, facts, *textDocument);
+        edits.insert(edits.end(), fieldEdits.begin(), fieldEdits.end());
 
         if (!edits.empty())
         {

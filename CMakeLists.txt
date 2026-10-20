@@ -82,6 +82,7 @@ target_sources(Luwu.LanguageServer PRIVATE
         src/Hovers.cpp
         ${LSP_EMBEDDED_RESOURCES_SOURCE}
         src/LuauExt.cpp
+        src/Destructure.cpp
         src/LuauFileUtils.cpp
         src/IostreamHelpers.cpp
         src/Utils.cpp

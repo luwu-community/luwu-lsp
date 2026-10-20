@@ -172,19 +172,13 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         if (syntheticTypes.find(ref) != syntheticTypes.end())
             return false;
 
-        // HACK: The location information provided only gives location for the whole reference
-        // but we do not want to highlight punctuation inside of it (Module.Type<Param> should not highlight . < >)
-        // So we use the start position and consider the end positions separately.
-        // Here, we make the assumption that there is no comments or newlines present in between the punctuation
-
-        auto startPosition = ref->location.begin;
-        // Highlight prefix if exists
-        if (ref->prefix)
-        {
-            Luau::Position endPosition{startPosition.line, startPosition.column + static_cast<unsigned int>(strlen(ref->prefix->value))};
-            tokens.emplace_back(SemanticToken{startPosition, endPosition, lsp::SemanticTokenTypes::Namespace, lsp::SemanticTokenModifiers::None});
-            startPosition = {endPosition.line, endPosition.column + 1};
-        }
+        // Highlight the prefix and name by their own locations, so the punctuation between them
+        // (Module.Type<Param> should not highlight . < >) stays uncoloured.
+        // Luwu Destructuring: `type .{A} = module` desugars to `type A = module.A`, whose reference sits on the key
+        // with the prefix written after it. That prefix is the `= module` value, an ordinary name, so leave it be.
+        if (ref->prefix && ref->prefixLocation && ref->prefixLocation->begin < ref->nameLocation.begin)
+            tokens.emplace_back(SemanticToken{
+                ref->prefixLocation->begin, ref->prefixLocation->end, lsp::SemanticTokenTypes::Namespace, lsp::SemanticTokenModifiers::None});
 
         // Highlight name -- as a class when the annotation names one, so `userid: UserId` colors
         // `UserId` the same way its `class UserId` declaration is colored
@@ -194,8 +188,12 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         else if (resolvedTy && namesUserDefinedClass(*resolvedTy, builtinTypes))
             tokenType = lsp::SemanticTokenTypes::Class;
 
-        Luau::Position endPosition{startPosition.line, startPosition.column + static_cast<unsigned int>(strlen(ref->name.value))};
-        tokens.emplace_back(SemanticToken{startPosition, endPosition, tokenType, lsp::SemanticTokenModifiers::None});
+        // A reference the parser made up sits somewhere its name isn't written (the `any` of an untyped `declare
+        // function` parameter, the error alias of an empty `type .{} = m`), so only a name spanning exactly its
+        // own text is coloured.
+        const Luau::Location& nameLocation = ref->nameLocation;
+        if (nameLocation.begin.line == nameLocation.end.line && nameLocation.end.column - nameLocation.begin.column == strlen(ref->name.value))
+            tokens.emplace_back(SemanticToken{nameLocation.begin, nameLocation.end, tokenType, lsp::SemanticTokenModifiers::None});
 
         // Do not highlight parameters as they will be visited later
         return true;
@@ -223,17 +221,23 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
 
         for (auto var : local->vars)
         {
+            // Luwu Destructuring: an unnamed pattern's value is bound to a hidden local spanning the whole `.{...}`
+            if (strcmp(var->name.value, Luau::kDestructuredLocalName) == 0)
+                continue;
+
             auto ty = scope->lookup(var);
             if (ty)
             {
                 auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable, builtinTypes);
                 if (type == lsp::SemanticTokenTypes::Variable)
-                    return true; // No special semantic token needed, fall back to syntax highlighting
+                    continue; // No special semantic token needed, fall back to syntax highlighting
                 tokens.emplace_back(SemanticToken{var->location.begin, var->location.end, type, lsp::SemanticTokenModifiers::None});
             }
         }
 
-        return true;
+        // Luwu Destructuring: a field desugars to `h1 = (destructured).h1`, whose made-up read sits on the key; the
+        // bound name's own token is the only one it gets
+        return !local->isDesugaredField();
     }
 
     // bool visit(Luau::AstStatFunction* func) override

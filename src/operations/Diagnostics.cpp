@@ -143,13 +143,16 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
     // Report Type Errors
     // Note that type errors can extend to related modules in the require graph - so we report related information here
     std::vector<std::pair<size_t, uint8_t>> mismatchNotations;
+    Luau::ModulePtr checkedModule = frontend.moduleResolver.getModule(moduleName);
     for (auto& error : cr.errors)
     {
         if (error.moduleName == moduleName)
         {
             auto diagnostic = createTypeErrorDiagnostic(error, &fileResolver, *textDocument);
-            if (const auto* mismatch = Luau::get_if<Luau::TypeMismatch>(&error.data); mismatch && mismatch->notation)
-                mismatchNotations.emplace_back(report.items.size(), mismatch->notation);
+            if (checkedModule)
+                linkNotes(diagnostic, error, checkedModule->notes, *textDocument);
+            if (const auto* mismatch = Luau::get_if<Luau::TypeMismatch>(&error.data); mismatch && mismatch->explained && mismatch->explained->notation)
+                mismatchNotations.emplace_back(report.items.size(), mismatch->explained->notation);
             report.items.emplace_back(diagnostic);
         }
         else if (supportsRelatedDocuments(client->capabilities))
@@ -274,11 +277,14 @@ lsp::WorkspaceDiagnosticReport WorkspaceFolder::workspaceDiagnostics(const lsp::
 
         // Report Type Errors
         // Only report errors for the current file
+        Luau::ModulePtr checkedModule = frontend.moduleResolver.getModule(moduleName);
         for (auto& error : cr.errors)
         {
             if (error.moduleName == moduleName)
             {
                 auto diagnostic = createTypeErrorDiagnostic(error, &fileResolver, document);
+                if (checkedModule)
+                    linkNotes(diagnostic, error, checkedModule->notes, document);
                 documentReport.items.emplace_back(diagnostic);
             }
         }

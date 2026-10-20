@@ -967,6 +967,17 @@ lsp::Diagnostic createNoteDiagnostic(const Luau::DiagnosticNote& note, const Tex
     return diagnostic;
 }
 
+void linkNotes(lsp::Diagnostic& diagnostic, const Luau::TypeError& error, const std::vector<Luau::DiagnosticNote>& notes, const TextDocument* textDocument)
+{
+    if (!textDocument)
+        return;
+    for (const Luau::DiagnosticNote& note : notes)
+    {
+        if (note.origin == error.location)
+            diagnostic.relatedInformation.push_back({{textDocument->uri(), toUTF16Range(textDocument, note.location)}, note.message});
+    }
+}
+
 lsp::Diagnostic createLintDiagnostic(const Luau::LintWarning& lint, const TextDocument* textDocument)
 {
     std::string lintName = Luau::LintWarning::getName(lint.code);

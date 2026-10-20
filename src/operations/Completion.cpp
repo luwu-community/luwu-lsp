@@ -16,6 +16,8 @@
 #include "LSP/Workspace.hpp"
 #include "LSP/LuauExt.hpp"
 #include "LSP/DocumentationParser.hpp"
+#include "LSP/Destructure.hpp"
+#include "Platform/StringRequireAutoImporter.hpp"
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuwuDestructuring)
@@ -350,6 +352,99 @@ void WorkspaceFolder::suggestImports(const Luau::ModuleName& moduleName, const L
     }
 
     platform->handleSuggestImports(textDocument, *sourceModule, config, hotCommentsLineNumber, completingTypeReferencePrefix, result);
+
+    suggestDestructureImports(*sourceModule, *module, position, config, textDocument, completingTypeReferencePrefix, result);
+}
+
+// The identifier being typed at `position`
+static std::string typedWord(const TextDocument& textDocument, const Luau::Position& position)
+{
+    std::string line = textDocument.getLine(position.line);
+    size_t end = std::min(static_cast<size_t>(position.column), line.size());
+    size_t start = end;
+    while (start > 0 && (isalnum(static_cast<unsigned char>(line[start - 1])) || line[start - 1] == '_'))
+        --start;
+    return line.substr(start, end - start);
+}
+
+// Luwu Destructuring (rfcs/destructuring.md): names reachable through a destructuring, imported by adding them to it:
+// `Paragraph` from `const .{ elements.{ Heading } } = chimera` becomes `elements.{ Heading, Paragraph }`, and from a
+// module not required yet, `const .{ elements.{ Paragraph } } = require("@chimera")`. Two levels down at most.
+std::vector<Luau::LanguageServer::Destructure::ImportCandidate> WorkspaceFolder::destructureImportCandidates(const Luau::SourceModule& sourceModule,
+    const Luau::Module& module, const Luau::Position& position, const std::string& typed, bool typesOnly, const ClientConfiguration& config,
+    const TextDocument& textDocument) const
+{
+    namespace Destructure = Luau::LanguageServer::Destructure;
+    namespace AutoImports = Luau::LanguageServer::AutoImports;
+
+    size_t hotCommentsLineNumber = AutoImports::computeHotCommentsLineNumber(sourceModule);
+
+    std::vector<Destructure::UnimportedModule> unimported;
+    if (config.completion.imports.suggestRequires)
+    {
+        AutoImports::FindImportsVisitor importsVisitor;
+        importsVisitor.visit(sourceModule.root);
+
+        AutoImports::StringRequireAutoImporterContext ctx{
+            sourceModule.name,
+            Luau::NotNull(&textDocument),
+            platform->getAutoImportsModuleVisitor(sourceModule.name),
+            Luau::NotNull(this),
+            Luau::NotNull(&config.completion.imports),
+            hotCommentsLineNumber,
+            Luau::NotNull(&importsVisitor),
+            platform->getAutoImportsRequirePathComputer(sourceModule.name, config.completion.imports.requireStyle),
+        };
+
+        for (const auto& require : AutoImports::computeAllStringRequires(ctx))
+        {
+            auto required = getModule(require.moduleName);
+            if (!required)
+                required = getModule(require.moduleName, /* forAutocomplete: */ true);
+            if (!required)
+                continue;
+
+            unimported.push_back(Destructure::UnimportedModule{
+                require.requirePath,
+                Luau::first(required->returnType),
+                require.edit.range,
+                !require.edit.newText.empty() && require.edit.newText.front() == '\n',
+                config.completion.imports.useConst,
+            });
+        }
+    }
+
+    return Destructure::importCandidates(sourceModule, module, position, typed, typesOnly, frontend.builtinTypes, textDocument, unimported);
+}
+
+void WorkspaceFolder::suggestDestructureImports(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::Position& position,
+    const ClientConfiguration& config, const TextDocument& textDocument, bool typesOnly, std::vector<lsp::CompletionItem>& result)
+{
+    std::string typed = typedWord(textDocument, position);
+    if (typed.empty())
+        return;
+
+    for (auto& candidate : destructureImportCandidates(sourceModule, module, position, typed, typesOnly, config, textDocument))
+    {
+        lsp::CompletionItem item;
+        item.label = candidate.name;
+        item.labelDetails = {std::nullopt, candidate.from};
+        item.detail = "auto-import from " + candidate.from;
+        item.documentation = {lsp::MarkupKind::Markdown, codeBlock(codeBlockLanguage(textDocument), candidate.edit.newText)};
+        item.insertText = candidate.name;
+        item.sortText = SortText::AutoImports;
+        item.additionalTextEdits = {std::move(candidate.edit)};
+
+        item.kind = lsp::CompletionItemKind::Variable;
+        if (Luau::LanguageServer::Destructure::bringsAType(candidate.type, frontend.builtinTypes))
+            item.kind = lsp::CompletionItemKind::Class;
+        else if (candidate.type && Luau::get<Luau::FunctionType>(Luau::follow(*candidate.type)))
+            item.kind = lsp::CompletionItemKind::Function;
+        else if (candidate.type && Luau::get<Luau::TableType>(Luau::follow(*candidate.type)))
+            item.kind = lsp::CompletionItemKind::Module;
+
+        result.push_back(std::move(item));
+    }
 }
 
 static bool canUseSnippets(const lsp::ClientCapabilities& capabilities)

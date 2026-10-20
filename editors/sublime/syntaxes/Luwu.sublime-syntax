@@ -23,6 +23,7 @@ contexts:
     - include: comment
     - include: local-declaration
     - include: const-declaration
+    - include: type-destructure-declaration
     - include: extern-type-declaration
     - include: declare-function
     - include: expect-function
@@ -80,9 +81,9 @@ contexts:
         - match: '(```)'
           scope: comment.block.luwu
         - include: markdown_prose
-        - include: doc_comment_tags
-        # Comment prose. Stops at `]`, a backtick, `@` and the markdown punctuation
-        # above so the end delimiter, fences, doc tags and markdown can still match.
+        # Comment prose. Stops at `]`, a backtick and the markdown punctuation above
+        # so the end delimiter, fences and markdown can still match. `@` isn't
+        # coloured: Moonwave tags are semantic tokens, and only in Luau files.
         - match: '[^\]`@*_~\[#>]+'
           scope: comment.block.luwu
         - match: '[\]`@*_~\[#>]'
@@ -97,7 +98,7 @@ contexts:
           pop: true
         - match: '\S+'
           scope: variable.parameter.directive.luwu
-    - match: '(--!)(strict|nonstrict|nocheck|nolint)\b'
+    - match: '(--!)(strict|nonstrict|nocheck|nolint|lint)\b'
       captures:
         1: keyword.operator.directive.luwu
         2: storage.modifier.directive.luwu
@@ -107,13 +108,26 @@ contexts:
           pop: true
         - match: '\S+'
           scope: variable.parameter.directive.luwu
+    # A code fence across `---` doc lines, highlighted as Luwu like one in a
+    # `--[=[ ]=]` block. Each line's `---` stays a comment; the fence ends at a `---`
+    # line that starts with ```, or at a line that isn't a `---` comment.
+    - match: '^\s*(---)\s*(```(?:luwu)?)\s*$\n?'
+      captures:
+        1: comment.line.double-dash.documentation.luwu
+        2: comment.block.luwu
+      push: doc-line-fence-luwu-wrapper
+    # The same, for a ```luau fence.
+    - match: '^\s*(---)\s*(```luau?)\s*$\n?'
+      captures:
+        1: comment.line.double-dash.documentation.luwu
+        2: comment.block.luwu
+      push: doc-line-fence-luau-wrapper
     - match: '---'
       push:
         - meta_scope: comment.line.double-dash.documentation.luwu
         - match: \n
           pop: true
         - include: markdown_prose
-        - include: doc_comment_tags
     - match: '--'
       push:
         - meta_scope: comment.line.double-dash.luwu
@@ -161,25 +175,51 @@ contexts:
         2: string.other.link.title.luwu
         5: markup.underline.link.luwu
 
-  doc_comment_tags:
-    - match: '((?<=[\s*!\/])[\\@]param)(?:\s)+(\b\w+\b)'
+  # A fence across `---` doc lines. The wrapper consumes the closing ``` line, which
+  # would otherwise open a new fence, and pushes the body. The body's prototype goes
+  # into every context the embedded code pushes, so the fence ends -- and each
+  # line's `---` stays a comment -- even inside an unfinished table or call.
+  doc-line-fence-luwu-wrapper:
+    - include: doc-line-fence-end
+    - match: ''
+      push: doc-line-fence-luwu
+      with_prototype:
+        - include: doc-line-fence-prototype
+
+  doc-line-fence-luau-wrapper:
+    - include: doc-line-fence-end
+    - match: ''
+      push: doc-line-fence-luau
+      with_prototype:
+        - include: doc-line-fence-prototype
+
+  doc-line-fence-end:
+    - match: '^\s*(---)\s*(```)\s*$\n?'
       captures:
-        1: storage.type.class.luadoc.luwu
-        2: variable.parameter.luwu
-    - match: '((?<=[\s*!\/])[\\@]return)(?:\s)+(\b\w+\b)'
+        1: comment.line.double-dash.documentation.luwu
+        2: comment.block.luwu
+      pop: true
+    - match: '^(?!\s*---)'
+      pop: true
+
+  doc-line-fence-luwu:
+    - meta_content_scope: meta.embedded.block.luwu
+    - include: doc-line-fence-prototype
+    - include: scope:source.luwu
+
+  doc-line-fence-luau:
+    - meta_content_scope: meta.embedded.block.luau
+    - include: doc-line-fence-prototype
+    - include: scope:source.luau
+
+  doc-line-fence-prototype:
+    - match: '^(?=\s*---\s*```)'
+      pop: true
+    - match: '^(?!\s*---)'
+      pop: true
+    - match: '^\s*(---)'
       captures:
-        1: storage.type.class.luadoc.luwu
-        2: variable.parameter.luwu
-    - match: '((?<=[\s*!\/])[\\@]type)(?:\s)+(\b\w+\b)'
-      captures:
-        1: storage.type.class.luadoc.luwu
-        2: entity.name.type.luwu
-    - match: '((?<=[\s*!\/])[\\@]field)(?:\s)+(\b\w+\b)'
-      captures:
-        1: storage.type.class.luadoc.luwu
-        2: variable.other.property.luwu
-    - match: '@\w+'
-      scope: storage.type.class.luadoc.luwu
+        1: comment.line.double-dash.documentation.luwu
 
   # An attribute, bare (`@native`) or as a bracketed list
   # (`@[deprecated { use = "dog" }, native]`). Only the bracketed form takes
@@ -662,8 +702,18 @@ contexts:
         - include: scope:source.luwu
 
   keyword:
-    - match: \b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\b
+    - match: '\b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\b|\b(?:when|give)\b(?=\s*(?:local\b|const\b|[^\s=.,:;)\]}]))'
       scope: keyword.control.luwu
+    # Luwu match expressions: `match` before the value it tests (`match x`,
+    # `match const v = x`), and `case` starting an arm. Only in those shapes, so a
+    # variable named `match` or `case` stays a name.
+    - match: '(?<![.:])\bmatch\b(?=\s+(?:local\b|const\b|not\b|[^\s=.,:;)\]}+*/%^<>~-]))|^\s*\bcase\b(?=\s+(?:is\b|implements\b|nil\b|none\b|true\b|false\b|-?\d|["''`]))'
+      scope: keyword.control.luwu
+    # Luwu match expressions: the `is` and `implements` type tests (`x is string`,
+    # `p is not Point`, `o implements Named`). A name, `not`, `nil` or `function`
+    # follows them; anything else is a variable named `is`.
+    - match: '(?<![.:])\b(?:is|implements)\b(?=\s+(?:not\b|nil\b|function\b|[a-zA-Z_]))'
+      scope: keyword.operator.wordlike.luwu
     - match: \b(local)\b
       scope: storage.modifier.local.luwu
     - match: \b(const)\b
@@ -712,11 +762,16 @@ contexts:
         - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
           scope: variable.other.readwrite.luwu
 
+  # `[export] const name = v`, and a bare `export name = v` / `export .{x, y} = v`,
+  # which mean `export const` (rfcs/destructuring.md). A bare `export` only counts
+  # before a name that isn't one of the keywords `export` combines with, or before
+  # `.{`.
   const-declaration:
-    - match: '\b(?:(export)\s+)?(const)\b'
+    - match: '\b(?:(export)\s+)?(const)\b|\b(export)\b(?=\s*\.\s*\{|\s+(?!(?:type|local|const|function|class|trait|declare|extern|public|private|final)\b)[a-zA-Z_])'
       captures:
         1: storage.modifier.visibility.luwu
         2: storage.modifier.const.luwu
+        3: storage.modifier.visibility.luwu
       push:
         - match: '(?=\s*[=;])|^(?!\s*[|&])'
           pop: true
@@ -840,6 +895,44 @@ contexts:
         - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
           scope: variable.other.readwrite.luwu
 
+  # `[export] type .{A, B as C} = module` (rfcs/destructuring.md): binds the types a
+  # module exports. Ends at the pattern's `}`, so `= module` highlights as an
+  # ordinary expression.
+  type-destructure-declaration:
+    - match: '(?<![^.]\.|:)\b(?:(export)\s+)?(type)\s*(?=\.\s*\{)'
+      captures:
+        1: storage.modifier.visibility.luwu
+        2: storage.type.luwu
+      push:
+        - match: '(?<=\})'
+          pop: true
+        - include: type-destructure-pattern
+
+  # The `.{...}` of a type destructure: like destructure-pattern, but what gets
+  # bound is a type. A key followed by `as` or by its own `.{...}` is a field being
+  # read, so it is scoped as a property.
+  type-destructure-pattern:
+    - match: '(\.)\s*(\{)'
+      captures:
+        1: punctuation.accessor.luwu
+        2: punctuation.definition.destructure.begin.luwu
+      push:
+        - match: '\}'
+          scope: punctuation.definition.destructure.end.luwu
+          pop: true
+        - include: comment
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\s+(as)\b'
+          captures:
+            1: variable.other.property.luwu
+            2: keyword.control.as.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\.\s*\{)'
+          scope: variable.other.property.luwu
+        - include: type-destructure-pattern
+        - match: ','
+          scope: punctuation.separator.comma.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: entity.name.type.luwu
+
   number:
     - match: '\b0_*[xX]_*[\da-fA-F_]*(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
       scope: constant.numeric.hex.luwu
@@ -849,6 +942,13 @@ contexts:
       scope: constant.numeric.decimal.luwu
 
   operator:
+    # Luwu push: `container <+ values`.
+    - match: '<\+'
+      scope: keyword.operator.push.luwu
+    # Luwu pop: `<-container` where an expression starts; between operands, `a<-b`
+    # is still `a < -b`.
+    - match: '(?:(?<=[=(,{\[])|(?<=[=(,{\[] )|(?<=\breturn )|(?<=\band )|(?<=\bor )|(?<=\bnot )|(?<=\bgive ))<-'
+      scope: keyword.operator.pop.luwu
     - match: '==|~=|<=?|>=?'
       scope: keyword.operator.comparison.luwu
     - match: \+=|-=|/=|//=|\*=|%=|\^=|\.\.=|=
@@ -878,17 +978,17 @@ contexts:
         1: punctuation.definition.comment.luwu
 
   standard_library:
-    - match: '(?<![^.]\.|:)\b(assert|collectgarbage|error|gcinfo|getfenv|getmetatable|ipairs|loadstring|newproxy|next|pairs|pcall|print|rawequal|rawset|require|select|setfenv|setmetatable|tonumber|tostring|type|typeof|unpack|xpcall)\b'
+    - match: '(?<![^.]\.|:)\b(assert|collectgarbage|error|gcinfo|getfenv|getmetatable|ipairs|loadstring|newproxy|next|pairs|pcall|print|rawequal|rawset|require|select|setfenv|setmetatable|tonumber|tostring|type|typeof|unpack|xpcall)\b(?!\s*=(?!=))'
       scope: support.function.luwu
-    - match: '(?<![^.]\.|:)\b(_G|_VERSION)\b'
+    - match: '(?<![^.]\.|:)\b(_G|_VERSION)\b(?!\s*=(?!=))'
       scope: constant.language.luwu
-    - match: '(?<![^.]\.|:)\b(bit32\.(?:arshift|band|bnot|bor|btest|bxor|extract|lrotate|lshift|replace|rrotate|rshift|countlz|countrz|byteswap)|coroutine\.(?:create|isyieldable|resume|running|status|wrap|yield|close)|debug\.(?:info|loadmodule|profilebegin|profileend|traceback)|integer\.(?:add|arshift|band|bnot|bor|bswap|btest|bxor|clamp|countlz|countrz|create|div|extract|fromstring|ge|gt|idiv|le|lrotate|lshift|lt|max|min|mod|mul|neg|rem|replace|rrotate|rshift|sub|tonumber|udiv|uge|ugt|ule|ult|urem)|math\.(?:abs|acos|asin|atan|atan2|ceil|clamp|cos|cosh|deg|exp|floor|fmod|frexp|isfinite|isinf|isnan|ldexp|lerp|log|log10|map|max|min|modf|noise|pow|rad|random|randomseed|round|sign|sin|sinh|sqrt|tan|tanh)|os\.(?:clock|date|difftime|time)|string\.(?:byte|char|find|format|gmatch|gsub|len|lower|match|pack|packsize|rep|reverse|split|sub|unpack|upper)|table\.(?:concat|create|find|foreach|foreachi|getn|insert|maxn|move|pack|remove|sort|unpack|clear|freeze|isfrozen|clone)|task\.(?:spawn|synchronize|desynchronize|wait|defer|delay)|utf8\.(?:char|codepoint|codes|graphemes|len|nfcnormalize|nfdnormalize|offset)|buffer\.(?:create|fromstring|tostring|len|readbits|readi8|readu8|readi16|readu16|readi32|readu32|readinteger|readf32|readf64|writebits|writei8|writeu8|writei16|writeu16|writei32|writeu32|writeinteger|writef32|writef64|readstring|writestring|copy|fill)|vector\.(?:abs|angle|ceil|clamp|create|cross|dot|floor|lerp|magnitude|max|min|normalize|sign))\b'
+    - match: '(?<![^.]\.|:)\b(bit32\.(?:arshift|band|bnot|bor|btest|bxor|extract|lrotate|lshift|replace|rrotate|rshift|countlz|countrz|byteswap)|coroutine\.(?:create|isyieldable|resume|running|status|wrap|yield|close)|debug\.(?:info|loadmodule|profilebegin|profileend|traceback)|integer\.(?:add|arshift|band|bnot|bor|bswap|btest|bxor|clamp|countlz|countrz|create|div|extract|fromstring|ge|gt|idiv|le|lrotate|lshift|lt|max|min|mod|mul|neg|rem|replace|rrotate|rshift|sub|tonumber|udiv|uge|ugt|ule|ult|urem)|math\.(?:abs|acos|asin|atan|atan2|ceil|clamp|cos|cosh|deg|exp|floor|fmod|frexp|isfinite|isinf|isnan|ldexp|lerp|log|log10|map|max|min|modf|noise|pow|rad|random|randomseed|round|sign|sin|sinh|sqrt|tan|tanh)|os\.(?:clock|date|difftime|time)|string\.(?:byte|char|find|format|gmatch|gsub|len|lower|match|pack|packsize|rep|reverse|split|sub|unpack|upper)|table\.(?:concat|create|find|foreach|foreachi|getn|insert|maxn|move|pack|remove|sort|unpack|clear|freeze|isfrozen|clone)|task\.(?:spawn|synchronize|desynchronize|wait|defer|delay)|utf8\.(?:char|codepoint|codes|graphemes|len|nfcnormalize|nfdnormalize|offset)|buffer\.(?:create|fromstring|tostring|len|readbits|readi8|readu8|readi16|readu16|readi32|readu32|readinteger|readf32|readf64|writebits|writei8|writeu8|writei16|writeu16|writei32|writeu32|writeinteger|writef32|writef64|readstring|writestring|copy|fill)|vector\.(?:abs|angle|ceil|clamp|create|cross|dot|floor|lerp|magnitude|max|min|normalize|sign))\b(?!\s*=(?!=))'
       scope: support.function.luwu
-    - match: '(?<![^.]\.|:)\b(bit32|buffer|coroutine|debug|integer(\.(maxsigned|minsigned))?|math(\.(huge|pi|nan|e|phi|sqrt2|tau))?|os|string|table|task|utf8(\.charpattern)?|vector(\.(one|zero))?)\b'
+    - match: '(?<![^.]\.|:)\b(bit32|buffer|coroutine|debug|integer(\.(maxsigned|minsigned))?|math(\.(huge|pi|nan|e|phi|sqrt2|tau))?|os|string|table|task|utf8(\.charpattern)?|vector(\.(one|zero))?)\b(?!\s*=(?!=))'
       scope: support.constant.luwu
-    - match: '(?<![^.]\.|:)\b(delay|DebuggerManager|elapsedTime|PluginManager|printidentity|settings|spawn|stats|tick|time|UserSettings|version|wait|warn)\b'
+    - match: '(?<![^.]\.|:)\b(delay|DebuggerManager|elapsedTime|PluginManager|printidentity|settings|spawn|stats|tick|time|UserSettings|version|wait|warn)\b(?!\s*=(?!=))'
       scope: support.function.luwu
-    - match: '(?<![^.]\.|:)\b(game|plugin|shared|script|workspace|Enum(?:\.\w+){0,2})\b'
+    - match: '(?<![^.]\.|:)\b(game|plugin|shared|script|workspace|Enum(?:\.\w+){0,2})\b(?!\s*=(?!=))'
       scope: constant.language.luwu
 
   string:
@@ -950,7 +1050,7 @@ contexts:
         1: storage.modifier.visibility.luwu
         2: storage.type.luwu
       push:
-        - match: '(?=[),}\]](?!\s*[&|]))|(?=\s*;)|(?=\s*(?:[*+%^]|\/\/?|(?<!\.)\.\.(?!\.)|-(?![->`])|~=|==))|(?=\s*\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while)\b)|(?=^\s*$)|(?=^\s*(?:@|\b(?:export\s+)?type\b|\b(?:declare\s+)?extern\s+type\b))|(?=^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(?:(?:[+\-*/%^]|\.\.)?=(?!=)|\(|\[|:))'
+        - match: '(?=[),}\]](?!\s*[&|]))|(?=\s*;)|(?=\s*(?:[*+%^]|\/\/?|(?<!\.)\.\.(?!\.)|-(?![->`])|~=|==))|(?=\s*\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while)\b)|(?=^\s*$)|(?=^\s*(?:@|\b(?:export|type)\b|\b(?:declare\s+)?extern\s+type\b))|(?=^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(?:(?:[+\-*/%^]|\.\.)?=(?!=)|\(|\[|:))'
           pop: true
         - include: type_literal
         - match: '='
@@ -985,7 +1085,7 @@ contexts:
       captures:
         1: keyword.operator.typecast.luwu
       push:
-        - match: '(?=[),}\]](?!\s*[&|]))|(?=\s*;)|(?=\s*(?:[*+%^]|\/\/?|(?<!\.)\.\.(?!\.)|-(?![->`])|~=|==))|(?=\s*\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while)\b)|(?=^\s*$)|(?=^\s*(?:@|\b(?:export\s+)?type\b|\b(?:declare\s+)?extern\s+type\b))|(?=^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(?:(?:[+\-*/%^]|\.\.)?=(?!=)|\(|\[|:))'
+        - match: '(?=[),}\]](?!\s*[&|]))|(?=\s*;)|(?=\s*(?:[*+%^]|\/\/?|(?<!\.)\.\.(?!\.)|-(?![->`])|~=|==))|(?=\s*\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while)\b)|(?=^\s*$)|(?=^\s*(?:@|\b(?:export|type)\b|\b(?:declare\s+)?extern\s+type\b))|(?=^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(?:(?:[+\-*/%^]|\.\.)?=(?!=)|\(|\[|:))'
           pop: true
         - include: type_literal
 

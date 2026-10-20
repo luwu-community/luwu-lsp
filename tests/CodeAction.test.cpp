@@ -6,6 +6,7 @@
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuDoExpr)
+LUAU_FASTFLAG(LuwuDestructuring)
 
 TEST_SUITE_BEGIN("CodeAction");
 
@@ -1039,6 +1040,201 @@ class Single implements (Named, Aged) end
     CHECK_EQ(single[0].edit->changes.at(uri)[0].newText, "(\n    Named,\n    Aged\n)");
 }
 
+static std::string applyCodeAction(const std::vector<lsp::CodeAction>& actions, const std::string& title, const Uri& uri, const std::string& source)
+{
+    auto action = findCodeAction(actions, title);
+    REQUIRE(action);
+    REQUIRE(action->edit);
+    return applyEdit(source, action->edit->changes.at(uri));
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructure_layout_puts_the_pattern_under_the_cursor_one_field_per_line")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = {}\n"
+                         "const .{\n"
+                         "    Component,\n"
+                         "    style.{ Rule, token },\n"
+                         "    components.{ Card, Menu as M },\n"
+                         "} = chimera\n";
+    auto uri = newDocument("test.luau", source);
+
+    // In `components.{`, the nested pattern is the one laid out
+    auto actions = codeActionsAt(*this, uri, 4, 17);
+    REQUIRE(!actions.empty());
+    CHECK_EQ(actions[0].title, "Put each field on its own line");
+    CHECK_EQ(actions[0].kind, lsp::CodeActionKind::QuickFix);
+    CHECK_EQ(applyCodeAction(actions, "Put each field on its own line", uri, source),
+        "local chimera = {}\n"
+        "const .{\n"
+        "    Component,\n"
+        "    style.{ Rule, token },\n"
+        "    components.{\n"
+        "        Card,\n"
+        "        Menu as M,\n"
+        "    },\n"
+        "} = chimera\n");
+
+    // Between the outer pattern's fields, the outer pattern goes on one line, the nested ones with it
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 6), "Put fields on one line", uri, source),
+        "local chimera = {}\n"
+        "const .{ Component, style.{ Rule, token }, components.{ Card, Menu as M } } = chimera\n");
+
+    // Outside any pattern there's nothing to lay out
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 5, 6), "Put fields on one line"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructure_layout_collapses_nested_multiline_patterns")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = {}\n"
+                         "export .{\n"
+                         "    elements.{\n"
+                         "        Header,\n"
+                         "        Section,\n"
+                         "    },\n"
+                         "    Card,\n"
+                         "} = chimera\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 6, 5), "Put fields on one line", uri, source),
+        "local chimera = {}\n"
+        "export .{ elements.{ Header, Section }, Card } = chimera\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 3, 9), "Put fields on one line", uri, source),
+        "local chimera = {}\n"
+        "export .{\n"
+        "    elements.{ Header, Section },\n"
+        "    Card,\n"
+        "} = chimera\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructure_layout_works_on_type_destructures_and_skips_comments")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local m = {}\n"
+                         "type .{ Content, Style as S } = m\n"
+                         "const .{\n"
+                         "    a, -- the a\n"
+                         "    b,\n"
+                         "} = m\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 9), "Put each field on its own line", uri, source),
+        "local m = {}\n"
+        "type .{\n"
+        "    Content,\n"
+        "    Style as S,\n"
+        "} = m\n"
+        "const .{\n"
+        "    a, -- the a\n"
+        "    b,\n"
+        "} = m\n");
+
+    // On one line, the comment would swallow the fields after it
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 4, 4), "Put fields on one line"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "import_field_adds_it_to_the_pattern_and_unqualifies_its_uses")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { components = { Card = 1, Menu = 2 } }\n"
+                         "const .{\n"
+                         "    components.{ Menu },\n"
+                         "} = chimera\n"
+                         "print(components.Card, components.Card + 1)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 4, 18), "Import 'Card' from 'components'", uri, source),
+        "local chimera = { components = { Card = 1, Menu = 2 } }\n"
+        "const .{\n"
+        "    components.{ Menu, Card },\n"
+        "} = chimera\n"
+        "print(Card, Card + 1)\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "import_field_uses_an_unnamed_pattern_or_gives_the_local_one")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { Card = 1, Menu = 2 }\n"
+                         "const .{ Menu } = chimera\n"
+                         "print(chimera.Card)\n";
+    auto uri = newDocument("test.luau", source);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 15), "Import 'Card' from 'chimera'", uri, source),
+        "local chimera = { Card = 1, Menu = 2 }\n"
+        "const .{ Menu, Card } = chimera\n"
+        "print(Card)\n");
+
+    std::string plain = "local chimera = { Card = 1 }\n"
+                        "print(chimera.Card)\n";
+    auto plainUri = newDocument("plain.luau", plain);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, plainUri, 1, 15), "Import 'Card' from 'chimera'", plainUri, plain),
+        "local chimera.{ Card } = { Card = 1 }\n"
+        "print(Card)\n");
+
+    // A `Card` already in the file would be captured
+    std::string taken = "local chimera = { Card = 1 }\n"
+                        "local function f(Card) return Card end\n"
+                        "print(chimera.Card)\n";
+    auto takenUri = newDocument("taken.luau", taken);
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, takenUri, 2, 15), "Import 'Card' from 'chimera'"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "import_all_fields_adds_every_unbound_field_without_recursing")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { Card = 1, Menu = 2, elements = { Div = 3 } }\n"
+                         "const .{ Menu } = chimera\n"
+                         "print(chimera.Card)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 10), "Import all fields of 'chimera'", uri, source),
+        "local chimera = { Card = 1, Menu = 2, elements = { Div = 3 } }\n"
+        "const .{ Menu, Card, elements } = chimera\n"
+        "print(Card)\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "qualify_field_takes_it_out_of_the_pattern")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { components = { Card = 1, Menu = 2 } }\n"
+                         "const .{\n"
+                         "    components.{ Card, Menu },\n"
+                         "} = chimera\n"
+                         "print(Card, Menu)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 18), "Qualify 'Card' as 'components.Card'", uri, source),
+        "local chimera = { components = { Card = 1, Menu = 2 } }\n"
+        "const .{\n"
+        "    components.{ Menu },\n"
+        "} = chimera\n"
+        "print(components.Card, Menu)\n");
+
+    // The last field of an unnamed pattern takes the whole declaration with it
+    std::string last = "local chimera = { Card = 1 }\n"
+                       "const .{ Card } = chimera\n"
+                       "print(Card)\n";
+    auto lastUri = newDocument("last.luau", last);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, lastUri, 1, 10), "Qualify 'Card' as 'chimera.Card'", lastUri, last),
+        "local chimera = { Card = 1 }\n"
+        "print(chimera.Card)\n");
+}
+
 static std::optional<lsp::TextEdit> orLeaveGuardRewrite(Fixture& fixture, const lsp::DocumentUri& uri, size_t line, size_t column)
 {
     auto actions = codeActionsAt(fixture, uri, line, column, {lsp::CodeActionKind::RefactorRewrite});
@@ -1163,5 +1359,67 @@ end
 
     CHECK_FALSE(orLeaveGuardRewrite(*this, uri, 2, 6));
 }
+TEST_CASE_FIXTURE(Fixture, "unknown_name_is_imported_through_a_destructuring")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { elements = { Heading = 1, Paragraph = 2 } }\n"
+                         "const .{ elements.{ Heading } } = chimera\n"
+                         "print(Paragraph)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 8), "Import 'Paragraph' from 'elements'", uri, source),
+        "local chimera = { elements = { Heading = 1, Paragraph = 2 } }\n"
+        "const .{ elements.{ Heading, Paragraph } } = chimera\n"
+        "print(Paragraph)\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "unused_destructured_fields_leave_their_pattern")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { elements = { Heading = 1, Paragraph = 2 }, Card = 3 }\n"
+                         "const .{\n"
+                         "    elements.{ Heading, Paragraph },\n"
+                         "    Card,\n"
+                         "} = chimera\n"
+                         "print(Heading)\n";
+    auto uri = newDocument("test.luau", source);
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{0, 0}, {5, 0}};
+    params.context.only = {lsp::CodeActionKind::Source};
+    auto actions = workspace.codeAction(params, nullptr).value_or(std::vector<lsp::CodeAction>{});
+
+    CHECK_EQ(applyCodeAction(actions, "Remove all unused code", uri, source),
+        "local chimera = { elements = { Heading = 1, Paragraph = 2 }, Card = 3 }\n"
+        "const .{\n"
+        "    elements.{ Heading },\n"
+        "} = chimera\n"
+        "print(Heading)\n");
+
+    // One at a time, from its own warning
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 3, 5), "Remove unused variable: 'Card'", uri, source),
+        "local chimera = { elements = { Heading = 1, Paragraph = 2 }, Card = 3 }\n"
+        "const .{\n"
+        "    elements.{ Heading, Paragraph },\n"
+        "} = chimera\n"
+        "print(Heading)\n");
+
+    // Nothing used: the declaration goes
+    std::string unused = "local chimera = { Card = 3 }\n"
+                         "const .{ Card } = chimera\n"
+                         "print(chimera)\n";
+    auto unusedUri = newDocument("unused.luau", unused);
+    params.textDocument.uri = unusedUri;
+    auto unusedActions = workspace.codeAction(params, nullptr).value_or(std::vector<lsp::CodeAction>{});
+    CHECK_EQ(applyCodeAction(unusedActions, "Remove all unused code", unusedUri, unused),
+        "local chimera = { Card = 3 }\n"
+        "print(chimera)\n");
+}
 
 TEST_SUITE_END();
+

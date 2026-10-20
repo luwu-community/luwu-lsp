@@ -2266,5 +2266,79 @@ TEST_CASE_FIXTURE(Fixture, "no_auto_imports_inside_a_destructuring_pattern")
     params.position = plainMarker;
     CHECK(getItem(workspace.completion(params, nullptr), "foo"));
 }
+static std::vector<lsp::CompletionItem> completeAt(Fixture& fixture, const Uri& uri, const lsp::Position& position)
+{
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = position;
+    return fixture.workspace.completion(params, nullptr);
+}
+
+// Luwu Destructuring: a name two levels into a value the file already destructures is imported by adding it to the
+// pattern, nested pattern and all
+TEST_CASE_FIXTURE(Fixture, "auto_import_adds_to_an_existing_destructuring")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+    client->globalConfig.completion.imports.enabled = true;
+
+    auto [source, marker] = sourceWithMarker("local chimera = { elements = { Heading = 1, Paragraph = 2 }, Card = 3, deep = { a = { Pane = 4 } } }\n"
+                                             "const .{ elements.{ Heading } } = chimera\n"
+                                             "local x = P|\n");
+    auto uri = newDocument("user.luau", source);
+
+    auto paragraph = getItem(completeAt(*this, uri, marker), "Paragraph");
+    REQUIRE(paragraph);
+    REQUIRE_EQ(paragraph->additionalTextEdits.size(), 1);
+    CHECK_EQ(applyEdit(source, paragraph->additionalTextEdits),
+        "local chimera = { elements = { Heading = 1, Paragraph = 2 }, Card = 3, deep = { a = { Pane = 4 } } }\n"
+        "const .{ elements.{ Heading, Paragraph } } = chimera\n"
+        "local x = P\n");
+
+    // Three levels down is too far
+    CHECK_FALSE(getItem(completeAt(*this, uri, marker), "Pane"));
+
+    // A field of the outer value goes in the outer pattern
+    auto [cardSource, cardMarker] = sourceWithMarker("local chimera = { elements = { Heading = 1 }, Card = 3 }\n"
+                                                     "const .{ elements.{ Heading } } = chimera\n"
+                                                     "local x = C|\n");
+    auto cardUri = newDocument("card.luau", cardSource);
+    auto card = getItem(completeAt(*this, cardUri, cardMarker), "Card");
+    REQUIRE(card);
+    CHECK_EQ(applyEdit(cardSource, card->additionalTextEdits),
+        "local chimera = { elements = { Heading = 1 }, Card = 3 }\n"
+        "const .{ elements.{ Heading }, Card } = chimera\n"
+        "local x = C\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "auto_import_destructures_a_required_module_once")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+    client->globalConfig.completion.imports.enabled = true;
+
+    std::string chimeraSource = "return { elements = { Paragraph = 1, Heading = 2 }, Card = 3 }";
+    auto chimera = newDocument(tempDir.write_child("chimera.luau", chimeraSource), chimeraSource);
+    workspace.checkStrict(workspace.fileResolver.getModuleName(chimera), nullptr, /* forAutocomplete= */ false);
+
+    // Not required yet: a new destructuring of the require
+    auto [source, marker] = sourceWithMarker("local x = Pa|\n");
+    auto uri = newDocument("user.luau", source);
+    auto paragraph = getItem(completeAt(*this, uri, marker), "Paragraph");
+    REQUIRE(paragraph);
+    REQUIRE_EQ(paragraph->additionalTextEdits.size(), 1);
+    CHECK_NE(paragraph->additionalTextEdits[0].newText.find(".{ elements.{ Paragraph } } = require(\"./chimera\")"), std::string::npos);
+
+    // Required through a destructuring already: added to it, not destructured again
+    auto [requiredSource, requiredMarker] = sourceWithMarker("const .{ elements.{ Paragraph } } = require(\"./chimera\")\n"
+                                                             "local x = He|\n");
+    auto requiredUri = newDocument("required.luau", requiredSource);
+    auto heading = getItem(completeAt(*this, requiredUri, requiredMarker), "Heading");
+    REQUIRE(heading);
+    REQUIRE_EQ(heading->additionalTextEdits.size(), 1);
+    CHECK_EQ(applyEdit(requiredSource, heading->additionalTextEdits),
+        "const .{ elements.{ Paragraph, Heading } } = require(\"./chimera\")\n"
+        "local x = He\n");
+}
 
 TEST_SUITE_END();

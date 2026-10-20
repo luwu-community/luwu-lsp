@@ -49,7 +49,9 @@
     // `trait Meower(tag: string) needs Animal`, `declare class type Bar`,
     // `export declare trait type Baz`), whose body is closed by `end`
     "increaseIndentPattern": "(?:^(?:\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`|(?!\\-\\-)[^\"'`])*((\\b(function|do|repeat)\\b(?:(?!\\b(end|until)\\b)(?:\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`|(?!\\-\\-)[^\"'`]))*)|(\\{\\s*)|(\\b(then|else)\\b[;\\s]*))(\\-\\-.*)*$)|(?:^\\s*(?:export\\s+)?(?:declare\\s+(?:class|trait)\\s+type|class|trait)\\s+[A-Za-z_]((?!\\-\\-|\\bend\\b).)*(\\-\\-.*)?$)",
-    "decreaseIndentPattern": "^\\s*((\\b(end|until)\\b)|(\\})|(\\))|(\\b(else)\\b[;\\s]*))"
+    // `else` isn't here: in a `match` or an if-else expression it's an arm, level with the ones above it, and this
+    // pattern can't tell. src/elseIndent.ts dedents an `if` statement's `else` instead.
+    "decreaseIndentPattern": "^\\s*((\\b(end|until)\\b)|(\\})|(\\)))"
   },
 
   "onEnterRules": [
@@ -74,6 +76,28 @@
       "afterText": "^\\s*end\\b",
       "action": {
         "indent": "indentOutdent"
+      }
+    },
+    {
+      // an `else` arm or a `give` that already has its value ends its expression (a `match`, an if-else or a `do`
+      // expression), so the next line goes back out to the code around it. `else if` goes on with the chain.
+      "beforeText": "^\\s*(?:else\\s+(?!if\\b)|give\\s+)(?!--)\\S",
+      "action": {
+        "indent": "outdent"
+      }
+    },
+    {
+      // a `give` with no value yet: the value goes on the next line
+      "beforeText": "^\\s*give\\s*(?:--.*)?$",
+      "action": {
+        "indent": "indent"
+      }
+    },
+    {
+      // a `match` header (`match x`, `match const v = x`), whose `case` arms go on the lines below it
+      "beforeText": "(?<![.:\\w])match\\s+(?!--)(?:local\\b|const\\b|not\\b|[^\\s=.,:;)\\]}])((?!\\bcase\\b).)*$",
+      "action": {
+        "indent": "indent"
       }
     },
     {

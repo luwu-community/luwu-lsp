@@ -9,6 +9,7 @@ LUAU_FASTFLAG(LuwuIfLocal)
 LUAU_FASTFLAG(LuwuTableComprehensions)
 LUAU_FASTFLAG(LuwuDoExpr)
 LUAU_FASTFLAG(LuwuInLuwuDocs)
+LUAU_FASTFLAG(LuwuDestructuring)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -323,6 +324,72 @@ TEST_CASE_FIXTURE(Fixture, "do_expression_give_has_keyword_semantic_token")
 
     auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
     checkKeywordToken(tokens, wordPosition(source, 1, "give"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "type_destructure_colors_only_the_type_names")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    // `type .{Content} = chimera` desugars to `type Content = chimera.Content`, a reference whose prefix is written
+    // after its name: `Content` is coloured as a type, and nothing lands on `chimera`
+    std::string source = "local chimera = {}\n"
+                         "type .{ Content } = chimera\n"
+                         "local x: chimera.Content\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+
+    auto content = getSemanticToken(tokens, wordPosition(source, 1, "Content"));
+    REQUIRE(content);
+    CHECK_EQ(content->end.column - content->start.column, 7);
+
+    auto module = wordPosition(source, 1, "chimera");
+    for (const auto& token : tokens)
+        if (token.start.line == 1)
+            CHECK(token.end.column <= module.column);
+
+    // a written `chimera.Content` still colours both parts, by their own locations
+    auto prefix = getSemanticToken(tokens, wordPosition(source, 2, "chimera"));
+    REQUIRE(prefix);
+    CHECK_EQ(prefix->tokenType, lsp::SemanticTokenTypes::Namespace);
+    CHECK_EQ(prefix->end.column - prefix->start.column, 7);
+    auto name = getSemanticToken(tokens, wordPosition(source, 2, "Content"));
+    REQUIRE(name);
+    CHECK_EQ(name->end.column - name->start.column, 7);
+}
+
+TEST_CASE_FIXTURE(Fixture, "destructured_names_get_one_token_each_and_the_pattern_none")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    // The hidden local an unnamed pattern binds its value to spans the whole `.{...}`, and each field's desugared
+    // read sits on its key: neither is source anyone wrote
+    std::string source = "local t = { h1 = function() end, h2 = function() end }\n"
+                         "local function f() end\n"
+                         "const .{ h1, h2 } = t\n"
+                         "const .{ x } = f\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+
+    for (unsigned int line : {2u, 3u})
+        CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, line, ".{")));
+
+    for (const char* name : {"h1", "h2"})
+    {
+        auto position = wordPosition(source, 2, name);
+        size_t count = std::count_if(tokens.begin(), tokens.end(),
+            [&](const SemanticToken& token)
+            {
+                return token.start == position;
+            });
+        CHECK_EQ(count, 1);
+        auto token = getSemanticToken(tokens, position);
+        REQUIRE(token);
+        CHECK_EQ(token->tokenType, lsp::SemanticTokenTypes::Function);
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "variables_named_give_and_when_are_not_keywords")

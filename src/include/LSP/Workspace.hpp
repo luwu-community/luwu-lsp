@@ -12,6 +12,7 @@
 #include "LSP/Client.hpp"
 #include "LSP/WorkspaceFileResolver.hpp"
 #include "LSP/LuauExt.hpp"
+#include "LSP/Destructure.hpp"
 
 using LSPCancellationToken = std::shared_ptr<Luau::FrontendCancellationToken>;
 
@@ -138,6 +139,13 @@ private:
     void endAutocompletion(const lsp::CompletionParams& params);
     void suggestImports(const Luau::ModuleName& moduleName, const Luau::Position& position, const ClientConfiguration& config,
         const TextDocument& textDocument, std::vector<lsp::CompletionItem>& result, bool completingTypeReferencePrefix = true);
+    // Luwu Destructuring: names starting like `typed` that adding them to a destructuring (or a new one of a module not
+    // required yet) would import, for completion and the unknown-name quick fix
+    std::vector<Luau::LanguageServer::Destructure::ImportCandidate> destructureImportCandidates(const Luau::SourceModule& sourceModule,
+        const Luau::Module& module, const Luau::Position& position, const std::string& typed, bool typesOnly, const ClientConfiguration& config,
+        const TextDocument& textDocument) const;
+    void suggestDestructureImports(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::Position& position,
+        const ClientConfiguration& config, const TextDocument& textDocument, bool typesOnly, std::vector<lsp::CompletionItem>& result);
     lsp::WorkspaceEdit computeOrganiseRequiresEdit(const lsp::DocumentUri& uri);
     std::vector<Luau::ModuleName> findReverseDependencies(const Luau::ModuleName& moduleName);
     std::vector<Uri> findFilesForWorkspaceDiagnostics(const std::string& rootPath, const ClientConfiguration& config);

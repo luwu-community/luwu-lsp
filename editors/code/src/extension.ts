@@ -40,6 +40,7 @@ import {
 } from "./settings";
 
 import { registerLongBracketAutoClose } from "./longBracketAutoClose";
+import { registerElseIndent } from "./elseIndent";
 import { registerDocCodeBlocks } from "./docCodeBlocks";
 import { registerPasteReindent } from "./pasteReindent";
 import { registerLegacySettingsNotice } from "./legacySettingsNotice";
@@ -735,6 +736,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   registerConflictingExtensionCheck(context);
   registerLongBracketAutoClose(context);
+  registerElseIndent(context);
   registerDocCodeBlocks(context);
   registerPasteReindent(context);
   registerLegacySettingsNotice(context);

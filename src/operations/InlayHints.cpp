@@ -460,6 +460,11 @@ struct InlayHintVisitor : public Luau::AstVisitor
         if (config.inlayHints.parameterNames == InlayHintsParameterNamesConfig::None)
             return true;
 
+        // Luwu match expressions: `x is Point` is a `class.isinstance(x, Point)` call the parser wrote, with no
+        // parentheses to show its parameters next to
+        if (call->fromTypeTest)
+            return true;
+
         auto ty = module->astTypes.find(call->func);
         if (!ty)
             return false;

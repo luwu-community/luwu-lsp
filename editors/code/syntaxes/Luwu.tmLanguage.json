@@ -33,6 +33,9 @@
       "include": "#const-declaration"
     },
     {
+      "include": "#type-destructure-declaration"
+    },
+    {
       "include": "#extern-type-declaration"
     },
     {
@@ -252,7 +255,8 @@
       ]
     },
     "const-declaration": {
-      "begin": "\\b(?:(export)\\s+)?(const)\\b",
+      "comment": "`[export] const name = v`, and a bare `export name = v` / `export .{x, y} = v`, which mean `export const` (rfcs/destructuring.md). A bare `export` only counts before a name that isn't one of the keywords `export` combines with, or before `.{`.",
+      "begin": "\\b(?:(export)\\s+)?(const)\\b|\\b(export)\\b(?=\\s*\\.\\s*\\{|\\s+(?!(?:type|local|const|function|class|trait|declare|extern|public|private|final)\\b)[a-zA-Z_])",
       "end": "(?=\\s*[=;])|^(?!\\s*[|&])",
       "beginCaptures": {
         "1": {
@@ -260,6 +264,9 @@
         },
         "2": {
           "name": "storage.modifier.const.luwu"
+        },
+        "3": {
+          "name": "storage.modifier.visibility.luwu"
         }
       },
       "patterns": [
@@ -1421,6 +1428,16 @@
           "name": "keyword.control.luwu"
         },
         {
+          "comment": "Luwu match expressions: `match` before the value it tests (`match x`, `match const v = x`), and `case` starting an arm. Only in those shapes, so a variable named `match` or `case` stays a name.",
+          "match": "(?<![.:])\\bmatch\\b(?=\\s+(?:local\\b|const\\b|not\\b|[^\\s=.,:;)\\]}+*/%^<>~-]))|^\\s*\\bcase\\b(?=\\s+(?:is\\b|implements\\b|nil\\b|none\\b|true\\b|false\\b|-?\\d|[\"'`]))",
+          "name": "keyword.control.luwu"
+        },
+        {
+          "comment": "Luwu match expressions: the `is` and `implements` type tests (`x is string`, `p is not Point`, `o implements Named`). A name, `not`, `nil` or `function` follows them; anything else is a variable named `is`.",
+          "match": "(?<![.:])\\b(?:is|implements)\\b(?=\\s+(?:not\\b|nil\\b|function\\b|[a-zA-Z_]))",
+          "name": "keyword.operator.wordlike.luwu"
+        },
+        {
           "match": "\\b(local)\\b",
           "name": "storage.modifier.local.luwu"
         },
@@ -1655,7 +1672,7 @@
           ]
         },
         {
-          "begin": "(--!)(strict|nonstrict|nocheck|nolint)\\b",
+          "begin": "(--!)(strict|nonstrict|nocheck|nolint|lint)\\b",
           "beginCaptures": {
             "1": {
               "name": "keyword.operator.directive.luwu"
@@ -1931,9 +1948,76 @@
         }
       ]
     },
+    "type-destructure-declaration": {
+      "comment": "`[export] type .{A, B as C} = module` (rfcs/destructuring.md): binds the types a module exports. Ends at the pattern's `}`, so `= module` highlights as an ordinary expression.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(type)\\s*(?=\\.\\s*\\{)",
+      "end": "(?<=\\})",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.visibility.luwu"
+        },
+        "2": {
+          "name": "storage.type.luwu"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#type-destructure-pattern"
+        }
+      ]
+    },
+    "type-destructure-pattern": {
+      "comment": "The `.{...}` of a type destructure: like #destructure-pattern, but what gets bound is a type. A key followed by `as` or by its own `.{...}` is a field being read, so it is scoped as a property.",
+      "begin": "(\\.)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.accessor.luwu"
+        },
+        "2": {
+          "name": "punctuation.definition.destructure.begin.luwu"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.destructure.end.luwu"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s+(as)\\b",
+          "captures": {
+            "1": {
+              "name": "variable.other.property.luwu"
+            },
+            "2": {
+              "name": "keyword.control.as.luwu"
+            }
+          }
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\.\\s*\\{)",
+          "name": "variable.other.property.luwu"
+        },
+        {
+          "include": "#type-destructure-pattern"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.luwu"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "name": "entity.name.type.luwu"
+        }
+      ]
+    },
     "type-alias-declaration": {
       "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(type)\\b(?=\\s+(?!function\\b)[a-zA-Z_][a-zA-Z0-9_]*)",
-      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while|when|give)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export\\s+)?type\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
+      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|private|repeat|return|then|until|while|when|give)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export|type)\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luwu"
@@ -1971,7 +2055,7 @@
           "name": "keyword.operator.typecast.luwu"
         }
       },
-      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|repeat|return|then|until|while|when|give)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export\\s+)?type\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
+      "end": "(?=[),}\\]](?!\\s*[&|]))|(?=\\s*;)|(?=\\s*(?:[*+%^]|\\/\\/?|(?<!\\.)\\.\\.(?!\\.)|-(?![->`])|~=|==))|(?=\\s*\\b(?:and|or|break|class|declare|trait|const|continue|do|else|elseif|end|expect|for|function|if|in|local|public|repeat|return|then|until|while|when|give)\\b)|(?=^\\s*$)|(?=^\\s*(?:@|\\b(?:export|type)\\b|\\b(?:declare\\s+)?extern\\s+type\\b))|(?=^\\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*(?:(?:[+\\-*/%^]|\\.\\.)?=(?!=)|\\(|\\[|:))",
       "patterns": [
         {
           "include": "#type_literal"
