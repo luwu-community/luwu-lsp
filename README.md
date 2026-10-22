@@ -14,7 +14,7 @@ Note that Luwu is compatible with all Luau code 'til 0.731 and switching to Luwu
 Luau LSP server path binary.
 
 Luwu language features, such as classes, the `none` primitive, standard library additions, improved extern type definition behavior, and more, are on by default; pass `--luau-compat` (or set
-`luau-lsp.luauCompatibilityMode`) for Luau compatibility mode, which disables them. The new type solver is enabled in
+`luwu.luauCompatibilityMode`) for Luau compatibility mode, which disables them. The new type solver is enabled in
 every configuration.
 
 ## Getting Started
@@ -35,17 +35,57 @@ The Linux builds run on any distribution with glibc 2.28 or newer (RHEL 8, Debia
 
 ### VS Code
 
-1. Download the `.vsix` for your platform. It has the server bundled.
-2. Install it from the command line:
-   ```sh
-   code --install-extension luwu-lsp-linux-x64.vsix
-   ```
-   or from VS Code: open the Extensions view, click `...` at the top and pick **Install from VSIX...**.
-3. If you have JohnnyMorganz's **Luau Language Server** extension installed, disable it (at least in workspaces where you
-   use Luwu). Both extensions read the same `luau-lsp.*` settings and would each start a server on the same files.
-4. Run **Developer: Reload Window**.
+The `.vsix` has the server bundled. These commands download the one for your platform and install it in one go. Run
+them again to update.
 
-Settings still use the `luau-lsp.*` prefix, so an existing Luau LSP configuration carries over as is.
+Linux and macOS:
+
+```sh
+case "$(uname -sm)" in
+    "Linux x86_64") target=linux-x64 ;;
+    "Linux aarch64") target=linux-arm64 ;;
+    "Darwin arm64") target=darwin-arm64 ;;
+    "Darwin x86_64") target=darwin-x64 ;;
+esac
+curl -fL -o "${TMPDIR:-/tmp}/luwu-lsp.vsix" "https://github.com/luwu-community/luwu-lsp/releases/download/luwu-latest/luwu-lsp-$target.vsix"
+code --install-extension "${TMPDIR:-/tmp}/luwu-lsp.vsix"
+```
+
+Windows (PowerShell):
+
+```powershell
+$vsix = "$env:TEMP\luwu-lsp.vsix"
+Invoke-WebRequest "https://github.com/luwu-community/luwu-lsp/releases/download/luwu-latest/luwu-lsp-win32-x64.vsix" -OutFile $vsix
+code --install-extension $vsix
+```
+
+If you downloaded the `.vsix` from the release page instead, pass its full path, e.g.
+`code --install-extension ~/Downloads/luwu-lsp-linux-x64.vsix` (`$HOME\Downloads\luwu-lsp-win32-x64.vsix` on Windows).
+You can also install it from VS Code: open the Extensions view, click `...` at the top and pick **Install from VSIX...**.
+
+Then:
+
+1. If you have JohnnyMorganz's **Luau Language Server** extension installed, disable it (at least in workspaces where you
+   use Luwu). Otherwise both extensions start a server on the same files.
+2. Run **Developer: Reload Window**.
+
+#### Settings
+
+The extension's settings live under `luwu.*` (`luwu.server.path`, `luwu.types.definitionFiles`, ...). It also reads
+any `luau-lsp.*` settings you already have, so an existing Luau LSP configuration carries over. A `luwu.*` setting
+always wins over its `luau-lsp.*` counterpart. Set `"luwu.inheritLuauLspSettings": false` to ignore `luau-lsp.*`
+entirely, for example when you keep upstream's extension installed and configure the two separately.
+
+For now, edit settings in `settings.json` (**Preferences: Open User Settings (JSON)** or `.vscode/settings.json`)
+rather than the Settings UI. The extension declares every setting under both names, so the UI lists each one twice
+and it's easy to change the `luau-lsp.*` copy that a `luwu.*` value then overrides. Write new settings as `luwu.*`:
+
+```json
+{
+    "luwu.platform.type": "standard",
+    "luwu.types.definitionFiles": ["./globals.d.luau"]
+}
+```
 
 ### Other editors
 
@@ -89,15 +129,15 @@ compile against it instead of the submodule.
 ## Configuration
 
 General configuration (strictness, lints, require aliases) comes from `.luaurc` files, as described in Luau's
-[RFC documentation](https://rfcs.luau.org/config-luaurc.html). Language-server-specific settings are under `luau-lsp` in
-your editor's settings.
+[RFC documentation](https://rfcs.luau.org/config-luaurc.html). Language-server-specific settings are under `luwu` in
+your editor's settings (see [Settings](#settings) for how `luau-lsp.*` ones are read).
 
-To provide global type definitions for a custom environment, use `luau-lsp.types.definitionFiles`, with documentation
-in `luau-lsp.types.documentationFiles`. Require-by-string (`require("./module")`) works out of the box.
+To provide global type definitions for a custom environment, use `luwu.types.definitionFiles`, with documentation
+in `luwu.types.documentationFiles`. Require-by-string (`require("./module")`) works out of the box.
 
 LSP platform defaults to `standard` mode.
 
-Roblox platform support is inherited from luau-lsp and enabled with `luau-lsp.platform.type: "roblox"`; see the
+Roblox platform support is inherited from luau-lsp and enabled with `luwu.platform.type: "roblox"`; see the
 [luau-lsp README](https://github.com/JohnnyMorganz/luau-lsp#readme) for how it is configured.
 
 ## Supported Features
