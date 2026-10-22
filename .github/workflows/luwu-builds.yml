@@ -1,0 +1,179 @@
+name: Luwu Builds
+
+# Builds the server for every supported platform on each push to `luwu` and republishes
+# the `luwu-latest` prerelease with the binaries and a per-platform .vsix.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - luwu
+
+concurrency:
+  group: luwu-builds
+  cancel-in-progress: true
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "10.15"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x64
+          - os: macos-latest
+            name: macos-universal
+
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Server
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_STATIC_CRT:BOOL=ON -DLSP_BUILD_WITH_SENTRY:BOOL=OFF
+          cmake --build . --config RelWithDebInfo --target Luwu.LanguageServer.CLI -j 4
+
+      - name: (MacOS) Verify universal build and strip
+        if: runner.os == 'macOS'
+        run: |
+          lipo -archs build/luwu-lsp
+          strip -S build/luwu-lsp
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp build/RelWithDebInfo/luwu-lsp.exe dist/
+          else
+            cp build/luwu-lsp dist/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.name }}
+          path: ./dist
+
+  build-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            name: linux-x64
+            image-arch: x86_64
+          - runner: ubuntu-24.04-arm
+            name: linux-arm64
+            image-arch: aarch64
+
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    # manylinux_2_28 is AlmaLinux 8 (glibc 2.28), the same baseline seal's Linux builds use. Its
+    # gcc-toolset links newer libstdc++ symbols statically, so the binary runs on RHEL 8's libstdc++.
+    container: quay.io/pypa/manylinux_2_28_${{ matrix.image-arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Server
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_BUILD_WITH_SENTRY:BOOL=OFF
+          cmake --build . --target Luwu.LanguageServer.CLI -j 4
+          strip --strip-debug luwu-lsp
+
+      - name: Check glibc/libstdc++ requirements
+        run: |
+          BIN_PATH="build/luwu-lsp"
+          ldd "$BIN_PATH"
+          max_glibc=$(objdump -T "$BIN_PATH" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+          max_glibcxx=$(objdump -T "$BIN_PATH" | grep -o 'GLIBCXX_[0-9.]*' | sort -Vu | tail -1)
+          echo "max glibc symbol: $max_glibc"
+          echo "max libstdc++ symbol: ${max_glibcxx:-<none>}"
+          if [ "$(printf '%s\n' GLIBC_2.28 "$max_glibc" | sort -V | tail -1)" != "GLIBC_2.28" ]; then
+            echo "::error::binary requires $max_glibc, newer than GLIBC_2.28"
+            exit 1
+          fi
+          if [ -n "$max_glibcxx" ] && [ "$(printf '%s\n' GLIBCXX_3.4.25 "$max_glibcxx" | sort -V | tail -1)" != "GLIBCXX_3.4.25" ]; then
+            echo "::error::binary requires $max_glibcxx, newer than RHEL 8's libstdc++ (GLIBCXX_3.4.25)"
+            exit 1
+          fi
+
+      - name: Stage binary
+        run: |
+          mkdir dist
+          cp build/luwu-lsp dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.name }}
+          path: ./dist
+
+  release:
+    needs: [build, build-linux]
+    name: Publish luwu-latest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: bins
+
+      - run: npm ci
+        working-directory: editors/code
+
+      - name: Package binaries and extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release editors/code/bin
+          rm -f editors/code/README.md editors/code/CHANGELOG.md editors/code/LICENSE.md
+          cp README.md editors/code/README.md
+          cp CHANGELOG.md editors/code/CHANGELOG.md
+          cp LICENSE.md editors/code/LICENSE
+
+          # artifact name, binary file, server file in the extension, VS Code targets
+          while read -r name bin server targets; do
+            chmod 755 "bins/bin-$name/$bin"
+            (cd "bins/bin-$name" && zip -q "../../release/luwu-lsp-$name.zip" "$bin")
+            rm -f editors/code/bin/*
+            cp "bins/bin-$name/$bin" "editors/code/bin/$server"
+            for target in $targets; do
+              (cd editors/code && npx --yes @vscode/vsce package --target "$target" -o "../../release/luwu-lsp-$target.vsix" < /dev/null)
+            done
+          done <<'TARGETS'
+          windows-x64 luwu-lsp.exe server.exe win32-x64
+          macos-universal luwu-lsp server darwin-x64 darwin-arm64
+          linux-x64 luwu-lsp server linux-x64
+          linux-arm64 luwu-lsp server linux-arm64
+          TARGETS
+          ls -l release
+
+      - name: Republish luwu-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete luwu-latest --cleanup-tag --yes || true
+          gh release create luwu-latest release/* \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "luwu-latest" \
+            --notes "Latest build of the \`luwu\` branch ($GITHUB_SHA). Rebuilt on every push.
+
+          Server: \`luwu-lsp-<platform>.zip\`. VS Code extension: \`luwu-lsp-<vscode target>.vsix\` (install with \`code --install-extension\`). Linux builds need glibc 2.28 or newer."
