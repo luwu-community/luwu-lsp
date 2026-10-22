@@ -19,10 +19,48 @@ every configuration.
 
 ## Getting Started
 
-We're getting ready to ship editor extensions and prebuild binaries, but for now you kinda need to compile luwu-lsp from source.
+Prebuilt binaries and VS Code extensions are on the
+[`luwu-latest` prerelease](https://github.com/luwu-community/luwu-lsp/releases/tag/luwu-latest). It's rebuilt from the
+`luwu` branch on every push, so download it again to update.
 
-The bundled clients in [`editors/`](editors/README.md) are inherited from luau-lsp. For now, settings still use the `luau-lsp.*`
-prefix.
+| Platform | VS Code extension | Server only |
+|---|---|---|
+| Windows x64 | `luwu-lsp-win32-x64.vsix` | `luwu-lsp-windows-x64.zip` |
+| macOS (Apple Silicon) | `luwu-lsp-darwin-arm64.vsix` | `luwu-lsp-macos-universal.zip` |
+| macOS (Intel) | `luwu-lsp-darwin-x64.vsix` | `luwu-lsp-macos-universal.zip` |
+| Linux x64 | `luwu-lsp-linux-x64.vsix` | `luwu-lsp-linux-x64.zip` |
+| Linux arm64 | `luwu-lsp-linux-arm64.vsix` | `luwu-lsp-linux-arm64.zip` |
+
+The Linux builds run on any distribution with glibc 2.28 or newer (RHEL 8, Debian 10, Ubuntu 18.10 and later).
+
+### VS Code
+
+1. Download the `.vsix` for your platform. It has the server bundled.
+2. Install it from the command line:
+   ```sh
+   code --install-extension luwu-lsp-linux-x64.vsix
+   ```
+   or from VS Code: open the Extensions view, click `...` at the top and pick **Install from VSIX...**.
+3. If you have JohnnyMorganz's **Luau Language Server** extension installed, disable it (at least in workspaces where you
+   use Luwu). Both extensions read the same `luau-lsp.*` settings and would each start a server on the same files.
+4. Run **Developer: Reload Window**.
+
+Settings still use the `luau-lsp.*` prefix, so an existing Luau LSP configuration carries over as is.
+
+### Other editors
+
+Download the server zip for your platform and unzip `luwu-lsp` (`luwu-lsp.exe` on Windows) somewhere on your `PATH`. Then
+point your editor's Luau language server configuration at it. It's a drop-in replacement for the `luau-lsp` binary and
+takes the same arguments (`luwu-lsp lsp`). On macOS, Gatekeeper blocks the downloaded binary until you clear its
+quarantine flag with `xattr -d com.apple.quarantine luwu-lsp`.
+
+The server also typechecks from the command line:
+
+```sh
+luwu-lsp analyze --defs=globals.d.luau src/
+```
+
+The bundled clients in [`editors/`](editors/README.md) are inherited from luau-lsp.
 
 ### Build From Source
 
