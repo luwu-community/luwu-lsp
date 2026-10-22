@@ -1,6 +1,7 @@
 #include "LSP/Refactoring.hpp"
 #include "LSP/Workspace.hpp"
 #include "LSP/LuauExt.hpp"
+#include "LSP/Destructure.hpp"
 #include "Luau/AstQuery.h"
 
 #include <algorithm>
@@ -1147,7 +1148,14 @@ void computeRefactorings(
                 local = exprLocal->local;
         }
 
+        // Luwu Destructuring: a field of a pattern has no declaration of its own to inline, and the value a pattern
+        // destructures is held by a hidden local
+        namespace Destructure = Luau::LanguageServer::Destructure;
+        Destructure::DestructureFacts facts;
         if (local)
+            sourceModule.root->visit(&facts);
+
+        if (local && !Destructure::isHiddenDestructureLocal(local) && !Destructure::isPatternField(local, facts))
         {
             lsp::CodeAction action;
             action.title = "Inline variable '" + std::string(local->name.value) + "'";

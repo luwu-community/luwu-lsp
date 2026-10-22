@@ -2341,4 +2341,64 @@ TEST_CASE_FIXTURE(Fixture, "auto_import_destructures_a_required_module_once")
         "local x = He\n");
 }
 
+TEST_CASE_FIXTURE(Fixture, "auto_import_requires_a_submodule_rather_than_destructuring_its_parent")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+    client->globalConfig.completion.imports.enabled = true;
+
+    std::string fsSource = "return { readfile = function() return \"\" end }";
+    auto fsUri = newDocument(tempDir.write_child("std/fs.luau", fsSource), fsSource);
+    std::string stdSource = "return { fs = require(\"@self/fs\"), version = 1 }";
+    auto stdUri = newDocument(tempDir.write_child("std/init.luau", stdSource), stdSource);
+    workspace.checkStrict(workspace.fileResolver.getModuleName(fsUri), nullptr, /* forAutocomplete= */ false);
+    workspace.checkStrict(workspace.fileResolver.getModuleName(stdUri), nullptr, /* forAutocomplete= */ false);
+
+    // `fs` is a module of its own: requiring "./std" for it would load all of it
+    auto [source, marker] = sourceWithMarker("local x = f|\n");
+    auto uri = newDocument("user.luau", source);
+    auto items = completeAt(*this, uri, marker);
+    bool fromStd = false;
+    bool direct = false;
+    for (const auto& item : items)
+    {
+        if (item.label != "fs")
+            continue;
+        for (const auto& edit : item.additionalTextEdits)
+        {
+            fromStd = fromStd || edit.newText.find(".{ fs } = require(\"./std\")") != std::string::npos;
+            direct = direct || edit.newText.find("fs = require(\"./std/fs\")") != std::string::npos;
+        }
+    }
+    CHECK_FALSE(fromStd);
+    CHECK(direct);
+
+    // A field that isn't a module still comes through a destructuring
+    auto [versionSource, versionMarker] = sourceWithMarker("local x = ve|\n");
+    auto versionUri = newDocument("version.luau", versionSource);
+    auto version = getItem(completeAt(*this, versionUri, versionMarker), "version");
+    REQUIRE(version);
+    REQUIRE_EQ(version->additionalTextEdits.size(), 1);
+    CHECK_NE(version->additionalTextEdits[0].newText.find(".{ version } = require(\"./std\")"), std::string::npos);
+
+    // Once "./std" is required, `fs` goes into its destructuring, or the local holding it gets one in place, and isn't
+    // required again on its own
+    std::vector<std::pair<std::string, std::string>> requiredCases{
+        {"const .{ version } = require(\"./std\")\n", "const .{ version, fs } = require(\"./std\")\nlocal x = f\n"},
+        {"const std = require(\"./std\")\n", "const std.{ fs } = require(\"./std\")\nlocal x = f\n"},
+    };
+    for (size_t i = 0; i < requiredCases.size(); ++i)
+    {
+        const auto& [required, expected] = requiredCases[i];
+        auto [requiredSource, requiredMarker] = sourceWithMarker(required + "local x = f|\n");
+        auto requiredUri = newDocument("required" + std::to_string(i) + ".luau", requiredSource);
+        std::vector<lsp::CompletionItem> fsItems;
+        for (const auto& item : completeAt(*this, requiredUri, requiredMarker))
+            if (item.label == "fs")
+                fsItems.push_back(item);
+        REQUIRE_EQ(fsItems.size(), 1);
+        CHECK_EQ(applyEdit(requiredSource, fsItems[0].additionalTextEdits), expected);
+    }
+}
+
 TEST_SUITE_END();

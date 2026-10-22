@@ -3,6 +3,8 @@
 
 #include "LSP/IostreamHelpers.hpp"
 
+LUAU_FASTFLAG(LuwuClasses)
+
 TEST_SUITE_BEGIN("References");
 
 // TODO: cross module tests
@@ -720,6 +722,47 @@ TEST_CASE_FIXTURE(Fixture, "find_references_through_nested_metatable_chain")
 
     CHECK_EQ(lsp::Range{{4, 21}, {4, 25}}, result->at(0).range); // function Foo.Test()
     CHECK_EQ(lsp::Range{{10, 12}, {10, 16}}, result->at(1).range); // Baz:Test()
+}
+
+TEST_CASE_FIXTURE(Fixture, "find_references_of_private_class_method_from_its_declaration")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ENABLE_NEW_SOLVER();
+
+    auto source = R"(
+class Parser
+    public function __init(self) end
+    private function in_pre(self: Parser): boolean
+        return false
+    end
+    public function step(self)
+        if self:in_pre() then
+            return
+        end
+    end
+end
+)";
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::ReferenceParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{3, 22};
+
+    auto result = workspace.references(params, nullptr);
+    REQUIRE(result);
+    REQUIRE_EQ(2, result->size());
+
+    sortResults(result);
+
+    CHECK_EQ(lsp::Range{{3, 21}, {3, 27}}, result->at(0).range);
+    CHECK_EQ(lsp::Range{{7, 16}, {7, 22}}, result->at(1).range);
+
+    // and from the call site
+    params.position = lsp::Position{7, 18};
+    auto fromUsage = workspace.references(params, nullptr);
+    REQUIRE(fromUsage);
+    CHECK_EQ(2, fromUsage->size());
 }
 
 TEST_SUITE_END();

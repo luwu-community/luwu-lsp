@@ -617,6 +617,163 @@ static std::vector<lsp::Location> processReferences(WorkspaceFileResolver& fileR
     return result;
 }
 
+static std::vector<lsp::Location> toLspLocations(
+    const lsp::DocumentUri& uri, const TextDocument& textDocument, const std::vector<Luau::Location>& locations)
+{
+    std::vector<lsp::Location> result;
+    result.reserve(locations.size());
+    for (const auto& location : locations)
+        result.emplace_back(
+            lsp::Location{uri, {textDocument.convertPosition(location.begin), textDocument.convertPosition(location.end)}});
+    return result;
+}
+
+// Finds the class statement (always top-level) in `root` whose own name is `local`, if any.
+static Luau::AstStatClass* findClassStatByNameLocal(Luau::AstStatBlock* root, Luau::AstLocal* local)
+{
+    for (Luau::AstStat* stat : root->body)
+        if (auto* classStat = stat->as<Luau::AstStatClass>())
+            if (classStat->name == local)
+                return classStat;
+    return nullptr;
+}
+
+// Finds the class statement (always top-level) in `root` named `name`. Class names aren't pushed as
+// locals, so value usages of a class (`Dog(...)`, `Dog.staticFn`) parse as globals with its name.
+static Luau::AstStatClass* findClassStatByName(Luau::AstStatBlock* root, const Luau::AstName& name)
+{
+    for (Luau::AstStat* stat : root->body)
+        if (auto* classStat = stat->as<Luau::AstStatClass>())
+            if (classStat->name->name == name)
+                return classStat;
+    return nullptr;
+}
+
+// Luwu Classes: where the field a primary constructor parameter sets is declared (`class Cat(name)` has `self.name`): the
+// body's restatement of it if there is one, the parameter otherwise. None when `local` isn't such a parameter, or a
+// method of the same name means there is no field.
+static std::optional<types::ClassMemberOrigin> primaryConstructorFieldOrigin(
+    Luau::AstStatBlock* root, const Luau::ModuleName& moduleName, Luau::AstLocal* local)
+{
+    for (Luau::AstStat* stat : root->body)
+    {
+        auto* classStat = stat->as<Luau::AstStatClass>();
+        if (!classStat || !classStat->primaryConstructor)
+            continue;
+
+        const auto& args = classStat->primaryConstructor->args;
+        if (std::find(args.begin(), args.end(), local) == args.end())
+            continue;
+
+        for (const auto& member : classStat->members)
+        {
+            if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->name == local->name)
+                return types::ClassMemberOrigin{moduleName, prop->nameLocation};
+            if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->functionName == local->name)
+                return std::nullopt;
+        }
+        return types::ClassMemberOrigin{moduleName, local->location};
+    }
+    return std::nullopt;
+}
+
+std::optional<std::vector<lsp::Location>> WorkspaceFolder::findClassReferencesAtPosition(const Luau::ModuleName& moduleName,
+    const lsp::DocumentUri& uri, const TextDocument& textDocument, const Luau::Position& position, const LSPCancellationToken& cancellationToken)
+{
+    auto sourceModule = frontend.getSourceModule(moduleName);
+    if (!sourceModule)
+        return std::nullopt;
+
+    auto classNameLocations = [&](Luau::AstStatClass* classStat)
+    {
+        return toLspLocations(uri, textDocument, types::findClassNameReferences(*sourceModule, classStat));
+    };
+    auto memberLocations = [&](const types::ClassMemberOrigin& origin, const Luau::Name& name)
+    {
+        return processReferences(fileResolver, findAllClassMemberReferences(origin, name, cancellationToken));
+    };
+
+    // The class name at its declaration (`class Dog`)
+    if (auto* classStat = types::findClassStatContainingPosition(sourceModule->root, position);
+        classStat && classStat->name->location.containsClosed(position))
+        return classNameLocations(classStat);
+
+    // A field, method, or static function at its declaration inside a class or trait. An expected function's signature
+    // spans its name, so this can't skip positions inside methods.
+    if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, position))
+    {
+        for (const auto& member : classStat->members)
+        {
+            if (const auto* prop = member.get_if<Luau::AstClassProperty>(); prop && prop->nameLocation.containsClosed(position))
+                return memberLocations({moduleName, prop->nameLocation}, prop->name.value);
+            else if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->nameLocation.containsClosed(position))
+                return memberLocations({moduleName, method->nameLocation}, method->functionName.value);
+        }
+    }
+
+    // A primary constructor parameter at its declaration stands for its field
+    for (Luau::AstStat* stat : sourceModule->root->body)
+    {
+        auto* classStat = stat->as<Luau::AstStatClass>();
+        if (!classStat || !classStat->primaryConstructor)
+            continue;
+        for (Luau::AstLocal* param : classStat->primaryConstructor->args)
+        {
+            if (!param->location.containsClosed(position))
+                continue;
+            if (auto origin = primaryConstructorFieldOrigin(sourceModule->root, moduleName, param))
+                return memberLocations(*origin, param->name.value);
+        }
+    }
+
+    auto exprOrLocal = findExprOrLocalAtPositionClosed(*sourceModule, position);
+    if (auto* local = exprOrLocal.getLocal())
+    {
+        if (auto* classStat = findClassStatByNameLocal(sourceModule->root, local))
+            return classNameLocations(classStat);
+        if (auto origin = primaryConstructorFieldOrigin(sourceModule->root, moduleName, local))
+            return memberLocations(*origin, local->name.value);
+    }
+    else if (auto expr = exprOrLocal.getExpr())
+    {
+        if (auto exprLocal = expr->as<Luau::AstExprLocal>())
+        {
+            if (auto* classStat = findClassStatByNameLocal(sourceModule->root, exprLocal->local))
+                return classNameLocations(classStat);
+            // A primary constructor parameter used in the class body stands for its field, `self.name` included
+            if (auto origin = primaryConstructorFieldOrigin(sourceModule->root, moduleName, exprLocal->local))
+                return memberLocations(*origin, exprLocal->local->name.value);
+        }
+        // A value usage of a class (`Dog(...)`, `Dog.staticFn`), which parses as a global
+        else if (auto global = expr->as<Luau::AstExprGlobal>())
+        {
+            if (auto* classStat = findClassStatByName(sourceModule->root, global->name))
+                return classNameLocations(classStat);
+        }
+        // A field, method, or static function at a usage site (`dog.name`/`Dog.method`/`dog:method`), wherever the
+        // class or trait declaring it lives
+        else if (auto indexName = expr->as<Luau::AstExprIndexName>())
+        {
+            auto module = getModule(moduleName, /* forAutocomplete: */ true);
+            if (auto ty = module->astTypes.find(indexName->expr))
+                if (auto origin = types::findClassMemberOrigin(*ty, indexName->index.value))
+                    return memberLocations(*origin, indexName->index.value);
+        }
+    }
+
+    // A class in a type annotation (`local x: Dog`)
+    if (auto ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position, /* includeTypes= */ true); !ancestry.empty())
+    {
+        if (auto reference = ancestry.back()->as<Luau::AstTypeReference>();
+            reference && !reference->prefix && reference->nameLocation.containsClosed(position))
+        {
+            if (auto* classStat = findClassStatByName(sourceModule->root, reference->name))
+                return classNameLocations(classStat);
+        }
+    }
+
+    return std::nullopt;
+}
 
 class FindTypeParameterUsages : public Luau::AstVisitor
 {
@@ -820,6 +977,9 @@ lsp::ReferenceResult WorkspaceFolder::references(const lsp::ReferenceParams& par
 
     if (auto* typeFunction = findTypeFunctionAtPosition(*sourceModule, position))
         return processReferences(fileResolver, findAllTypeFunctionReferences(moduleName, typeFunction, cancellationToken));
+
+    if (auto locations = findClassReferencesAtPosition(moduleName, params.textDocument.uri, *textDocument, position, cancellationToken))
+        return locations;
 
     auto exprOrLocal = findExprOrLocalAtPositionClosed(*sourceModule, position);
     Luau::Symbol symbol;

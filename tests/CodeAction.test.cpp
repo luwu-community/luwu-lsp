@@ -930,7 +930,8 @@ local function foo(a: number, b: { x: number, y: number })
 end
 )");
 
-    auto actions = codeActionsAt(*this, uri, 1, 22);
+    // Between tokens, the layout heads the menu
+    auto actions = codeActionsAt(*this, uri, 1, 21);
     REQUIRE(!actions.empty());
     CHECK_EQ(actions[0].title, "Put each parameter on its own line");
     CHECK_EQ(actions[0].kind, lsp::CodeActionKind::QuickFix);
@@ -941,6 +942,11 @@ end
     CHECK_EQ(edits[0].newText, "(\n    a: number,\n    b: { x: number, y: number }\n)");
 
     // A client asking only for refactorings still gets it, as a rewrite
+    // On a name it's still offered, after that name's own actions
+    auto onName = codeActionsAt(*this, uri, 1, 22);
+    REQUIRE(findCodeAction(onName, "Put each parameter on its own line"));
+    CHECK_NE(onName[0].title, "Put each parameter on its own line");
+
     auto rewrites = codeActionsAt(*this, uri, 1, 22, {lsp::CodeActionKind::RefactorRewrite});
     auto rewrite = findCodeAction(rewrites, "Put each parameter on its own line");
     REQUIRE(rewrite);
@@ -964,7 +970,7 @@ trait Element(
 end
 )");
 
-    auto actions = codeActionsAt(*this, uri, 2, 5);
+    auto actions = codeActionsAt(*this, uri, 2, 8);
     REQUIRE(!actions.empty());
     CHECK_EQ(actions[0].title, "Put parameters on one line");
     CHECK_EQ(actions[0].edit->changes.at(uri)[0].newText, "(tag: string, id: number)");
@@ -986,13 +992,19 @@ end
 trait Both needs Named, Aged end
 )");
 
-    for (auto [line, column] : std::vector<std::pair<size_t, size_t>>{{5, 15}, {5, 25}, {5, 34}})
+    // On the keyword and between the traits it heads the menu, and on a trait's name it's still offered
+    for (auto [line, column] : std::vector<std::pair<size_t, size_t>>{{5, 15}, {5, 30}, {5, 25}, {5, 34}})
     {
         auto actions = codeActionsAt(*this, uri, line, column);
-        REQUIRE(!actions.empty());
-        CHECK_EQ(actions[0].title, "Put each trait on its own line");
-        CHECK_EQ(actions[0].kind, lsp::CodeActionKind::QuickFix);
-        auto edits = actions[0].edit->changes.at(uri);
+        if (column == 15 || column == 30)
+        {
+            REQUIRE(!actions.empty());
+            CHECK_EQ(actions[0].title, "Put each trait on its own line");
+        }
+        auto action = findCodeAction(actions, "Put each trait on its own line");
+        REQUIRE(action);
+        CHECK_EQ(action->kind, lsp::CodeActionKind::QuickFix);
+        auto edits = action->edit->changes.at(uri);
         REQUIRE_EQ(edits.size(), 1);
         CHECK_EQ(edits[0].range, lsp::Range{{5, 24}, {5, 35}});
         CHECK_EQ(edits[0].newText, "(\n    Named,\n    Aged\n)");
@@ -1024,7 +1036,7 @@ end
 class Single implements (Named, Aged) end
 )");
 
-    auto actions = codeActionsAt(*this, uri, 4, 6);
+    auto actions = codeActionsAt(*this, uri, 4, 10);
     REQUIRE(!actions.empty());
     CHECK_EQ(actions[0].title, "Put traits on one line");
     auto edits = actions[0].edit->changes.at(uri);
@@ -1033,7 +1045,7 @@ class Single implements (Named, Aged) end
     CHECK_EQ(edits[0].newText, "Named, Aged");
 
     // A parenthesized list on one line goes one trait per line, keeping its parentheses
-    auto single = codeActionsAt(*this, uri, 8, 30);
+    auto single = codeActionsAt(*this, uri, 8, 31);
     REQUIRE(!single.empty());
     CHECK_EQ(single[0].title, "Put each trait on its own line");
     CHECK_EQ(single[0].edit->changes.at(uri)[0].range, lsp::Range{{8, 24}, {8, 37}});
@@ -1062,7 +1074,7 @@ TEST_CASE_FIXTURE(Fixture, "destructure_layout_puts_the_pattern_under_the_cursor
     auto uri = newDocument("test.luau", source);
 
     // In `components.{`, the nested pattern is the one laid out
-    auto actions = codeActionsAt(*this, uri, 4, 17);
+    auto actions = codeActionsAt(*this, uri, 4, 16);
     REQUIRE(!actions.empty());
     CHECK_EQ(actions[0].title, "Put each field on its own line");
     CHECK_EQ(actions[0].kind, lsp::CodeActionKind::QuickFix);
@@ -1421,5 +1433,297 @@ TEST_CASE_FIXTURE(Fixture, "unused_destructured_fields_leave_their_pattern")
         "print(chimera)\n");
 }
 
-TEST_SUITE_END();
+TEST_CASE_FIXTURE(Fixture, "unknown_name_is_imported_into_an_empty_pattern_of_a_required_module")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
 
+    newDocument("lib.luau", "return { elements = { Heading = 1, Paragraph = 2 } }\n");
+    std::string source = "const .{\n"
+                         "    elements.{}\n"
+                         "} = require(\"lib.luau\")\n"
+                         "print(Paragraph)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 3, 8), "Import 'Paragraph' from 'elements'", uri, source),
+        "const .{\n"
+        "    elements.{ Paragraph }\n"
+        "} = require(\"lib.luau\")\n"
+        "print(Paragraph)\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "import_all_fields_fills_an_empty_pattern")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { elements = { Heading = 1, Paragraph = 2 } }\n"
+                         "const .{ elements.{} } = chimera\n";
+    auto uri = newDocument("test.luau", source);
+
+    auto actions = codeActionsAt(*this, uri, 1, 19);
+    CHECK_EQ(applyCodeAction(actions, "Import all fields of 'elements'", uri, source),
+        "local chimera = { elements = { Heading = 1, Paragraph = 2 } }\n"
+        "const .{ elements.{ Heading, Paragraph } } = chimera\n");
+
+    // The value a pattern destructures has no name to inline, and an empty pattern has no layout to change
+    CHECK_FALSE(findCodeAction(actions, "Inline variable '(destructured)'"));
+    CHECK_FALSE(findCodeAction(actions, "Put each field on its own line"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "remove_all_unused_imports_from_one_of_them")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    newDocument("lib.luau", "return { components = { Card = 1, Column = 2, Menu = 3 }, elements = { Main = 4, Paragraph = 5, Heading = { h1 = 6, h2 = 7 } } }\n");
+    newDocument("other.luau", "return {}\n");
+    std::string source = "const .{\n"
+                         "    components.{\n"
+                         "        Card,\n"
+                         "        Column,\n"
+                         "        Menu,\n"
+                         "    },\n"
+                         "    elements.{ Main, Paragraph },\n"
+                         "} = require(\"lib.luau\")\n"
+                         "local other = require(\"other.luau\")\n"
+                         "local unrelated = 1\n"
+                         "print(Card, Main)\n";
+    auto uri = newDocument("test.luau", source);
+
+    auto actions = codeActionsAt(*this, uri, 3, 9);
+    CHECK_EQ(applyCodeAction(actions, "Remove all unused imports", uri, source),
+        "const .{\n"
+        "    components.{\n"
+        "        Card,\n"
+        "    },\n"
+        "    elements.{ Main },\n"
+        "} = require(\"lib.luau\")\n"
+        "local unrelated = 1\n"
+        "print(Card, Main)\n");
+
+    // Not from an unused local that isn't an import
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 9, 7), "Remove all unused imports"));
+
+    // A pattern on a local holding the module destructures an import too
+    std::string aliased = "const lib = require(\"lib.luau\")\n"
+                          "const .{\n"
+                          "    components.{ Card, Column },\n"
+                          "    elements.{\n"
+                          "        Main,\n"
+                          "        Paragraph,\n"
+                          "        Heading as .{ h1 as H1, h2 as H2 },\n"
+                          "    },\n"
+                          "} = lib\n"
+                          "print(Card, Main)\n";
+    auto aliasedUri = newDocument("aliased.luau", aliased);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, aliasedUri, 2, 24), "Remove all unused imports", aliasedUri, aliased),
+        "const lib = require(\"lib.luau\")\n"
+        "const .{\n"
+        "    components.{ Card },\n"
+        "    elements.{\n"
+        "        Main,\n"
+        "    },\n"
+        "} = lib\n"
+        "print(Card, Main)\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "unknown_type_is_imported_through_a_type_destructuring")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    newDocument("lib.luau", "export type Content = string | number\n"
+                            "export type Other = boolean\n"
+                            "return { Card = 1 }\n");
+
+    // An unnamed pattern on the require gets a name to read the type from
+    std::string unnamed = "const .{\n"
+                          "    Card,\n"
+                          "} = require(\"lib.luau\")\n"
+                          "local x: Content = 1\n"
+                          "print(Card, x)\n";
+    auto unnamedUri = newDocument("unnamed.luau", unnamed);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, unnamedUri, 3, 11), "Import 'Content' from 'lib'", unnamedUri, unnamed),
+        "const lib.{\n"
+        "    Card,\n"
+        "} = require(\"lib.luau\")\n"
+        "type .{ Content } = lib\n"
+        "local x: Content = 1\n"
+        "print(Card, x)\n");
+
+    // A local holding the module gets a type destructuring under it
+    std::string named = "const lib = require(\"lib.luau\")\n"
+                        "local x: Content = 1\n"
+                        "print(lib, x)\n";
+    auto namedUri = newDocument("named.luau", named);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, namedUri, 1, 11), "Import 'Content' from 'lib'", namedUri, named),
+        "const lib = require(\"lib.luau\")\n"
+        "type .{ Content } = lib\n"
+        "local x: Content = 1\n"
+        "print(lib, x)\n");
+
+    // A type destructuring already written takes it
+    std::string existing = "const lib = require(\"lib.luau\")\n"
+                           "type .{ Other } = lib\n"
+                           "local x: Content = 1\n"
+                           "local y: Other = true\n"
+                           "print(lib, x, y)\n";
+    auto existingUri = newDocument("existing.luau", existing);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, existingUri, 2, 11), "Import 'Content' from 'lib'", existingUri, existing),
+        "const lib = require(\"lib.luau\")\n"
+        "type .{ Other, Content } = lib\n"
+        "local x: Content = 1\n"
+        "local y: Other = true\n"
+        "print(lib, x, y)\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "pattern_fields_have_no_inline_variable_action")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local chimera = { components = { Card = 1 } }\n"
+                         "const .{ components.{ Card } } = chimera\n"
+                         "print(Card, components)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 1, 12), "Inline variable 'components'"));
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 1, 23), "Inline variable 'Card'"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "call_argument_layout_toggles_between_one_line_and_one_per_line")
+{
+    std::string source = "local function foo(...) end\n"
+                         "foo(1, \"a, b\", foo(2, 3))\n";
+    auto uri = newDocument("test.luau", source);
+
+    // Between the outer call's arguments, the outer call is laid out
+    auto actions = codeActionsAt(*this, uri, 1, 6);
+    REQUIRE(!actions.empty());
+    CHECK_EQ(actions[0].title, "Put each argument on its own line");
+    std::string spread = applyCodeAction(actions, "Put each argument on its own line", uri, source);
+    CHECK_EQ(spread, "local function foo(...) end\n"
+                     "foo(\n"
+                     "    1,\n"
+                     "    \"a, b\",\n"
+                     "    foo(2, 3)\n"
+                     ")\n");
+
+    // Inside the inner call, the inner one is
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 20), "Put each argument on its own line", uri, source),
+        "local function foo(...) end\n"
+        "foo(1, \"a, b\", foo(\n"
+        "    2,\n"
+        "    3\n"
+        "))\n");
+
+    auto spreadUri = newDocument("spread.luau", spread);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, spreadUri, 2, 6), "Put arguments on one line", spreadUri, spread), source);
+}
+
+TEST_CASE_FIXTURE(Fixture, "table_layout_toggles_and_keeps_nested_items_indented")
+{
+    std::string source = "local function foo(...) end\n"
+                         "local t = { 1, x = 2; [\"y\"] = { z = 3 } }\n"
+                         "foo(t, {\n"
+                         "    a = 1,\n"
+                         "})\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 13), "Put each entry on its own line", uri, source),
+        "local function foo(...) end\n"
+        "local t = {\n"
+        "    1,\n"
+        "    x = 2,\n"
+        "    [\"y\"] = { z = 3 },\n"
+        "}\n"
+        "foo(t, {\n"
+        "    a = 1,\n"
+        "})\n");
+
+    // The table argument's own lines move in with it, and back out
+    std::string spread = applyCodeAction(codeActionsAt(*this, uri, 2, 6), "Put each argument on its own line", uri, source);
+    CHECK_EQ(spread, "local function foo(...) end\n"
+                     "local t = { 1, x = 2; [\"y\"] = { z = 3 } }\n"
+                     "foo(\n"
+                     "    t,\n"
+                     "    {\n"
+                     "        a = 1,\n"
+                     "    }\n"
+                     ")\n");
+    auto spreadUri = newDocument("spread.luau", spread);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, spreadUri, 3, 6), "Put arguments on one line", spreadUri, spread), source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 3, 4), "Put entries on one line", uri, source),
+        "local function foo(...) end\n"
+        "local t = { 1, x = 2; [\"y\"] = { z = 3 } }\n"
+        "foo(t, { a = 1 })\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "list_layout_stops_at_function_bodies_and_comments")
+{
+    std::string source = "local t = {\n"
+                         "    f = function()\n"
+                         "        return 1\n"
+                         "    end,\n"
+                         "    g = 2, -- two\n"
+                         "}\n"
+                         "local u = { 1,\n"
+                         "    2 }\n";
+    auto uri = newDocument("test.luau", source);
+
+    // Inside a function body the table around it isn't offered
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 2, 9), "Put entries on one line"));
+    // A comment in the list could end up in front of code
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 4, 10), "Put entries on one line"));
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 6, 13), "Put entries on one line", uri, source),
+        "local t = {\n"
+        "    f = function()\n"
+        "        return 1\n"
+        "    end,\n"
+        "    g = 2, -- two\n"
+        "}\n"
+        "local u = { 1, 2 }\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "unused_import_fixes_come_before_layout_and_silencing")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    newDocument("lib.luau", "return { components = { Card = 1, Column = 2, Menu = 3 } }\n");
+    std::string source = "const .{\n"
+                         "    components.{\n"
+                         "        Card,\n"
+                         "        Column,\n"
+                         "        Menu,\n"
+                         "    },\n"
+                         "} = require(\"lib.luau\")\n"
+                         "print(Card)\n";
+    auto uri = newDocument("test.luau", source);
+
+    auto titles = [&](size_t line, size_t column)
+    {
+        std::vector<std::string> result;
+        for (const auto& action : codeActionsAt(*this, uri, line, column, {lsp::CodeActionKind::QuickFix}))
+            result.push_back(action.title);
+        return result;
+    };
+
+    // On the name, its fixes come first, removing it before moving it out of the pattern, then the layout, then silencing
+    CHECK_EQ(titles(3, 10), std::vector<std::string>{
+                                "Remove unused variable: 'Column'",
+                                "Remove all unused imports",
+                                "Qualify 'Column' as 'components.Column'",
+                                "Put fields on one line",
+                                "Prefix 'Column' with '_' to silence",
+                            });
+
+    // After the comma, between tokens, the layout comes first
+    auto between = titles(3, 15);
+    REQUIRE(!between.empty());
+    CHECK_EQ(between[0], "Put fields on one line");
+}
+
+TEST_SUITE_END();

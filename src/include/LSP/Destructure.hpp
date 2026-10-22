@@ -193,6 +193,10 @@ std::vector<lsp::TextEdit> removeFieldsEdits(const std::unordered_set<const Luau
 // Whether `local` is bound by a field of a pattern, rather than declared on its own
 bool isPatternField(const Luau::AstLocal* local, const DestructureFacts& facts);
 
+// Whether `field` is bound by a pattern destructuring what a `require` loads: `const .{ elements.{ Div } } = require(...)`,
+// or `= chimera` after `const chimera = require(...)`
+bool isImportedByPattern(const Luau::AstLocal* field, const DestructureFacts& facts);
+
 // A name completion can offer from a module already imported through a destructuring: `Paragraph` from
 // `const .{ elements.{ Heading } } = chimera`, imported by `edit` as `elements.{ Heading, Paragraph }`
 struct ImportCandidate
@@ -202,6 +206,10 @@ struct ImportCandidate
     std::string from;
     std::optional<Luau::TypeId> type;
     lsp::TextEdit edit;
+    // A type alias a module exports, imported by a type destructuring: `type .{ Content } = chimera`
+    bool isType = false;
+    // From a module the file already requires, which is how the name should come in rather than by another require
+    bool fromRequired = true;
 };
 
 // A module the file doesn't require yet, and where a require of it would go
@@ -217,9 +225,11 @@ struct UnimportedModule
 // Every field up to two levels into a value the module's top level already destructures or binds from a `require`, or
 // into a module in `unimported`, that isn't bound yet and wouldn't capture or shadow anything at `position`. Only names
 // starting like `typed` are offered; `typesOnly` keeps the classes and traits, for a type annotation. A field a pattern
-// already written can take comes before one needing a new declaration.
+// already written can take comes before one needing a new declaration. With `typesOnly`, the type aliases those modules
+// export are offered too, through a type destructuring; `requiredModule` gives the module a `require` call at a location
+// loads, for a pattern destructuring one directly.
 std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::Position& position,
     const std::string& typed, bool typesOnly, Luau::NotNull<Luau::BuiltinTypes> builtinTypes, const TextDocument& textDocument,
-    const std::vector<UnimportedModule>& unimported = {});
+    const std::vector<UnimportedModule>& unimported = {}, const std::function<Luau::ModulePtr(const Luau::Location&)>& requiredModule = {});
 
 } // namespace Luau::LanguageServer::Destructure

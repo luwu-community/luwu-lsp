@@ -414,7 +414,20 @@ std::vector<Luau::LanguageServer::Destructure::ImportCandidate> WorkspaceFolder:
         }
     }
 
-    return Destructure::importCandidates(sourceModule, module, position, typed, typesOnly, frontend.builtinTypes, textDocument, unimported);
+    // The module the `require` call at a location loads, as the frontend resolved it
+    auto requiredModule = [&](const Luau::Location& location) -> Luau::ModulePtr
+    {
+        auto node = frontend.sourceNodes.find(sourceModule.name);
+        if (node == frontend.sourceNodes.end())
+            return nullptr;
+        for (const auto& [requiredName, requireLocation] : node->second->requireLocations)
+            if (requireLocation == location)
+                return getModule(requiredName) ? getModule(requiredName) : getModule(requiredName, /* forAutocomplete: */ true);
+        return nullptr;
+    };
+
+    return Destructure::importCandidates(
+        sourceModule, module, position, typed, typesOnly, frontend.builtinTypes, textDocument, unimported, requiredModule);
 }
 
 void WorkspaceFolder::suggestDestructureImports(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::Position& position,
@@ -426,6 +439,21 @@ void WorkspaceFolder::suggestDestructureImports(const Luau::SourceModule& source
 
     for (auto& candidate : destructureImportCandidates(sourceModule, module, position, typed, typesOnly, config, textDocument))
     {
+        // A module the file already requires gives the name through its destructuring, so another require of the
+        // name's own module isn't offered next to it
+        if (candidate.fromRequired)
+            result.erase(std::remove_if(result.begin(), result.end(),
+                             [&](const lsp::CompletionItem& other)
+                             {
+                                 return other.label == candidate.name &&
+                                        std::any_of(other.additionalTextEdits.begin(), other.additionalTextEdits.end(),
+                                            [](const lsp::TextEdit& edit)
+                                            {
+                                                return edit.newText.find("require(") != std::string::npos;
+                                            });
+                             }),
+                result.end());
+
         lsp::CompletionItem item;
         item.label = candidate.name;
         item.labelDetails = {std::nullopt, candidate.from};
@@ -436,7 +464,9 @@ void WorkspaceFolder::suggestDestructureImports(const Luau::SourceModule& source
         item.additionalTextEdits = {std::move(candidate.edit)};
 
         item.kind = lsp::CompletionItemKind::Variable;
-        if (Luau::LanguageServer::Destructure::bringsAType(candidate.type, frontend.builtinTypes))
+        if (candidate.isType)
+            item.kind = lsp::CompletionItemKind::Interface;
+        else if (Luau::LanguageServer::Destructure::bringsAType(candidate.type, frontend.builtinTypes))
             item.kind = lsp::CompletionItemKind::Class;
         else if (candidate.type && Luau::get<Luau::FunctionType>(Luau::follow(*candidate.type)))
             item.kind = lsp::CompletionItemKind::Function;

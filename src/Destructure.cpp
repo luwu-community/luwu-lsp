@@ -133,10 +133,9 @@ std::optional<std::pair<std::string, std::vector<std::string>>> splitDestructure
         return std::nullopt;
 
     auto fields = splitParameters(text.substr(open + 1, text.size() - open - 2));
+    // `elements.{}` has no fields yet, and importing into it fills it
     if (!fields.empty() && fields.back().empty())
         fields.pop_back();
-    if (fields.empty())
-        return std::nullopt;
 
     return std::make_pair(text.substr(0, open), fields);
 }
@@ -146,7 +145,7 @@ std::optional<std::string> layOutDestructureOnOneLine(
     const Luau::Location& location, const Luau::AstDestructurePattern* pattern, const TextDocument& textDocument)
 {
     auto split = splitDestructurePattern(textDocument.getText(textDocument.convertLocation(location)));
-    if (!split)
+    if (!split || split->second.empty())
         return std::nullopt;
     auto& [opening, fields] = *split;
 
@@ -189,7 +188,7 @@ std::string layOutFieldsOnePerLine(const std::string& opening, const std::vector
 std::optional<std::string> layOutDestructureOnePerLine(const Luau::Location& location, const TextDocument& textDocument)
 {
     auto split = splitDestructurePattern(textDocument.getText(textDocument.convertLocation(location)));
-    if (!split)
+    if (!split || split->second.empty())
         return std::nullopt;
     return layOutFieldsOnePerLine(split->first, split->second, location.begin.line, textDocument);
 }
@@ -422,6 +421,40 @@ static bool isRequireCall(const Luau::AstExpr* expr)
     return func && strcmp(func->name.value, "require") == 0;
 }
 
+// Whether `expr` holds what a `require` loads: the call itself, a local declared with one (`chimera`), or a field read
+// from either (`chimera.components`)
+static bool holdsRequiredValue(const Luau::AstExpr* expr, const DestructureFacts& facts, size_t depth = 0)
+{
+    if (depth > 8)
+        return false;
+    if (isRequireCall(expr))
+        return true;
+    if (const auto* index = expr->as<Luau::AstExprIndexName>())
+        return holdsRequiredValue(index->expr, facts, depth + 1);
+
+    const auto* ref = expr->as<Luau::AstExprLocal>();
+    auto declaration = ref ? facts.declarations.find(ref->local) : facts.declarations.end();
+    if (declaration == facts.declarations.end())
+        return false;
+    const Luau::AstStatLocal* statement = declaration->second;
+    for (size_t i = 0; i < statement->vars.size && i < statement->values.size; ++i)
+        if (statement->vars.data[i] == ref->local)
+            return holdsRequiredValue(statement->values.data[i], facts, depth + 1);
+    return false;
+}
+
+bool isImportedByPattern(const Luau::AstLocal* field, const DestructureFacts& facts)
+{
+    for (const auto& [pattern, holder] : facts.topPatterns)
+    {
+        if (!pattern->location || !pattern->location->encloses(field->location))
+            continue;
+        const auto* statement = holder->as<Luau::AstStatLocal>();
+        return statement && statement->values.size == 1 && holdsRequiredValue(statement->values.data[0], facts);
+    }
+    return false;
+}
+
 static const Luau::TableType* tableOf(std::optional<Luau::TypeId> ty)
 {
     return ty ? Luau::get<Luau::TableType>(Luau::follow(*ty)) : nullptr;
@@ -433,9 +466,145 @@ static bool startsLike(const std::string& name, const std::string& typed)
     return !typed.empty() && !name.empty() && tolower(static_cast<unsigned char>(name[0])) == tolower(static_cast<unsigned char>(typed[0]));
 }
 
+// Whether `pattern` or a pattern nested in it binds a local named `name`
+static bool patternBinds(const Luau::AstDestructurePattern& pattern, const std::string& name)
+{
+    if (pattern.local && !isHiddenDestructureLocal(pattern.local) && name == pattern.local->name.value)
+        return true;
+    for (const auto& field : pattern.fields)
+        if (patternBinds(field.target, name))
+            return true;
+    return false;
+}
+
+// A require's path as a name to give the value it loads: `chimera` for "@chimera", `elements` for "./src/elements"
+static std::string nameForRequire(const Luau::AstExpr* call)
+{
+    const auto* args = call->as<Luau::AstExprCall>();
+    const auto* path = args && args->args.size == 1 ? args->args.data[0]->as<Luau::AstExprConstantString>() : nullptr;
+    if (!path)
+        return "";
+
+    std::string text(path->value.data, path->value.size);
+    while (!text.empty() && text.back() == '/')
+        text.pop_back();
+    text = text.substr(text.find_last_of('/') == std::string::npos ? 0 : text.find_last_of('/') + 1);
+    if (size_t dot = text.find('.'); dot != std::string::npos && dot > 0)
+        text = text.substr(0, dot);
+
+    std::string name;
+    for (char c : text)
+        if (isalnum(static_cast<unsigned char>(c)) || c == '_')
+            name += c;
+        else if (c != '@' && !name.empty())
+            name += '_';
+    return name;
+}
+
+// Luwu Destructuring: the type aliases the modules held at the top of the file export, each imported by a type
+// destructuring of its module. An existing `type .{ ... } = m` takes it first, then a new `type .{ Content } = m` under a
+// local holding the module, then a pattern on a `require` that gets a name for it: `const chimera.{ ... } = require(...)`.
+static void offerTypeAliases(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::Position& position,
+    const std::string& typed, const TextDocument& textDocument, const DestructureFacts& facts,
+    const std::function<Luau::ModulePtr(const Luau::Location&)>& requiredModule,
+    const std::function<bool(const std::string&, bool)>& available, std::map<std::string, ImportCandidate>& best)
+{
+    auto moduleScope = module.getModuleScope();
+    auto scope = Luau::findScopeAtPosition(module, position);
+
+    auto offer = [&](const std::string& name, const std::string& from, lsp::TextEdit edit)
+    {
+        if (best.count(name) || !isIdentifier(name) || !startsLike(name, typed) || (scope && scope->lookupType(name)))
+            return;
+        if (moduleScope->exportedTypeBindings.count(name) || moduleScope->privateTypeBindings.count(name))
+            return;
+        best.emplace(name, ImportCandidate{name, from, std::nullopt, std::move(edit), /* isType= */ true});
+    };
+
+    auto exportedBy = [&](const std::string& local) -> const std::unordered_map<Luau::Name, Luau::TypeFun>*
+    {
+        auto it = moduleScope->importedTypeBindings.find(local);
+        return it == moduleScope->importedTypeBindings.end() ? nullptr : &it->second;
+    };
+
+    auto beforeCursor = [&](const Luau::AstStat* stat)
+    {
+        return stat->location.end < position;
+    };
+
+    // `type .{ Style } = chimera` already written
+    for (Luau::AstStat* stat : sourceModule.root->body)
+    {
+        auto* alias = stat->as<Luau::AstStatTypeAlias>();
+        if (!alias || !alias->destructure || !alias->destructure->closed || !beforeCursor(alias))
+            continue;
+        const Luau::AstTypeDestructure& destructure = *alias->destructure;
+        const auto* types = exportedBy(destructure.module.value ? destructure.module.value : "");
+        auto split = splitDestructurePattern(textDocument.getText(textDocument.convertLocation(destructure.location)));
+        if (!types || !split)
+            continue;
+        for (const auto& [name, _] : *types)
+        {
+            auto fields = split->second;
+            fields.push_back(name);
+            offer(name, destructure.module.value,
+                {textDocument.convertLocation(destructure.location), layOutFieldsLike(destructure.location, split->first, fields, textDocument)});
+        }
+    }
+
+    // A local holding a module: `const chimera = require(...)`, or one a pattern binds, like `elements` in `elements.{}`
+    for (Luau::AstStat* stat : sourceModule.root->body)
+    {
+        auto* declaration = stat->as<Luau::AstStatLocal>();
+        if (!declaration || declaration->isDesugaredField() || !beforeCursor(declaration))
+            continue;
+
+        std::vector<std::string> names;
+        if (declaration->destructure)
+        {
+            for (const auto& [local, types] : moduleScope->importedTypeBindings)
+                if (isIdentifier(local) && patternBinds(*declaration->destructure, local))
+                    names.push_back(local);
+        }
+        else
+            for (Luau::AstLocal* var : declaration->vars)
+                names.push_back(var->name.value);
+
+        std::string indent = getLineIndentation(textDocument, declaration->location.begin.line);
+        lsp::Position at{declaration->location.end.line + 1, 0};
+        for (const auto& local : names)
+            if (const auto* types = exportedBy(local))
+                for (const auto& [name, _] : *types)
+                    offer(name, local, {{at, at}, indent + "type .{ " + name + " } = " + local + "\n"});
+    }
+
+    // `const .{ ... } = require(...)`, whose value has no name to read types from yet
+    if (!requiredModule)
+        return;
+    for (const auto& [pattern, holder] : facts.topPatterns)
+    {
+        auto* declaration = holder->as<Luau::AstStatLocal>();
+        if (!declaration || !pattern->location || !isHiddenDestructureLocal(pattern->local) || !beforeCursor(declaration) ||
+            declaration->values.size != 1 || !isRequireCall(declaration->values.data[0]) ||
+            std::find(sourceModule.root->body.begin(), sourceModule.root->body.end(), declaration) == sourceModule.root->body.end())
+            continue;
+
+        std::string local = nameForRequire(declaration->values.data[0]);
+        auto required = requiredModule(declaration->values.data[0]->location);
+        if (!isIdentifier(local) || !available(local, false) || !required)
+            continue;
+
+        Luau::Location rest{pattern->location->begin, declaration->location.end};
+        std::string text = local + textDocument.getText(textDocument.convertLocation(rest)) + "\n" +
+                           getLineIndentation(textDocument, declaration->location.begin.line) + "type .{ ";
+        for (const auto& [name, _] : required->exportedTypeBindings)
+            offer(name, local, {textDocument.convertLocation(rest), text + name + " } = " + local});
+    }
+}
+
 std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceModule, const Luau::Module& module, const Luau::Position& position,
     const std::string& typed, bool typesOnly, Luau::NotNull<Luau::BuiltinTypes> builtinTypes, const TextDocument& textDocument,
-    const std::vector<UnimportedModule>& unimported)
+    const std::vector<UnimportedModule>& unimported, const std::function<Luau::ModulePtr(const Luau::Location&)>& requiredModule)
 {
     DestructureFacts facts;
     sourceModule.root->visit(&facts);
@@ -458,6 +627,8 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
 
     // By name, the first offer kept: fields of patterns already written come before new declarations
     std::map<std::string, ImportCandidate> best;
+    // False once the offers come from modules not required yet
+    bool offeringRequired = true;
     auto offer = [&](const std::string& name, const std::string& from, std::optional<Luau::TypeId> type, lsp::TextEdit edit)
     {
         bool withType = bringsAType(type, builtinTypes);
@@ -465,7 +636,7 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
             return;
         if (Luau::Location{textDocument.convertPosition(edit.range.start), textDocument.convertPosition(edit.range.end)}.containsClosed(position))
             return;
-        best.emplace(name, ImportCandidate{name, from, type, std::move(edit)});
+        best.emplace(name, ImportCandidate{name, from, type, std::move(edit), /* isType= */ false, offeringRequired});
     };
 
     auto atTopBeforeCursor = [&](const Luau::AstNode* node)
@@ -492,6 +663,9 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
                         offer(innerName, from + "." + name, innerProp.readTy, *edit);
         }
     };
+
+    if (typesOnly)
+        offerTypeAliases(sourceModule, module, position, typed, textDocument, facts, requiredModule, available, best);
 
     // Patterns at the top of the module, nested ones included, each offering what it doesn't bind yet
     for (const auto& entry : facts.patterns)
@@ -543,7 +717,8 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
             });
     }
 
-    // `const chimera = require(...)` at the top, not destructured yet: a new `const .{...} = chimera` under it
+    // `const chimera = require(...)` at the top, not destructured yet: it gets a pattern of its own in place,
+    // `const chimera.{...} = require(...)`. One with a type annotation gets a new `const .{...} = chimera` under it.
     for (Luau::AstStat* stat : sourceModule.root->body)
     {
         auto* declaration = stat->as<Luau::AstStatLocal>();
@@ -561,16 +736,26 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
         if (destructured || !table)
             continue;
 
-        lsp::Position at{declaration->location.end.line + 1, 0};
+        lsp::Position after = textDocument.convertPosition(var->location.end);
+        lsp::Position below{declaration->location.end.line + 1, 0};
         std::string keyword = declaration->isConst ? "const " : "local ";
         offerFields(table, var->name.value,
             [&](const std::string& text) -> std::optional<lsp::TextEdit>
             {
-                return lsp::TextEdit{{at, at}, keyword + ".{ " + text + " } = " + var->name.value + "\n"};
+                if (!var->annotation)
+                    return lsp::TextEdit{{after, after}, ".{ " + text + " }"};
+                return lsp::TextEdit{{below, below}, keyword + ".{ " + text + " } = " + var->name.value + "\n"};
             });
     }
 
-    // Modules not required yet: a new `const .{...} = require(...)` where the require would go
+    // Modules not required yet: a new `const .{...} = require(...)` where the require would go. A field that is a module
+    // of its own (`fs` of "@std", when "@std/fs" can be required) is left to that module's require: requiring all of
+    // "@std" for it loads every module it holds.
+    std::unordered_set<std::string> requirable(facts.requirePaths.begin(), facts.requirePaths.end());
+    for (const auto& candidate : unimported)
+        requirable.insert(candidate.requirePath);
+    offeringRequired = false;
+
     for (const auto& candidate : unimported)
     {
         const Luau::TableType* table = tableOf(candidate.type);
@@ -580,6 +765,8 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
         offerFields(table, candidate.requirePath,
             [&](const std::string& text) -> std::optional<lsp::TextEdit>
             {
+                if (requirable.count(candidate.requirePath + "/" + text.substr(0, text.find(".{"))))
+                    return std::nullopt;
                 std::string declaration =
                     std::string(candidate.useConst ? "const " : "local ") + ".{ " + text + " } = require(\"" + candidate.requirePath + "\")\n";
                 return lsp::TextEdit{candidate.range, (candidate.prependNewline ? "\n" : "") + declaration};

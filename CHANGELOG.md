@@ -15,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added `diagnostics.showHelp` (on by default) and the `Luwu: Show or Hide Help in Diagnostics` command: off, diagnostics leave out their `Help (...)` paragraphs and the diagnostics that are only help
 - Uses of a local left without a type by an error elsewhere get an information-level note linking to that error
 - Added a `blockEndHints` inlay hint (enabled by default) that labels the `end` of long functions, loops, `if`/`elseif`/`else` chains, and classes (e.g. `end function foo`, `end for k, v in pairs(t)`) once a block spans at least `blockEndHintsMinLines` lines (default 35), similar to rust-analyzer's closing brace hints
+- Editor support for Luwu destructuring (`const .{ elements.{ Heading } } = chimera`):
+  - Auto-import completions add a name to the destructuring it comes from. A field of a module the file already destructures goes into that pattern (`elements.{ Heading, Paragraph }`), a module required but not destructured gets a `const .{ ... } = m` under its require, and a module not required yet gets a new `const .{ ... } = require(...)`. Fields up to two levels into a module are offered
+  - An unknown name gets the same import as a quick fix. An unknown type that a module exports as a type alias is imported through a type destructuring: it is added to an existing `type .{ ... } = m`, written as `type .{ Content } = m` under a local holding the module, or, for a pattern on a `require` that has no name, the pattern is named (`const chimera.{ ... } = require("@chimera")`) and the type destructuring goes under it
+  - "Import 'Card' from 'components'" on `components.Card` adds `Card` to the pattern binding `components` and rewrites every `components.Card` in the file to `Card`. "Import all fields of 'chimera'" adds every field the pattern doesn't bind yet, and "Qualify 'Card' as 'components.Card'" undoes an import
+  - "Put each field on its own line" / "Put fields on one line" refactor actions for the pattern under the cursor, nested patterns and `type .{ ... }` included. A pattern holding a comment is never collapsed onto one line
+  - Removing an unused destructured name takes just that field out of its pattern, from its quick fix or from "Remove all unused code". With the cursor on an unused import, a "Remove all unused imports" quick fix removes every unused `local m = require(...)` in the file and every unused field of a pattern destructuring a required module, whether the pattern is on the `require` itself or on a local holding its value
+  - Semantic tokens give each destructured name one token and the pattern itself none, and a type destructuring colors only the type names
+- The TextMate and Sublime grammars highlight destructuring patterns, type destructurings, a bare `export name = v` / `export .{ x, y } = v`, and Luwu match expressions (`match`, `case`, and the `is` / `implements` type tests)
+- Typing `else` dedents it to the `if` statement whose block it continues. In a `match` or a multi-line if-else expression `else` is an arm and stays level with the arms above it. Enter after an `else` arm or a `give` that has its value goes back out to the surrounding code, after a bare `give` it indents for the value, and after a `match` header it indents for the `case` arms
+- Diagnostics carry the notes Luwu attaches to an error as related information that links to the code each note points at
 
 ### Changed
 
@@ -35,6 +45,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fixed renaming a class not renaming its value usages (constructor calls like `Cat("tom")`, `Cat.staticFn`, passing `Cat` around), and renaming from a `: Cat` type annotation only renaming that one annotation
 - Fixed `@self` string-require aliases resolving from the filesystem instead of the sourcemap tree for non-DataModel roots ([#1511](https://github.com/JohnnyMorganz/luau-lsp/issues/1511))
 - Fixed hovering over `vector` showing "extern type vector" instead of `vector`
+- Fixed Find All References returning nothing for a class field or method, from its declaration or from a usage. It now finds every declaration and `.name` / `:name` access across modules, including the trait members it overrides or fulfills, and on a class name it also finds the class's type annotations
+- Fixed imports into an empty destructuring pattern such as `elements.{}`, which were never offered. The quick fix for an unknown name added a second `require` instead
+- "Inline variable" is no longer offered on a destructured name or on the hidden local holding a pattern's value, where it showed up as `Inline variable '(destructured)'`
+- Parameter name inlay hints are no longer shown on a match expression's `x is Point` type test
+- Fixed the dark Luwu file icon lagging the VSCode explorer: it had 9,011 paths and now has 35
 
 ## [1.69.0] - 2026-07-14
 

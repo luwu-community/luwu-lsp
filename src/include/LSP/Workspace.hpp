@@ -180,6 +180,10 @@ public:
     // of implementing classes that override or fulfill it.
     std::vector<Reference> findAllClassMemberReferences(
         const types::ClassMemberOrigin& origin, const Luau::Name& name, const LSPCancellationToken& cancellationToken);
+    // Luwu Classes: the references of the class name or class member at `position`, declaration included. None when
+    // there is no class or class member there. Shared by find references and rename.
+    std::optional<std::vector<lsp::Location>> findClassReferencesAtPosition(const Luau::ModuleName& moduleName, const lsp::DocumentUri& uri,
+        const TextDocument& textDocument, const Luau::Position& position, const LSPCancellationToken& cancellationToken);
 
     std::vector<lsp::CompletionItem> completion(const lsp::CompletionParams& params, const LSPCancellationToken& cancellationToken);
 

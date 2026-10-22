@@ -9,9 +9,11 @@
 #include "Platform/LSPPlatform.hpp"
 #include "Luau/Ast.h"
 #include "Luau/Error.h"
+#include "Luau/Lexer.h"
 #include "LSP/Destructure.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <unordered_set>
 
 LUAU_FASTFLAG(LuauSolverV2)
@@ -63,36 +65,120 @@ Luau::AstStat* findStatementContainingLocal(Luau::AstStatBlock* root, const Luau
     return finder.result;
 }
 
-// The parameter list of whatever function (or class primary constructor) `position` sits in, as a
-// source location covering the parentheses themselves.
-struct FindParameterListAtPosition : Luau::AstVisitor
+// A comma-separated list in brackets: a function's parameters, a call's arguments or a table's entries
+struct BracketList
+{
+    // From the opening bracket to the closing one
+    Luau::Location location;
+    // Where each item ends, which finds the separators; empty for parameters, which are split on top-level commas
+    std::vector<Luau::Position> itemEnds;
+    const char* singular = "";
+    const char* plural = "";
+    // `{ a, b }` on one line, with a space inside each brace
+    bool padded = false;
+    // A comma after the last item too, when there's one per line
+    bool trailingComma = false;
+};
+
+// The innermost bracket list `position` sits in. A function body is code of its own: a list around the function isn't
+// offered from inside it.
+struct FindBracketListAtPosition : Luau::AstVisitor
 {
     Luau::Position targetPosition;
-    std::optional<Luau::Location> result;
+    const TextDocument& textDocument;
+    std::optional<BracketList> result;
 
-    explicit FindParameterListAtPosition(const Luau::Position& position)
+    FindBracketListAtPosition(const Luau::Position& position, const TextDocument& textDocument)
         : targetPosition(position)
+        , textDocument(textDocument)
     {
+    }
+
+    bool startsWith(const Luau::Location& location, char bracket) const
+    {
+        std::string text = textDocument.getText(textDocument.convertLocation(location));
+        return !text.empty() && text.front() == bracket;
     }
 
     bool visit(Luau::AstExprFunction* node) override
     {
+        if (node->body && node->body->location.containsClosed(targetPosition))
+            result.reset();
         if (node->argLocation && node->argLocation->containsClosed(targetPosition))
-            result = node->argLocation;
+            result = BracketList{*node->argLocation, {}, "parameter", "parameters"};
         return true;
     }
 
     bool visit(Luau::AstStatClass* node) override
     {
         if (node->primaryConstructor && node->primaryConstructor->argLocation.containsClosed(targetPosition))
-            result = node->primaryConstructor->argLocation;
+            result = BracketList{node->primaryConstructor->argLocation, {}, "parameter", "parameters"};
+        return true;
+    }
+
+    bool visit(Luau::AstExprCall* node) override
+    {
+        // `argLocation` starts after the `(`, so it's found after the function being called. `f{...}` and `f"..."` have
+        // no parentheses to lay out.
+        if (node->args.size == 0 || !node->location.containsClosed(targetPosition))
+            return true;
+        std::string text = textDocument.getText();
+        size_t open = skipWhitespaceAndComments(text, textDocument.offsetAt(textDocument.convertPosition(node->func->location.end)));
+        if (open >= text.size() || text[open] != '(')
+            return true;
+        Luau::Location location{textDocument.convertPosition(textDocument.positionAt(open)), node->argLocation.end};
+
+        if (location.containsClosed(targetPosition))
+        {
+            BracketList list{location, {}, "argument", "arguments"};
+            for (Luau::AstExpr* arg : node->args)
+                list.itemEnds.push_back(arg->location.end);
+            result = std::move(list);
+        }
+        return true;
+    }
+
+    bool visit(Luau::AstExprTable* node) override
+    {
+        if (node->items.size > 0 && node->location.containsClosed(targetPosition) && startsWith(node->location, '{'))
+        {
+            BracketList list{node->location, {}, "entry", "entries", /* padded= */ true, /* trailingComma= */ true};
+            for (const auto& item : node->items)
+                list.itemEnds.push_back(item.value->location.end);
+            result = std::move(list);
+        }
         return true;
     }
 };
 
-// A code action rewriting the layout of a comma-separated list. Offered first and as a quick fix when the client
-// takes quick fixes, so it heads the menu whenever the cursor is in a list; a client asking only for refactorings
-// gets it as a rewrite.
+// Whether `position` touches a name, at its start, inside it or at its end. Keywords aren't names: on `function` or
+// `implements` the cursor is still between the things a list holds.
+bool touchesName(const TextDocument& textDocument, const Luau::Position& position)
+{
+    std::string line = textDocument.getLine(position.line);
+    auto isNameChar = [&](size_t i)
+    {
+        return i < line.size() && (isalnum(static_cast<unsigned char>(line[i])) || line[i] == '_');
+    };
+
+    size_t begin = std::min<size_t>(position.column, line.size());
+    size_t end = begin;
+    while (begin > 0 && isNameChar(begin - 1))
+        --begin;
+    while (isNameChar(end))
+        ++end;
+    if (begin == end)
+        return false;
+
+    // Luwu's contextual keywords read as keywords here, though code could also use them as names
+    static const std::unordered_set<std::string> contextualKeywords{"class", "trait", "implements", "needs", "expect", "public", "private",
+        "const", "export", "type", "continue", "when", "give", "match", "case", "is", "as"};
+    std::string word = line.substr(begin, end - begin);
+    return !Luau::Lexer::isReserved(word) && !contextualKeywords.count(word);
+}
+
+// A code action rewriting the layout of a comma-separated list: a quick fix when the client takes quick fixes, so it
+// shows in the lightbulb menu, and a rewrite for a client asking only for refactorings.
 void addListLayoutAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, std::string title, const lsp::Range& range,
     std::string newText, std::vector<lsp::CodeAction>& result)
 {
@@ -121,25 +207,154 @@ std::string layOutOnePerLine(const std::vector<std::string>& elements, const Tex
     return text;
 }
 
-// Rewrites a parameter list between one-per-line and all-on-one-line. Offered on any function, method, or class or
-// trait primary constructor.
-void generateParameterListWrapAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const Luau::Location& argLocation,
-    const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+// `item`'s lines after its first moved from the indentation `from` to `to`, so a multi-line item keeps its shape when
+// the list around it is laid out again. A long string's lines are its contents and stay as they are.
+std::string reindent(const std::string& item, const std::string& from, const std::string& to)
 {
-    lsp::Range range = textDocument.convertLocation(argLocation);
+    if (from == to || item.find('\n') == std::string::npos || item.find("[[") != std::string::npos || item.find("[=") != std::string::npos)
+        return item;
+
+    std::string text;
+    size_t start = 0;
+    for (size_t lineIndex = 0; start <= item.size(); ++lineIndex)
+    {
+        size_t end = item.find('\n', start);
+        std::string line = item.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (lineIndex > 0)
+        {
+            text += '\n';
+            if (line.compare(0, from.size(), from) == 0)
+                line = to + line.substr(from.size());
+            else if (line.find_first_not_of(" \t") == std::string::npos)
+                line.clear();
+        }
+        text += line;
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    return text;
+}
+
+// The spans of `text` between its top-level commas, from `begin` to `end`, the way splitParameters splits a list
+std::vector<std::pair<size_t, size_t>> splitOnTopLevelCommas(const std::string& text, size_t begin, size_t end)
+{
+    std::vector<std::pair<size_t, size_t>> spans;
+    int depth = 0;
+    char stringDelimiter = '\0';
+    size_t start = begin;
+    for (size_t i = begin; i < end; ++i)
+    {
+        char c = text[i];
+        if (stringDelimiter != '\0')
+        {
+            if (c == '\\')
+                ++i;
+            else if (c == stringDelimiter)
+                stringDelimiter = '\0';
+            continue;
+        }
+
+        if (c == '"' || c == '\'' || c == '`')
+            stringDelimiter = c;
+        else if (c == '(' || c == '{' || c == '[' || c == '<')
+            ++depth;
+        else if (c == ')' || c == '}' || c == ']' || c == '>')
+            --depth;
+        else if (c == ',' && depth == 0)
+        {
+            spans.emplace_back(start, i);
+            start = i + 1;
+        }
+    }
+    spans.emplace_back(start, end);
+    return spans;
+}
+
+// Rewrites a bracket list between one item per line and all on one line. A list is on one line when no line break
+// sits between its items, so `f(a, function() ... end)` counts as one. A comment anywhere in it could end up in front of
+// code, so such a list is left alone.
+void generateBracketListLayoutAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, const BracketList& list,
+    const std::vector<Luau::Comment>& comments, const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    for (const auto& comment : comments)
+        if (list.location.encloses(comment.location))
+            return;
+
+    lsp::Range range = textDocument.convertLocation(list.location);
     std::string text = textDocument.getText(range);
-    if (text.size() < 2 || text.front() != '(' || text.back() != ')')
+    if (text.size() < 2)
         return;
+    size_t listStart = textDocument.offsetAt(range.start);
 
-    auto parameters = splitParameters(text.substr(1, text.size() - 2));
-    if (parameters.empty() || (parameters.size() == 1 && parameters[0].empty()))
-        return;
-
-    if (text.find('\n') != std::string::npos)
-        addListLayoutAction(uri, context, "Put parameters on one line", range, "(" + layOutOnOneLine(parameters) + ")", result);
+    // Each item's span within `text`, separators left out
+    std::vector<std::pair<size_t, size_t>> spans;
+    if (list.itemEnds.empty())
+        spans = splitOnTopLevelCommas(text, 1, text.size() - 1);
     else
-        addListLayoutAction(
-            uri, context, "Put each parameter on its own line", range, layOutOnePerLine(parameters, textDocument, argLocation.begin.line), result);
+    {
+        size_t start = 1;
+        for (const auto& itemEnd : list.itemEnds)
+        {
+            size_t end = textDocument.offsetAt(textDocument.convertPosition(itemEnd)) - listStart;
+            if (end < start || end >= text.size())
+                return;
+            spans.emplace_back(start, end);
+            size_t separator = skipWhitespaceAndComments(text, end);
+            start = separator < text.size() - 1 && (text[separator] == ',' || text[separator] == ';') ? separator + 1 : end;
+        }
+    }
+
+    struct Item
+    {
+        std::string text;
+        std::string indentation;
+        size_t begin;
+        size_t end;
+    };
+    std::vector<Item> items;
+    for (auto [begin, end] : spans)
+    {
+        while (begin < end && isspace(static_cast<unsigned char>(text[begin])))
+            ++begin;
+        while (end > begin && isspace(static_cast<unsigned char>(text[end - 1])))
+            --end;
+        // a trailing comma leaves an empty span after it
+        if (begin == end)
+            continue;
+        size_t line = textDocument.positionAt(listStart + begin).line;
+        items.push_back({text.substr(begin, end - begin), getLineIndentation(textDocument, line), begin, end});
+    }
+    if (items.empty())
+        return;
+
+    bool multiline = text.find('\n', 1) < items.front().begin || text.find('\n', items.back().end) != std::string::npos;
+    for (size_t i = 1; i < items.size(); ++i)
+        multiline = multiline || text.substr(items[i - 1].end, items[i].begin - items[i - 1].end).find('\n') != std::string::npos;
+
+    char open = text.front();
+    char close = text.back();
+    std::string baseIndent = getLineIndentation(textDocument, list.location.begin.line);
+
+    if (multiline)
+    {
+        std::string pad = list.padded ? " " : "";
+        std::string newText = std::string(1, open) + pad;
+        for (size_t i = 0; i < items.size(); ++i)
+            newText += (i == 0 ? "" : ", ") + reindent(items[i].text, items[i].indentation, baseIndent);
+        newText += pad + close;
+        addListLayoutAction(uri, context, std::string("Put ") + list.plural + " on one line", range, newText, result);
+    }
+    else
+    {
+        std::string itemIndent = baseIndent + detectIndentUnit(textDocument);
+        std::string newText = std::string(1, open) + "\n";
+        for (size_t i = 0; i < items.size(); ++i)
+            newText += itemIndent + reindent(items[i].text, items[i].indentation, itemIndent) +
+                       (i + 1 < items.size() || list.trailingComma ? ",\n" : "\n");
+        newText += baseIndent + close;
+        addListLayoutAction(uri, context, std::string("Put each ") + list.singular + " on its own line", range, newText, result);
+    }
 }
 
 // Luwu Traits (rfcs/classes/traits.md): a class's `implements` list or a trait's `needs` list, as written in the
@@ -770,8 +985,10 @@ enum class UnusedCodeKind
     Import
 };
 
+// The fix prefixing the name with `_` goes to `silenceResult`, which is placed after the fixes acting on the code
 void generateUnusedCodeFixes(const lsp::DocumentUri& uri, const Luau::LintWarning& lint, const TextDocument& textDocument, Luau::AstStatBlock* root,
-    const std::optional<lsp::Diagnostic>& diagnostic, UnusedCodeKind kind, std::vector<lsp::CodeAction>& result)
+    const std::optional<lsp::Diagnostic>& diagnostic, UnusedCodeKind kind, std::vector<lsp::CodeAction>& result,
+    std::vector<lsp::CodeAction>& silenceResult)
 {
     lsp::Range lintRange = textDocument.convertLocation(lint.location);
     std::string name = textDocument.getText(lintRange);
@@ -807,7 +1024,7 @@ void generateUnusedCodeFixes(const lsp::DocumentUri& uri, const Luau::LintWarnin
         workspaceEdit.changes.emplace(uri, std::vector{edit});
         action.edit = workspaceEdit;
 
-        result.push_back(action);
+        silenceResult.push_back(action);
     }
 
     // Fix 2: Delete the declaration/statement. Luwu Destructuring: a field of a pattern leaves the pattern instead.
@@ -850,6 +1067,56 @@ void generateUnusedCodeFixes(const lsp::DocumentUri& uri, const Luau::LintWarnin
 
         result.push_back(action);
     }
+}
+
+// Luwu Destructuring: with the cursor on an unused import, every unused import in the module goes at once. A field of a
+// pattern destructuring a `require` counts as one, and a pattern's fields leave it in one edit.
+void generateRemoveAllUnusedImportsFix(const lsp::DocumentUri& uri, const Luau::LintResult& lintResult, const Luau::Location& requestRange,
+    Luau::AstStatBlock* root, const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
+{
+    DestructureFacts facts;
+    root->visit(&facts);
+
+    std::unordered_set<const Luau::AstLocal*> unusedFields;
+    std::vector<lsp::TextEdit> edits;
+    std::unordered_set<unsigned> deletedLines;
+    size_t count = 0;
+    bool underCursor = false;
+
+    for (const auto& lint : lintResult.warnings)
+    {
+        if (lint.code != Luau::LintWarning::Code_LocalUnused && lint.code != Luau::LintWarning::Code_ImportUnused)
+            continue;
+
+        if (const Luau::AstLocal* field = destructuredLocalAt(facts, lint.location))
+        {
+            if (!isImportedByPattern(field, facts))
+                continue;
+            unusedFields.insert(field);
+        }
+        else if (lint.code == Luau::LintWarning::Code_ImportUnused)
+        {
+            auto statement = findStatementContainingLocal(root, lint.location);
+            if (!statement || !locationOwnsItsLines(textDocument, statement->location))
+                continue;
+            if (deletedLines.insert(statement->location.begin.line).second)
+                edits.push_back({{{statement->location.begin.line, 0}, {statement->location.end.line + 1, 0}}, ""});
+        }
+        else
+            continue;
+
+        ++count;
+        underCursor = underCursor || requestRange.overlaps(lint.location);
+    }
+
+    // With only one, "Remove unused variable" already does this
+    if (!underCursor || count < 2)
+        return;
+
+    auto fieldEdits = removeFieldsEdits(unusedFields, facts, textDocument);
+    edits.insert(edits.end(), fieldEdits.begin(), fieldEdits.end());
+    if (!edits.empty())
+        addEditsAction(uri, lsp::CodeActionContext{}, "Remove all unused imports", std::move(edits), result);
 }
 
 void generateUnreachableCodeFix(const lsp::DocumentUri& uri, const Luau::LintWarning& lint, const TextDocument& textDocument,
@@ -1410,23 +1677,53 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
 
     auto requestRange = textDocument->convertRange(params.range);
 
-    // Laying out the parameter or trait list under the cursor goes first, so it heads the menu
+    // The layout of the list under the cursor, and the fixes silencing a lint with `_`, are placed once the rest are in
+    std::vector<lsp::CodeAction> layoutActions;
+    std::vector<lsp::CodeAction> silenceActions;
+    // Moving names in and out of destructurings, after the fixes for the lints on them (removing an unused one)
+    std::vector<lsp::CodeAction> importActions;
+
     if (params.context.wants(lsp::CodeActionKind::QuickFix) || params.context.wants(lsp::CodeActionKind::RefactorRewrite))
     {
-        FindParameterListAtPosition parameterListFinder(requestRange.begin);
-        sourceModule->root->visit(&parameterListFinder);
-        if (parameterListFinder.result)
-            generateParameterListWrapAction(params.textDocument.uri, params.context, *parameterListFinder.result, *textDocument, result);
-
+        // Only the innermost list around the cursor is laid out: parameters, arguments, a table, traits or a pattern
+        FindBracketListAtPosition bracketListFinder(requestRange.begin, *textDocument);
+        sourceModule->root->visit(&bracketListFinder);
         FindTraitListAtPosition traitListFinder(requestRange.begin, *textDocument);
         sourceModule->root->visit(&traitListFinder);
-        if (traitListFinder.result)
-            generateTraitListWrapAction(params.textDocument.uri, params.context, *traitListFinder.result, *textDocument, result);
-
         FindDestructurePatternAtPosition destructureFinder(requestRange.begin);
         sourceModule->root->visit(&destructureFinder);
+
+        std::optional<Luau::Location> innermost;
+        std::function<void()> layOut;
+        auto consider = [&](const Luau::Location& location, std::function<void()> generate)
+        {
+            if (!innermost || innermost->encloses(location))
+            {
+                innermost = location;
+                layOut = std::move(generate);
+            }
+        };
+        if (bracketListFinder.result)
+            consider(bracketListFinder.result->location,
+                [&]
+                {
+                    generateBracketListLayoutAction(params.textDocument.uri, params.context, *bracketListFinder.result,
+                        sourceModule->commentLocations, *textDocument, layoutActions);
+                });
+        if (traitListFinder.result)
+            consider(Luau::Location{traitListFinder.result->keyword.begin, traitListFinder.result->list.end},
+                [&]
+                {
+                    generateTraitListWrapAction(params.textDocument.uri, params.context, *traitListFinder.result, *textDocument, layoutActions);
+                });
         if (destructureFinder.result)
-            generateDestructureLayoutAction(params.textDocument.uri, params.context, *destructureFinder.result, *textDocument, result);
+            consider(destructureFinder.result->location,
+                [&]
+                {
+                    generateDestructureLayoutAction(params.textDocument.uri, params.context, *destructureFinder.result, *textDocument, layoutActions);
+                });
+        if (layOut)
+            layOut();
 
         // Luwu Destructuring: importing fields into a pattern and qualifying them back
         if (auto module = getModule(moduleName))
@@ -1436,14 +1733,15 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             auto builtinTypes = frontend.builtinTypes;
 
             generateImportFieldAction(params.textDocument.uri, params.context, requestRange.begin, *sourceModule, *module, builtinTypes, facts,
-                *textDocument, result);
+                *textDocument, importActions);
 
             if (destructureFinder.result && destructureFinder.result->pattern)
             {
                 const Luau::AstDestructurePattern& pattern = *destructureFinder.result->pattern;
-                generateQualifyFieldAction(
-                    params.textDocument.uri, params.context, requestRange.begin, pattern, *module, builtinTypes, facts, *textDocument, result);
-                generateImportAllFieldsAction(params.textDocument.uri, params.context, pattern, *module, builtinTypes, facts, *textDocument, result);
+                generateQualifyFieldAction(params.textDocument.uri, params.context, requestRange.begin, pattern, *module, builtinTypes, facts,
+                    *textDocument, importActions);
+                generateImportAllFieldsAction(
+                    params.textDocument.uri, params.context, pattern, *module, builtinTypes, facts, *textDocument, importActions);
             }
         }
     }
@@ -1466,14 +1764,15 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                 break;
             case Luau::LintWarning::Code_LocalUnused:
                 generateUnusedCodeFixes(
-                    params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, UnusedCodeKind::Variable, result);
+                    params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, UnusedCodeKind::Variable, result, silenceActions);
                 break;
             case Luau::LintWarning::Code_FunctionUnused:
                 generateUnusedCodeFixes(
-                    params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, UnusedCodeKind::Function, result);
+                    params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, UnusedCodeKind::Function, result, silenceActions);
                 break;
             case Luau::LintWarning::Code_ImportUnused:
-                generateUnusedCodeFixes(params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, UnusedCodeKind::Import, result);
+                generateUnusedCodeFixes(
+                    params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, UnusedCodeKind::Import, result, silenceActions);
                 break;
             case Luau::LintWarning::Code_UnreachableCode:
                 generateUnreachableCodeFix(params.textDocument.uri, lint, *textDocument, diagnostic, result);
@@ -1491,6 +1790,8 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                 break;
             }
         }
+
+        generateRemoveAllUnusedImportsFix(params.textDocument.uri, cr.lintResult, requestRange, sourceModule->root, *textDocument, result);
 
         UnknownSymbolFixContext unknownSymbolCtx{
             params.textDocument.uri,
@@ -1540,6 +1841,8 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                         lsp::CodeAction action;
                         action.title = "Import '" + candidate.name + "' from '" + candidate.from + "'";
                         action.kind = lsp::CodeActionKind::QuickFix;
+                        // from a module already required, it beats requiring the name's own module
+                        action.isPreferred = candidate.fromRequired;
                         if (diagnostic)
                             action.diagnostics.push_back(*diagnostic);
 
@@ -1758,7 +2061,15 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
 
     platform->handleCodeAction(params, result);
 
-    return result;
+    // Between tokens, the list's layout heads the quick fixes. On a name, that name's own fixes come first.
+    bool onName = touchesName(*textDocument, requestRange.begin);
+    std::vector<lsp::CodeAction> ordered = onName ? std::vector<lsp::CodeAction>{} : std::move(layoutActions);
+    ordered.insert(ordered.end(), std::make_move_iterator(result.begin()), std::make_move_iterator(result.end()));
+    ordered.insert(ordered.end(), std::make_move_iterator(importActions.begin()), std::make_move_iterator(importActions.end()));
+    if (onName)
+        ordered.insert(ordered.end(), std::make_move_iterator(layoutActions.begin()), std::make_move_iterator(layoutActions.end()));
+    ordered.insert(ordered.end(), std::make_move_iterator(silenceActions.begin()), std::make_move_iterator(silenceActions.end()));
+    return ordered;
 }
 
 lsp::CodeAction WorkspaceFolder::codeActionResolve(const lsp::CodeAction& action, const LSPCancellationToken& cancellationToken)
