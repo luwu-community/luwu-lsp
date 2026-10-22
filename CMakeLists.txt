@@ -198,6 +198,11 @@ else ()
     list(APPEND LUAU_LSP_OPTIONS -Wall)
 endif ()
 
+# gcc 14 reports false positives inside nlohmann json for std::optional members
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    list(APPEND LUAU_LSP_OPTIONS -Wno-maybe-uninitialized)
+endif ()
+
 if (LSP_WERROR)
     if (MSVC)
         list(APPEND LUAU_LSP_OPTIONS /WX) # Warnings are errors
@@ -240,6 +245,10 @@ target_include_directories(Luwu.LanguageServer PUBLIC src/include)
 target_include_directories(Luwu.LanguageServer SYSTEM PUBLIC ${EXTERN_INCLUDES})
 target_link_libraries(Luwu.LanguageServer PRIVATE ${LUWU_TARGET_PREFIX}.Ast ${LUWU_TARGET_PREFIX}.Analysis ${LUWU_TARGET_PREFIX}.Compiler ${LUWU_TARGET_PREFIX}.CodeGen)
 target_link_libraries(Luwu.LanguageServer PUBLIC ${LUWU_TARGET_PREFIX}.VM)
+
+# glibc before 2.34 keeps pthread_create in libpthread
+find_package(Threads REQUIRED)
+target_link_libraries(Luwu.LanguageServer PUBLIC Threads::Threads)
 
 set_target_properties(Luwu.LanguageServer.CLI PROPERTIES OUTPUT_NAME luwu-lsp)
 target_compile_options(Luwu.LanguageServer.CLI PRIVATE ${LUAU_LSP_OPTIONS})
