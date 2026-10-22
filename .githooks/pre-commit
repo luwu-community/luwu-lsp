@@ -1,0 +1,25 @@
+#!/bin/sh
+# Blocks a commit whose luwu submodule doesn't match the checkout in $LUWU_TEST_PATH.
+# Dev builds compile against $LUWU_TEST_PATH, so a commit that records any other
+# luwu commit was tested against code it doesn't ship with.
+
+[ -n "$LUWU_TEST_PATH" ] || exit 0
+
+if ! luwu_head=$(git -C "$LUWU_TEST_PATH" rev-parse HEAD 2>/dev/null); then
+    echo "pre-commit: LUWU_TEST_PATH ($LUWU_TEST_PATH) is not a git checkout." >&2
+    echo "Unset it or fix the path, or commit with --no-verify." >&2
+    exit 1
+fi
+
+submodule=$(git rev-parse :luwu 2>/dev/null)
+
+if [ "$submodule" != "$luwu_head" ]; then
+    echo "pre-commit: the luwu submodule is at ${submodule:-<missing>}, but LUWU_TEST_PATH" >&2
+    echo "($LUWU_TEST_PATH) is at $luwu_head." >&2
+    echo "Push that commit to luwu if it isn't already, then update the submodule:" >&2
+    echo "" >&2
+    echo "    git -C luwu fetch && git -C luwu checkout $luwu_head && git add luwu" >&2
+    echo "" >&2
+    echo "Commit with --no-verify to skip this check." >&2
+    exit 1
+fi
