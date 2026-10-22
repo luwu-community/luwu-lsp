@@ -328,7 +328,7 @@ EXTRA_MEMBERS = {
     "InstanceAdornment": ["Adornee: Instance?"],
     "BasePart": [
         "function GetConnectedParts(self, recursive: boolean?): { BasePart }",
-        "function GetJoints(self): { BasePart }",
+        "function GetJoints(self): { Instance }",
         "function GetNetworkOwner(self): Player?",
         "function GetTouchingParts(self): { BasePart }",
         "function SubtractAsync(self, parts: { BasePart }, collisionfidelity: EnumCollisionFidelity?, renderFidelity: EnumRenderFidelity?): UnionOperation",
@@ -501,6 +501,10 @@ declare utf8: {
 
 declare function warn<T...>(...: T...)
 
+-- FIXME: This type is not entirely correct - `loadstring` returns a function or
+-- (nil, string).
+declare function loadstring<A...>(src: string, chunkname: string?): (((A...) -> any)?, string?)
+
 @[deprecated { use = "task.spawn" }]
 declare function spawn(callback: (dt: number, gt: number) -> ())
 """
@@ -519,7 +523,7 @@ export type RBXScriptSignal<T... = ...any> = {
 }
 
 type HttpRequestOptions = {
-    Url: string,
+    Url: string | Secret,
     Method: "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "CONNECT" | "OPTIONS" | "TRACE" | "PATCH" | nil,
     Headers: { [string]: string | Secret }?,
     Body: string?,
