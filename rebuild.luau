@@ -257,6 +257,24 @@ const function git_or_error(git_args: { string }, cwd: string?): string
     return str.trim(result.out)
 end
 
+--- Points git at the tracked hooks in ./.githooks unless the user set their own core.hooksPath.
+--- Skipped outside a git checkout (a source tarball).
+const function install_hooks()
+    if not git({ "rev-parse", "--git-dir" }).ok then
+        return
+    end
+    const current = str.trim(git({ "config", "--get", "core.hooksPath" }).stdout)
+    if current == ".githooks" then
+        return
+    end
+    if current ~= "" then
+        output.ewriteln(`Not installing luwu-lsp's git hooks: core.hooksPath is already set to '{current}'.`)
+        return
+    end
+    git_or_error({ "config", "core.hooksPath", ".githooks" })
+    print("Installed luwu-lsp's git hooks (core.hooksPath = .githooks).")
+end
+
 --- Makes sure ./luwu is an actual checkout, cloning it at the commit luwu-lsp pins if it's missing or empty.
 --- Leaves an existing checkout alone: `git submodule update` would reset it to the pinned commit,
 --- undoing a `submodule-update` that hasn't been committed yet.
@@ -522,6 +540,7 @@ const function create_child_pool()
 end
 
 ensure_dependencies()
+install_hooks()
 
 if parsed.command == "submodule-update" then
     update_submodule(parsed:get<<string>>("--branch"))

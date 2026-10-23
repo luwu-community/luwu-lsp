@@ -124,8 +124,9 @@ seal ./rebuild.luau --help
 ```
 
 For development alongside Luwu itself, set the environment variable `LUWU_TEST_PATH` to your local checkout of the `luwu` repository; dev builds
-compile against it instead of the submodule. Run `git config core.hooksPath .githooks` once to enable the pre-commit
-hook that refuses a commit whose `luwu` submodule doesn't match the commit checked out in `LUWU_TEST_PATH`.
+compile against it instead of the submodule. `rebuild.luau` also installs the repo's git hooks
+(`core.hooksPath = .githooks`). Their pre-commit hook refuses a commit whose `luwu` submodule doesn't match the commit
+checked out in `LUWU_TEST_PATH`.
 
 ## Configuration
 
