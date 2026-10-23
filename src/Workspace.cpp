@@ -661,9 +661,6 @@ void WorkspaceFolder::registerTypes(const std::vector<std::string>& disabledGlob
 
         if (result.success)
         {
-            // Clear any set diagnostics
-            client->publishDiagnostics({uri, std::nullopt, {}});
-
             // Update the text document URI to point to the actual file on disk
             if (auto it = definitionsFileState.find(packageName); it != definitionsFileState.end())
                 it->second.textDocument = TextDocument(uri, "luau", 0, *definitionsContents);
@@ -672,18 +669,19 @@ void WorkspaceFolder::registerTypes(const std::vector<std::string>& disabledGlob
         {
             client->sendWindowMessage(
                 lsp::MessageType::Error, "Failed to read definitions file " + resolvedFilePath + ". Extended types will not be provided");
-
-            // Display relevant diagnostics
-            std::vector<lsp::Diagnostic> diagnostics;
-            for (auto& error : result.parseResult.errors)
-                diagnostics.emplace_back(createParseErrorDiagnostic(error));
-
-            if (result.module)
-                for (auto& error : result.module->errors)
-                    diagnostics.emplace_back(createTypeErrorDiagnostic(error, &fileResolver));
-
-            client->publishDiagnostics({uri, std::nullopt, diagnostics});
         }
+
+        // Display relevant diagnostics. Luwu: a definitions file with type errors still loads, so a loaded one can have
+        // some too. An empty list clears any diagnostics set before.
+        std::vector<lsp::Diagnostic> diagnostics;
+        for (auto& error : result.parseResult.errors)
+            diagnostics.emplace_back(createParseErrorDiagnostic(error));
+
+        if (result.module)
+            for (auto& error : result.module->errors)
+                diagnostics.emplace_back(createTypeErrorDiagnostic(error, &fileResolver));
+
+        client->publishDiagnostics({uri, std::nullopt, diagnostics});
     }
 
     if (!disabledGlobals.empty())

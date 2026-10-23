@@ -502,7 +502,8 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     {
         // The comprehension is stored as the loops it runs, each one's body holding only the next clause. A single
         // plain `when` is an ordinary if whose `if` is that `when`; a chain records its `when`s in its clauses,
-        // which visit(AstStatIf) covers. Every loop's `doLocation` is the one `give`
+        // which visit(AstStatIf) covers. Every loop's `doLocation` is the one `give`, or the `do` written in place of
+        // `give do`. That `do` is a reserved word, which the length check in addKeywordToken leaves to the grammar.
         std::optional<Luau::Location> giveLocation;
         Luau::AstStat* stat = comprehension->loop;
         while (stat)
