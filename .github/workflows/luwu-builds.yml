@@ -44,8 +44,9 @@ jobs:
       - name: Build Server
         shell: bash
         run: |
+          # cl's options are written with `-`, since Git Bash rewrites a `/O2` argument into a Windows path
           cmake -S . -B build -G Ninja $CMAKE_FLAGS -DLSP_STATIC_CRT:BOOL=ON \
-            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /Ob1 /DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/O2 /Ob1 /DNDEBUG"
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -Ob1 -DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -Ob1 -DNDEBUG"
           cmake --build build --target Luwu.LanguageServer.CLI -j 4
           sccache --show-stats
 
