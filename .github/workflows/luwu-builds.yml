@@ -15,50 +15,88 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "10.15"
+  # Every build compiles through sccache, stored in the GitHub Actions cache, so a push that doesn't bump luwu only
+  # recompiles what it changed. RelWithDebInfo's optimization flags without its debug info (each build step overrides
+  # them): the binaries are stripped anyway, and debug info is slow to build. MSVC's /Zi would also keep every object
+  # out of the cache.
+  SCCACHE_GHA_ENABLED: "true"
+  CMAKE_FLAGS: >-
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    -DLSP_BUILD_WITH_SENTRY:BOOL=OFF
+    -DCMAKE_C_COMPILER_LAUNCHER=sccache
+    -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            name: windows-x64
-          - os: macos-latest
-            name: macos-universal
-
-    name: build (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    name: build (windows-x64)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Build Server
-        run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_STATIC_CRT:BOOL=ON -DLSP_BUILD_WITH_SENTRY:BOOL=OFF
-          cmake --build . --config RelWithDebInfo --target Luwu.LanguageServer.CLI -j 4
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: (MacOS) Verify universal build and strip
-        if: runner.os == 'macOS'
+      # Ninja compiles files in parallel; the Visual Studio generator only builds whole projects in parallel, and
+      # compiler launchers (sccache) don't work with it
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Server
+        shell: bash
         run: |
-          lipo -archs build/luwu-lsp
-          strip -S build/luwu-lsp
+          cmake -S . -B build -G Ninja $CMAKE_FLAGS -DLSP_STATIC_CRT:BOOL=ON \
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /Ob1 /DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/O2 /Ob1 /DNDEBUG"
+          cmake --build build --target Luwu.LanguageServer.CLI -j 4
+          sccache --show-stats
 
       - name: Stage binary
         shell: bash
         run: |
           mkdir dist
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp build/RelWithDebInfo/luwu-lsp.exe dist/
-          else
-            cp build/luwu-lsp dist/
-          fi
+          cp build/luwu-lsp.exe dist/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: bin-${{ matrix.name }}
+          name: bin-windows-x64
+          path: ./dist
+
+  # One job per architecture, both on the arm64 runner (x86_64 cross-compiled), so they build in parallel. The
+  # publish job merges them into the universal binary.
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+
+    name: build (macos-${{ matrix.arch }})
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Build Server
+        run: |
+          cmake -S . -B build $CMAKE_FLAGS -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG"
+          cmake --build build --target Luwu.LanguageServer.CLI -j 4
+          sccache --show-stats
+
+      - name: Verify architecture and strip
+        run: |
+          lipo -archs build/luwu-lsp
+          strip -S build/luwu-lsp
+
+      - name: Stage binary
+        run: |
+          mkdir dist
+          cp build/luwu-lsp dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-macos-${{ matrix.arch }}
           path: ./dist
 
   build-linux:
@@ -83,12 +121,15 @@ jobs:
         with:
           submodules: recursive
 
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Build Server
         run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLSP_BUILD_WITH_SENTRY:BOOL=OFF
-          cmake --build . --target Luwu.LanguageServer.CLI -j 4
-          strip --strip-debug luwu-lsp
+          cmake -S . -B build $CMAKE_FLAGS \
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG"
+          cmake --build build --target Luwu.LanguageServer.CLI -j 4
+          sccache --show-stats
+          strip --strip-debug build/luwu-lsp
 
       - name: Check glibc/libstdc++ requirements
         run: |
@@ -118,7 +159,7 @@ jobs:
           path: ./dist
 
   release:
-    needs: [build, build-linux]
+    needs: [build-windows, build-macos, build-linux]
     name: Publish luwu-latest
     runs-on: ubuntu-latest
     permissions:
@@ -137,6 +178,18 @@ jobs:
 
       - run: npm ci
         working-directory: editors/code
+
+      - name: Merge the macOS binaries into a universal one
+        run: |
+          set -euo pipefail
+          lipo=$(command -v llvm-lipo || ls /usr/lib/llvm-*/bin/llvm-lipo 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$lipo" ]; then
+            sudo apt-get install -y -qq llvm >/dev/null
+            lipo=$(command -v llvm-lipo || ls /usr/lib/llvm-*/bin/llvm-lipo | sort -V | tail -1)
+          fi
+          mkdir -p bins/bin-macos-universal
+          "$lipo" -create bins/bin-macos-arm64/luwu-lsp bins/bin-macos-x86_64/luwu-lsp -output bins/bin-macos-universal/luwu-lsp
+          "$lipo" -archs bins/bin-macos-universal/luwu-lsp
 
       - name: Package binaries and extensions
         shell: bash
