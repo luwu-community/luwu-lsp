@@ -345,6 +345,38 @@ end
 
 const extension_dir_path = luwu_lsp_dir:join("editors", "code")
 
+--- The `.luaurc` schema the extension ships lists every lint name, and VSCode underlines any other name in a `"lint"`
+--- object as not allowed. Luwu adds lints all the time, so the list is rewritten from luwu's `kWarningNames` (in
+--- `LinterConfig.h`) every time the extension is packaged.
+const function sync_luaurc_lints(luwu_path: string)
+    const linter_config = fs.readfile(fs.path.join(luwu_path, "Config", "include", "Luau", "LinterConfig.h"))
+    const names_start = string.find(linter_config, "kWarningNames[] = {", 1, true)
+        or error("kWarningNames not found in LinterConfig.h")
+    const names_end = string.find(linter_config, "};", names_start, true) or error("kWarningNames isn't closed")
+
+    -- `Unknown` is code 0, a placeholder rather than a lint
+    const properties = { `                "*": \{ "type": "boolean" \}` }
+    for name in string.gmatch(string.sub(linter_config, names_start, names_end), '"(%w+)"') do
+        if name ~= "Unknown" then
+            table.insert(properties, `                "{name}": \{ "type": "boolean" \}`)
+        end
+    end
+
+    const schema_path = fs.path.join(extension_dir_path, "schemas", "luaurc.json")
+    const schema = fs.readfile(schema_path)
+    const lint_start = string.find(schema, '"lint": {', 1, true) or error("no \"lint\" object in luaurc.json")
+    const properties_open = '"properties": {'
+    const list_start = string.find(schema, properties_open, lint_start, true) or error("the lint object has no properties")
+    const list_end = string.find(schema, "\n            }", list_start, true) or error("the lint properties aren't closed")
+    const updated = string.sub(schema, 1, list_start + #properties_open - 1)
+        .. "\n" .. table.concat(properties, ",\n")
+        .. string.sub(schema, list_end)
+    if updated ~= schema then
+        fs.writefile(schema_path, updated)
+        print(`Updated the lint names in {schema_path}`)
+    end
+end
+
 --- Packages the VSCode extension. Deliberately does not touch the server binary: the .vsix
 --- carries no bin/server, so an installed extension uses whatever luau-lsp.server.path points at.
 const function package_vsix(): string
@@ -548,6 +580,7 @@ if parsed.command == "submodule-update" then
 end
 
 if parsed.command == "vsix" then
+    sync_luaurc_lints(if luwu_test_path and fs.is(luwu_test_path) == "Directory" then luwu_test_path else luwu_submodule_path)
     const packaged = package_vsix()
     if parsed.flags["--install"] then
         install_vsix(packaged)
