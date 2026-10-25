@@ -520,4 +520,54 @@ return f
     CHECK(fix->text.find("if not s:contains(\"x\") then") != std::string::npos);
 }
 
+TEST_CASE_FIXTURE(Fixture, "fix_all_is_a_quick_fix_when_the_module_has_more_than_one_warning")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string two = R"(
+local t = { 1, 2 }
+for k, v in pairs(t) do
+    print(k, v)
+end
+for k, v in pairs(t) do
+    print(k, v)
+end
+)";
+    auto fix = applyQuickFix(*this, two, "Fix all 'Pairs' warnings in this module");
+    REQUIRE(fix);
+    CHECK(fix->text.find("pairs") == std::string::npos);
+
+}
+
+TEST_CASE_FIXTURE(Fixture, "fix_all_is_not_a_quick_fix_for_a_single_warning")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string one = R"(
+local t = { 1, 2 }
+for k, v in pairs(t) do
+    print(k, v)
+end
+)";
+    CHECK_FALSE(applyQuickFix(*this, one, "Fix all 'Pairs' warnings in this module"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_and_or_fix_all_is_a_quick_fix_too")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string andOr = R"(
+local c = math.random() > 0.5
+local a = c and 1 or 2
+local b = c and 3 or 4
+print(a, b)
+)";
+    auto fix = applyQuickFix(*this, andOr, "Rewrite all 'a and b or c' as 'if a then b else c'");
+    REQUIRE(fix);
+    CHECK(fix->text.find("local b = if c then 3 else 4") != std::string::npos);
+}
+
 TEST_SUITE_END();

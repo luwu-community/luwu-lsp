@@ -1734,7 +1734,7 @@ static std::optional<std::pair<std::string, bool>> luaStringHelperFix(Fixture& f
 
     lsp::CodeActionParams params;
     params.textDocument.uri = uri;
-    params.range = {{line, 0}, {line, 200}};
+    params.range = {{line, 0}, {line + 1, 0}};
     params.context.only = {lsp::CodeActionKind::QuickFix};
 
     auto result = fixture.workspace.codeAction(params, nullptr);
@@ -1840,14 +1840,14 @@ function str.startswith(s: string, prefix: string): boolean
     return s:sub(1, #prefix) == prefix
 end
 local function check(x: string)
-    if not str.startswith(x, "") then
+    if not str.startswith(x, "ab") then
         return 1
     end
     return 2
 end
 )", 6);
     REQUIRE(fix);
-    CHECK_EQ(fix->first, "x:startswith(\"\")");
+    CHECK_EQ(fix->first, "x:startswith(\"ab\")");
     CHECK_FALSE(fix->second);
 }
 

@@ -1379,6 +1379,42 @@ void generateLuaAndOrFix(const lsp::DocumentUri& uri, const Luau::LintWarning& l
         addSingleEditAction(uri, "Rewrite as 'if a then b else c'", lsp::CodeActionKind::QuickFix, true, std::move(edits), diagnostic, result);
 }
 
+// Luwu: the title and edits of the action that fixes every warning of `code` in the module, for a lint that has one
+std::optional<std::pair<std::string, std::vector<lsp::TextEdit>>> computeModuleFixAll(Luau::LintWarning::Code code,
+    const std::vector<Luau::LintWarning>& warnings, Luau::AstStatBlock* root, const TextDocument& textDocument)
+{
+    std::vector<lsp::TextEdit> edits;
+    std::string title;
+
+    if (code == Luau::LintWarning::Code_ConstLocal)
+    {
+        title = "Make all never-reassigned locals 'const'";
+        for (const auto& lint : warnings)
+            if (lint.code == code)
+                if (auto stat = findStatementContainingLocal(root, lint.location))
+                    if (auto edit = switchBindingKeywordEdit(textDocument, stat, "local", "const"))
+                        edits.push_back(*edit);
+    }
+    else if (code == Luau::LintWarning::Code_LuaAndOr)
+    {
+        title = "Rewrite all 'a and b or c' as 'if a then b else c'";
+        std::vector<Luau::Location> locations;
+        for (const auto& lint : warnings)
+            if (lint.code == code)
+                locations.push_back(lint.location);
+        edits = computeAndOrEdits(textDocument, root, locations);
+    }
+    else if (auto fixAll = Luau::LanguageServer::LintFixes::fixAllTitle(code))
+    {
+        title = std::move(*fixAll);
+        edits = Luau::LanguageServer::LintFixes::computeFixAllEdits(code, warnings, root, textDocument);
+    }
+
+    if (edits.empty())
+        return std::nullopt;
+    return std::pair{std::move(title), std::move(edits)};
+}
+
 // Luwu: the binding statement whose keyword or names `position` is on
 struct FindBindingStatementAt : Luau::AstVisitor
 {
@@ -1750,6 +1786,7 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
     // Quick fixes from lint warnings
     if (params.context.wants(lsp::CodeActionKind::QuickFix))
     {
+        std::vector<Luau::LintWarning::Code> fixAllOffered;
         for (const auto& lint : cr.lintResult.warnings)
         {
             if (!requestRange.overlaps(lint.location))
@@ -1792,6 +1829,21 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                     addSingleEditAction(params.textDocument.uri, std::move(fix.title), lsp::CodeActionKind::QuickFix, fix.preferred,
                         std::move(fix.edits), diagnostic, result);
                 break;
+            }
+
+            // Luwu: with more than one warning of this lint in the module, fixing them all is offered next to fixing this
+            // one. VS Code only lists source actions (below) under Source Action, never in the quick fix menu.
+            bool more = std::count_if(cr.lintResult.warnings.begin(), cr.lintResult.warnings.end(),
+                            [&](const Luau::LintWarning& other)
+                            {
+                                return other.code == lint.code;
+                            }) > 1;
+            if (more && std::find(fixAllOffered.begin(), fixAllOffered.end(), lint.code) == fixAllOffered.end())
+            {
+                fixAllOffered.push_back(lint.code);
+                if (auto fixAll = computeModuleFixAll(lint.code, cr.lintResult.warnings, sourceModule->root, *textDocument))
+                    addSingleEditAction(params.textDocument.uri, std::move(fixAll->first), lsp::CodeActionKind::QuickFix, false,
+                        std::move(fixAll->second), diagnostic, result);
             }
         }
 
@@ -1974,36 +2026,7 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             result.emplace_back(removeUnusedAction);
         }
 
-        // Luwu: fix every ConstLocal and every LuaAndOr in the module
-        {
-            std::vector<lsp::TextEdit> constEdits;
-            std::vector<Luau::Location> andOrLocations;
-            for (const auto& lint : cr.lintResult.warnings)
-            {
-                if (lint.code == Luau::LintWarning::Code_ConstLocal)
-                {
-                    if (auto stat = findStatementContainingLocal(sourceModule->root, lint.location))
-                        if (auto edit = switchBindingKeywordEdit(*textDocument, stat, "local", "const"))
-                            constEdits.push_back(*edit);
-                }
-                else if (lint.code == Luau::LintWarning::Code_LuaAndOr)
-                    andOrLocations.push_back(lint.location);
-            }
-
-            if (!constEdits.empty())
-                addSingleEditAction(params.textDocument.uri, "Make all never-reassigned locals 'const'", lsp::CodeActionKind::Source, false,
-                    std::move(constEdits), std::nullopt, result);
-
-            if (!andOrLocations.empty())
-            {
-                std::vector<lsp::TextEdit> andOrEdits = computeAndOrEdits(*textDocument, sourceModule->root, andOrLocations);
-                if (!andOrEdits.empty())
-                    addSingleEditAction(params.textDocument.uri, "Rewrite all 'a and b or c' as 'if a then b else c'",
-                        lsp::CodeActionKind::Source, false, std::move(andOrEdits), std::nullopt, result);
-            }
-        }
-
-        // Luwu: fix every warning of each lint in LintFixes, one action per lint that has warnings here
+        // Luwu: fix every warning of each lint that has a fix, one action per lint that has warnings here
         {
             std::vector<Luau::LintWarning::Code> codes;
             for (const auto& lint : cr.lintResult.warnings)
@@ -2011,16 +2034,9 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                     codes.push_back(lint.code);
 
             for (auto code : codes)
-            {
-                auto title = Luau::LanguageServer::LintFixes::fixAllTitle(code);
-                if (!title)
-                    continue;
-
-                auto edits = Luau::LanguageServer::LintFixes::computeFixAllEdits(code, cr.lintResult.warnings, sourceModule->root, *textDocument);
-                if (!edits.empty())
-                    addSingleEditAction(
-                        params.textDocument.uri, std::move(*title), lsp::CodeActionKind::Source, false, std::move(edits), std::nullopt, result);
-            }
+                if (auto fixAll = computeModuleFixAll(code, cr.lintResult.warnings, sourceModule->root, *textDocument))
+                    addSingleEditAction(params.textDocument.uri, std::move(fixAll->first), lsp::CodeActionKind::Source, false,
+                        std::move(fixAll->second), std::nullopt, result);
         }
 
         // Add "Add all missing requires" source action

@@ -35,21 +35,7 @@ The Linux builds run on any distribution with glibc 2.28 or newer (RHEL 8, Debia
 
 ### VS Code
 
-The `.vsix` has the server bundled. These commands download the one for your platform and install it in one go. Run
-them again to update.
-
-Linux and macOS:
-
-```sh
-case "$(uname -sm)" in
-    "Linux x86_64") target=linux-x64 ;;
-    "Linux aarch64") target=linux-arm64 ;;
-    "Darwin arm64") target=darwin-arm64 ;;
-    "Darwin x86_64") target=darwin-x64 ;;
-esac
-curl -fL -o "${TMPDIR:-/tmp}/luwu-lsp.vsix" "https://github.com/luwu-community/luwu-lsp/releases/download/luwu-latest/luwu-lsp-$target.vsix"
-code --install-extension "${TMPDIR:-/tmp}/luwu-lsp.vsix"
-```
+The `.vsix` has the server bundled. Run the command for your platform to install or update it.
 
 Windows (PowerShell):
 
@@ -59,9 +45,20 @@ Invoke-WebRequest "https://github.com/luwu-community/luwu-lsp/releases/download/
 code --install-extension $vsix
 ```
 
-If you downloaded the `.vsix` from the release page instead, pass its full path, e.g.
-`code --install-extension ~/Downloads/luwu-lsp-linux-x64.vsix` (`$HOME\Downloads\luwu-lsp-win32-x64.vsix` on Windows).
-You can also install it from VS Code: open the Extensions view, click `...` at the top and pick **Install from VSIX...**.
+macOS and Linux:
+
+```sh
+case "$(uname -sm)" in
+    "Darwin arm64") target=darwin-arm64 ;;
+    "Darwin x86_64") target=darwin-x64 ;;
+    "Linux x86_64") target=linux-x64 ;;
+    "Linux aarch64") target=linux-arm64 ;;
+esac
+curl -fL -o "${TMPDIR:-/tmp}/luwu-lsp.vsix" "https://github.com/luwu-community/luwu-lsp/releases/download/luwu-latest/luwu-lsp-$target.vsix"
+code --install-extension "${TMPDIR:-/tmp}/luwu-lsp.vsix"
+```
+
+Or download the `.vsix` from the release and pick **Install from VSIX...** in the Extensions view's `...` menu.
 
 Then:
 
