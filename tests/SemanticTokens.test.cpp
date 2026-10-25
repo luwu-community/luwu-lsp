@@ -392,6 +392,36 @@ TEST_CASE_FIXTURE(Fixture, "destructured_names_get_one_token_each_and_the_patter
     }
 }
 
+TEST_CASE_FIXTURE(Fixture, "destructured_keys_read_under_another_name_are_properties")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local t = { h1 = 1, h2 = 2, sub = { gz = 1 } }\n"
+                         "const .{ h1 as H1, h2, sub as .{ gz as Gz } } = t\n"
+                         "for _, p.{ h1 as a } in { t } do end\n";
+    check(source);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+
+    for (const char* key : {"h1", "sub", "gz"})
+    {
+        auto token = getSemanticToken(tokens, wordPosition(source, 1, key));
+        REQUIRE(token);
+        CHECK_EQ(token->tokenType, lsp::SemanticTokenTypes::Property);
+    }
+    auto loopKey = getSemanticToken(tokens, wordPosition(source, 2, "h1"));
+    REQUIRE(loopKey);
+    CHECK_EQ(loopKey->tokenType, lsp::SemanticTokenTypes::Property);
+
+    // The names that get bound aren't properties
+    for (const char* name : {"H1", "h2", "Gz"})
+    {
+        auto token = getSemanticToken(tokens, wordPosition(source, 1, name));
+        CHECK((!token || token->tokenType != lsp::SemanticTokenTypes::Property));
+    }
+}
+
 TEST_CASE_FIXTURE(Fixture, "variables_named_give_and_when_are_not_keywords")
 {
     ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};

@@ -563,5 +563,25 @@ lsp::InlayHintResult WorkspaceFolder::inlayHint(const lsp::InlayHintParams& para
     InlayHintVisitor visitor{module, config, client, textDocument, &fileResolver};
     visitor.visit(sourceModule->root);
 
+    // Luwu: the compiler's remarks, after the end of the line each one is about
+    if (config.inlayHints.compilerRemarks)
+    {
+        for (auto& [line, remarks] : compilerRemarksByLine(moduleName, *textDocument))
+        {
+            std::string text = textDocument->getLine(line);
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
+                text.pop_back();
+
+            lsp::InlayHint hint;
+            hint.position = textDocument->convertPosition(Luau::Position{static_cast<unsigned>(line), static_cast<unsigned>(text.size())});
+            hint.paddingLeft = true;
+            std::string label;
+            for (const std::string& remark : remarks)
+                label += (label.empty() ? "" : "; ") + remark;
+            hint.label.push_back(lsp::InlayHintLabelPart{label});
+            visitor.hints.emplace_back(hint);
+        }
+    }
+
     return visitor.hints;
 }

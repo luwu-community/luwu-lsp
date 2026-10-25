@@ -7,6 +7,7 @@ LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuDoExpr)
 LUAU_FASTFLAG(LuwuDestructuring)
+LUAU_FASTFLAG(LuwuStringExtensions)
 
 TEST_SUITE_BEGIN("CodeAction");
 
@@ -1724,6 +1725,130 @@ TEST_CASE_FIXTURE(Fixture, "unused_import_fixes_come_before_layout_and_silencing
     auto between = titles(3, 15);
     REQUIRE(!between.empty());
     CHECK_EQ(between[0], "Put fields on one line");
+}
+
+// Luwu String Extensions: the quick fix for the LuaStringHelper warning on `line`, as new text and whether it's preferred
+static std::optional<std::pair<std::string, bool>> luaStringHelperFix(Fixture& fixture, const std::string& source, size_t line)
+{
+    auto uri = fixture.newDocument("test.luwu", source);
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {{line, 0}, {line, 200}};
+    params.context.only = {lsp::CodeActionKind::QuickFix};
+
+    auto result = fixture.workspace.codeAction(params, nullptr);
+    if (!result)
+        return std::nullopt;
+    for (const auto& action : *result)
+    {
+        if (action.title.rfind("Use 'string.", 0) != 0 || !action.edit)
+            continue;
+        auto& changes = action.edit->changes.at(uri);
+        REQUIRE_EQ(changes.size(), 1);
+        return std::pair{changes[0].newText, action.isPreferred};
+    }
+    return std::nullopt;
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_string_helper_fix_for_a_manual_prefix_check")
+{
+    ScopedFastFlag stringExtensions{FFlag::LuwuStringExtensions, true};
+
+    auto fix = luaStringHelperFix(*this, R"(
+local function check(s: string, p: string)
+    if s:sub(1, #p) ~= p then
+        return 1
+    end
+    return 2
+end
+)", 2);
+    REQUIRE(fix);
+    CHECK_EQ(fix->first, "not s:startswith(p)");
+    CHECK(fix->second);
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_string_helper_fix_takes_the_nil_comparison_with_it")
+{
+    ScopedFastFlag stringExtensions{FFlag::LuwuStringExtensions, true};
+
+    auto fix = luaStringHelperFix(*this, R"(
+local function check(s: string)
+    if string.find(s, "needle", 1, true) == nil then
+        return 1
+    end
+    return 2
+end
+)", 2);
+    REQUIRE(fix);
+    CHECK_EQ(fix->first, "not s:contains(\"needle\")");
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_string_helper_fix_for_an_anchored_pattern_keeps_the_not")
+{
+    ScopedFastFlag stringExtensions{FFlag::LuwuStringExtensions, true};
+
+    auto fix = luaStringHelperFix(*this, R"(
+local function check(s: string)
+    if not s:match("%.luwu$") then
+        return 1
+    end
+    return 2
+end
+)", 2);
+    REQUIRE(fix);
+    CHECK_EQ(fix->first, "s:endswith(\".luwu\")");
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_string_helper_fix_for_a_literal_gsub")
+{
+    ScopedFastFlag stringExtensions{FFlag::LuwuStringExtensions, true};
+
+    auto fix = luaStringHelperFix(*this, R"(
+local function rename(path: string)
+    local renamed = path:gsub("%.luau", ".luwu")
+    return renamed
+end
+)", 2);
+    REQUIRE(fix);
+    CHECK_EQ(fix->first, "path:replace(\".luau\", \".luwu\")");
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_string_helper_fix_writes_the_function_form_for_an_expression_subject")
+{
+    ScopedFastFlag stringExtensions{FFlag::LuwuStringExtensions, true};
+
+    auto fix = luaStringHelperFix(*this, R"(
+local function check(a: string, b: string)
+    if (a .. b):sub(-5) == ".luau" then
+        return 1
+    end
+    return 2
+end
+)", 2);
+    REQUIRE(fix);
+    CHECK_EQ(fix->first, "string.endswith((a .. b), \".luau\")");
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_string_helper_fix_for_another_librarys_helper_is_not_preferred")
+{
+    ScopedFastFlag stringExtensions{FFlag::LuwuStringExtensions, true};
+
+    auto fix = luaStringHelperFix(*this, R"(
+local str = {}
+function str.startswith(s: string, prefix: string): boolean
+    return s:sub(1, #prefix) == prefix
+end
+local function check(x: string)
+    if not str.startswith(x, "") then
+        return 1
+    end
+    return 2
+end
+)", 6);
+    REQUIRE(fix);
+    CHECK_EQ(fix->first, "x:startswith(\"\")");
+    CHECK_FALSE(fix->second);
 }
 
 TEST_SUITE_END();

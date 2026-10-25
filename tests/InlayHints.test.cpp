@@ -1216,4 +1216,31 @@ TEST_CASE_FIXTURE(Fixture, "show_single_block_end_hint_on_long_if_elseif_else_ch
     CHECK_EQ(labelToString(result[0].label), " if x == 1 ");
 }
 
+TEST_CASE_FIXTURE(Fixture, "compiler_remarks_at_the_end_of_their_lines")
+{
+    client->globalConfig.inlayHints.compilerRemarks = true;
+
+    std::string source = "--!optimize 2\n"
+                         "local function add(a: number, b: number): number\n"
+                         "    return a + b\n"
+                         "end\n"
+                         "print(add(1, 2))\n";
+
+    auto result = processInlayHint(this, source);
+    REQUIRE_EQ(result.size(), 1);
+    CHECK_EQ(result[0].position, lsp::Position{4, 16});
+    CHECK(labelToString(result[0].label).find("inlining succeeded: add") == 0);
+}
+
+TEST_CASE_FIXTURE(Fixture, "compiler_remarks_are_off_by_default")
+{
+    std::string source = "--!optimize 2\n"
+                         "local function add(a: number, b: number): number\n"
+                         "    return a + b\n"
+                         "end\n"
+                         "print(add(1, 2))\n";
+
+    CHECK(processInlayHint(this, source).empty());
+}
+
 TEST_SUITE_END();

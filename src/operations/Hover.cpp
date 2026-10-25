@@ -1104,6 +1104,77 @@ static std::optional<Primitive> builtinPrimitive(const Luau::Frontend& frontend,
     return std::nullopt;
 }
 
+// Luwu: a note for the hover of `callee` when the compiler inlines the call it's the function of. Only a module compiled
+// at -O2 (`--!optimize 2`, or `--!native`, which implies it) inlines anything, so no other module is compiled for it. The
+// compiler's remarks only know the line a call is on, so a remark is matched to the call by the name of the function it
+// inlined. A call that isn't inlined gets no note: most aren't, and saying so on every hover would be noise.
+static std::string inliningNote(const Luau::SourceModule& sourceModule, Luau::AstNode* callee,
+    const std::function<const std::unordered_map<size_t, std::vector<std::string>>&()>& remarksByLine)
+{
+    bool compiledAtO2 = std::any_of(sourceModule.hotcomments.begin(), sourceModule.hotcomments.end(),
+        [](const Luau::HotComment& hc)
+        {
+            bool optimize2 = hc.content.compare(0, 9, "optimize ") == 0 && atoi(hc.content.c_str() + 9) >= 2;
+            return hc.header && (optimize2 || hc.content == "native");
+        });
+    if (!compiledAtO2)
+        return "";
+
+    std::string name;
+    if (auto local = callee->as<Luau::AstExprLocal>())
+        name = local->local->name.value;
+    else if (auto global = callee->as<Luau::AstExprGlobal>())
+        name = global->name.value;
+    else if (auto index = callee->as<Luau::AstExprIndexName>())
+        name = index->index.value;
+    else
+        return "";
+
+    struct FindCall : Luau::AstVisitor
+    {
+        Luau::AstNode* callee;
+        Luau::AstExprCall* call = nullptr;
+
+        bool visit(Luau::AstExprCall* node) override
+        {
+            if (node->func == callee)
+                call = node;
+            return !call;
+        }
+    };
+
+    FindCall finder;
+    finder.callee = callee;
+    sourceModule.root->visit(&finder);
+    if (!finder.call)
+        return "";
+
+    unsigned line = finder.call->location.begin.line;
+
+    const auto& remarks = remarksByLine();
+    auto it = remarks.find(line);
+    if (it == remarks.end())
+        return "";
+
+    // `inlining succeeded: Class:method (cost 3, profit 2.50x, depth 1)`
+    constexpr std::string_view kSucceeded = "inlining succeeded: ";
+    for (const std::string& remark : it->second)
+    {
+        if (remark.compare(0, kSucceeded.size(), kSucceeded) != 0)
+            continue;
+
+        std::string inlined = remark.substr(kSucceeded.size());
+        inlined = inlined.substr(0, inlined.find(" ("));
+        if (size_t separator = inlined.find_last_of(":."); separator != std::string::npos)
+            inlined = inlined.substr(separator + 1);
+        // A method whose receiver's class came from a trusted annotation (`--!trust`) says `trusted` last
+        if (inlined == name)
+            return remark.size() > 10 && remark.compare(remark.size() - 10, 10, ", trusted)") == 0 ? "*(inlined via `--!trust`)*" : "*(inlined)*";
+    }
+
+    return "";
+}
+
 std::optional<lsp::Hover> WorkspaceFolder::hover(const lsp::HoverParams& params, const LSPCancellationToken& cancellationToken)
 {
     const auto& hoverConfig = client->getConfiguration(rootUri).hover;
@@ -2307,6 +2378,14 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     // Two trailing spaces, so the line doesn't run on from the one above it as one paragraph
     if (!refinement.empty())
         typeString += "  \n" + refinement;
+    // Luwu: a function's hover where it's called says whether the compiler inlines that call
+    std::string inlining = inliningNote(*sourceModule, node,
+        [&]() -> const std::unordered_map<size_t, std::vector<std::string>>&
+        {
+            return compilerRemarksByLine(moduleName, *textDocument);
+        });
+    if (!inlining.empty())
+        typeString += "  \n" + inlining;
 
     // Documentation comes before the types this one referred to: it's what the reader is actually
     // here to read, and a wide type's expansion would otherwise push it off the bottom

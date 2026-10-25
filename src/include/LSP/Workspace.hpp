@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <unordered_map>
 #include "Platform/LSPPlatform.hpp"
 #include "Luau/TypeCheckLimits.h"
 #include "Luau/Frontend.h"
@@ -150,6 +151,9 @@ private:
     std::vector<Luau::ModuleName> findReverseDependencies(const Luau::ModuleName& moduleName);
     std::vector<Uri> findFilesForWorkspaceDiagnostics(const std::string& rootPath, const ClientConfiguration& config);
 
+    // Luwu: each document's compiler remarks, with the version they were compiled from (compilerRemarksByLine)
+    std::unordered_map<Luau::ModuleName, std::pair<size_t, std::unordered_map<size_t, std::vector<std::string>>>> compilerRemarksCache;
+
 public:
     std::vector<std::string> getComments(const Luau::ModuleName& moduleName, const Luau::Location& node);
     /// Luwu doc references: where a reference in a doc comment (`[fs.file.read]`) points
@@ -230,6 +234,11 @@ public:
 
     lsp::BytecodeResult bytecode(const lsp::BytecodeParams& params);
     lsp::CompilerRemarksResult compilerRemarks(const lsp::CompilerRemarksParams& params);
+    // Luwu: the compiler's remarks on an open document by the 0-based line of the code each one is about, compiled the way
+    // a runtime does: at -O1 unless the source's `--!optimize` says otherwise. Empty when it doesn't compile. Only that
+    // document is compiled, once per version of it.
+    const std::unordered_map<size_t, std::vector<std::string>>& compilerRemarksByLine(
+        const Luau::ModuleName& moduleName, const TextDocument& textDocument);
     lsp::CodegenResult codeGen(const lsp::CodegenParams& params);
     lsp::RequireGraphResult requireGraph(const lsp::RequireGraphParams& params);
 

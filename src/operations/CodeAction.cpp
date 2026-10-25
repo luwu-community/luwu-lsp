@@ -11,6 +11,7 @@
 #include "Luau/Error.h"
 #include "Luau/Lexer.h"
 #include "LSP/Destructure.hpp"
+#include "LSP/LintFixes.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -1787,6 +1788,9 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                 generateLuaAndOrFix(params.textDocument.uri, lint, *textDocument, sourceModule->root, diagnostic, result);
                 break;
             default:
+                for (auto& fix : Luau::LanguageServer::LintFixes::computeLintFixes(lint, sourceModule->root, *textDocument))
+                    addSingleEditAction(params.textDocument.uri, std::move(fix.title), lsp::CodeActionKind::QuickFix, fix.preferred,
+                        std::move(fix.edits), diagnostic, result);
                 break;
             }
         }
@@ -1996,6 +2000,26 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                 if (!andOrEdits.empty())
                     addSingleEditAction(params.textDocument.uri, "Rewrite all 'a and b or c' as 'if a then b else c'",
                         lsp::CodeActionKind::Source, false, std::move(andOrEdits), std::nullopt, result);
+            }
+        }
+
+        // Luwu: fix every warning of each lint in LintFixes, one action per lint that has warnings here
+        {
+            std::vector<Luau::LintWarning::Code> codes;
+            for (const auto& lint : cr.lintResult.warnings)
+                if (std::find(codes.begin(), codes.end(), lint.code) == codes.end())
+                    codes.push_back(lint.code);
+
+            for (auto code : codes)
+            {
+                auto title = Luau::LanguageServer::LintFixes::fixAllTitle(code);
+                if (!title)
+                    continue;
+
+                auto edits = Luau::LanguageServer::LintFixes::computeFixAllEdits(code, cr.lintResult.warnings, sourceModule->root, *textDocument);
+                if (!edits.empty())
+                    addSingleEditAction(
+                        params.textDocument.uri, std::move(*title), lsp::CodeActionKind::Source, false, std::move(edits), std::nullopt, result);
             }
         }
 

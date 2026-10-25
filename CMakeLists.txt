@@ -118,6 +118,7 @@ target_sources(Luwu.LanguageServer PRIVATE
         src/operations/InlayHints.cpp
         src/operations/SemanticTokens.cpp
         src/operations/CodeAction.cpp
+        src/operations/LintFixes.cpp
         src/operations/Refactoring.cpp
         src/operations/WorkspaceSymbol.cpp
         src/operations/FoldingRange.cpp
@@ -181,6 +182,7 @@ target_sources(Luwu.LanguageServer.Test PRIVATE
         tests/FileOperations.test.cpp
         tests/AnalyzeCli.test.cpp
         tests/CodeAction.test.cpp
+        tests/LintFixes.test.cpp
         tests/Plugin.test.cpp
         tests/Refactoring.test.cpp
         src/AnalyzeCli.cpp # For testing

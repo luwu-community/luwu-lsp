@@ -5,9 +5,12 @@
     // symbols used for start and end a block comment. Remove this entry if your language does not support block comments
     "blockComment": ["--[[", "]]"]
   },
-  // symbols used as brackets
+  // symbols used as brackets. A Luwu `.{...}` (destructuring, or building a table)
+  // is a bracket of its own so that the `.` colors with its `{`; the grammar
+  // scopes `.{` as one token, which the bracket colorizer needs.
   "brackets": [
     ["{", "}"],
+    [".{", "}"],
     ["[", "]"],
     ["(", ")"]
   ],
@@ -35,6 +38,7 @@
   ],
   "colorizedBracketPairs": [
     ["{", "}"],
+    [".{", "}"],
     ["[", "]"],
     ["(", ")"],
     ["<", ">"]

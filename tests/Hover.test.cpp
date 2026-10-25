@@ -2189,4 +2189,47 @@ local s = Shapes()
     CHECK_FALSE(unspecified.canDecreaseVerbosity);
 }
 
+// Luwu: the hover on a call's function at -O2 says when the compiler inlines that call
+static std::string hoverAt(Fixture& fixture, const std::string& source, lsp::Position position)
+{
+    auto uri = fixture.newDocument("inline.luwu", source);
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = position;
+
+    auto result = fixture.workspace.hover(params, nullptr);
+    return result ? result->contents.value : "";
+}
+
+TEST_CASE_FIXTURE(Fixture, "hover_says_when_a_call_is_inlined")
+{
+    std::string source = R"(--!optimize 2
+local function add(a: number, b: number): number
+    return a + b
+end
+local function first(...: number): number
+    return (...)
+end
+print(add(1, 2), first(3))
+)";
+
+    CHECK(hoverAt(*this, source, {7, 7}).find("*(inlined)*") != std::string::npos);
+    // A variadic function is never inlined, which gets no note
+    CHECK(hoverAt(*this, source, {7, 18}).find("inlined") == std::string::npos);
+    // Nor does the declaration
+    CHECK(hoverAt(*this, source, {1, 16}).find("inlined") == std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "hover_says_nothing_about_inlining_below_o2")
+{
+    std::string source = R"(local function add(a: number, b: number): number
+    return a + b
+end
+print(add(1, 2))
+)";
+
+    CHECK(hoverAt(*this, source, {3, 7}).find("inlined") == std::string::npos);
+}
+
 TEST_SUITE_END();

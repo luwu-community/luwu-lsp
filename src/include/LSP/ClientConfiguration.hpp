@@ -101,13 +101,17 @@ struct ClientInlayHintsConfiguration
     /// Minimum number of lines a block must span (from its opening keyword to `end`) before a
     /// block end hint is shown for it.
     size_t blockEndHintsMinLines = 35;
+    /// Luwu: show the compiler's remarks (what it inlined, unrolled, couldn't optimize) at the end of the lines they're
+    /// about, for a module compiled the way the runtime would compile it.
+    bool compilerRemarks = false;
 
     inline bool operator==(const ClientInlayHintsConfiguration& rhs) const
     {
         return this->parameterNames == rhs.parameterNames && this->variableTypes == rhs.variableTypes && this->parameterTypes == rhs.parameterTypes &&
                this->functionReturnTypes == rhs.functionReturnTypes && this->hideHintsForErrorTypes == rhs.hideHintsForErrorTypes &&
                this->hideHintsForMatchingParameterNames == rhs.hideHintsForMatchingParameterNames && this->typeHintMaxLength == rhs.typeHintMaxLength &&
-               this->blockEndHints == rhs.blockEndHints && this->blockEndHintsMinLines == rhs.blockEndHintsMinLines;
+               this->blockEndHints == rhs.blockEndHints && this->blockEndHintsMinLines == rhs.blockEndHintsMinLines &&
+               this->compilerRemarks == rhs.compilerRemarks;
     }
 
     inline bool operator!=(const ClientInlayHintsConfiguration& rhs) const
@@ -116,7 +120,8 @@ struct ClientInlayHintsConfiguration
     }
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientInlayHintsConfiguration, parameterNames, variableTypes, parameterTypes, functionReturnTypes,
-    hideHintsForErrorTypes, hideHintsForMatchingParameterNames, typeHintMaxLength, makeInsertable, blockEndHints, blockEndHintsMinLines);
+    hideHintsForErrorTypes, hideHintsForMatchingParameterNames, typeHintMaxLength, makeInsertable, blockEndHints, blockEndHintsMinLines,
+    compilerRemarks);
 
 struct ClientHoverConfiguration
 {

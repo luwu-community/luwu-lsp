@@ -235,9 +235,34 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             }
         }
 
+        if (local->destructure)
+            addDestructuredKeyTokens(*local->destructure);
+
         // Luwu Destructuring: a field desugars to `h1 = (destructured).h1`, whose made-up read sits on the key; the
         // bound name's own token is the only one it gets
         return !local->isDesugaredField();
+    }
+
+    bool visit(Luau::AstStatForIn* forIn) override
+    {
+        for (const auto* pattern : forIn->destructure)
+            if (pattern)
+                addDestructuredKeyTokens(*pattern);
+        return true;
+    }
+
+    // Luwu Destructuring: the key of `h1 as H1` or `tar as .{gz}` is only the field being read, and what follows the
+    // `as` is what gets bound. The key is coloured as a property, like the `t.h1` it reads, so it isn't mistaken for
+    // a local. A key without `as` is the binding itself and gets the bound local's token.
+    void addDestructuredKeyTokens(const Luau::AstDestructurePattern& pattern)
+    {
+        for (const auto& field : pattern.fields)
+        {
+            if (field.asLocation && field.keyLocation.begin != field.keyLocation.end)
+                tokens.emplace_back(SemanticToken{
+                    field.keyLocation.begin, field.keyLocation.end, lsp::SemanticTokenTypes::Property, lsp::SemanticTokenModifiers::None});
+            addDestructuredKeyTokens(field.target);
+        }
     }
 
     // bool visit(Luau::AstStatFunction* func) override
