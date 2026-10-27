@@ -34,4 +34,18 @@ std::optional<std::string> fixAllTitle(Luau::LintWarning::Code code);
 std::vector<lsp::TextEdit> computeFixAllEdits(
     Luau::LintWarning::Code code, const std::vector<Luau::LintWarning>& warnings, Luau::AstStatBlock* root, const TextDocument& textDocument);
 
+// Luwu Do Expressions: one condition of `if <condition> then return end` as a guard: `x or return` for `not x`, and
+// `x and return` for anything else, so no condition gets flipped
+struct GuardCondition
+{
+    std::string tested;
+    // "or" or "and"
+    const char* joiner;
+};
+
+// The guards that replace `if <condition> then return end`, one per condition of its `or` chain. Empty when one would
+// start with `-`, a string or `(`, which continue the line above, or end in an if-else expression, which would take the
+// `and` or `or`.
+std::vector<GuardCondition> guardConditions(Luau::AstExpr* condition, const TextDocument& textDocument);
+
 } // namespace Luau::LanguageServer::LintFixes

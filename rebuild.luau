@@ -61,6 +61,7 @@ const parsed = args.parse(
         args.flag("--release", "Compiles the luwu-lsp binary in --config Release mode (defaults to false)"),
         args.flag("--static", "Linux only: fully statically link luwu-lsp into ./build-static, so it runs on distros with an older glibc than yours"),
         args.flag("--clean", "remove the build dir and reconfigure (do this luwu-lsp doesnt compile and you think partial build is stale)"),
+        args.flag("--full-debug-info", "Linux/macOS: compile with -g instead of -g1, so a debugger can show local variables (reconfigures the build dir both ways)"),
         args.named("--targets", "Which of the CMake build targets should we build? Defaults to CLI (Luwu.LanguageServer.CLI). Specify multiple targets by separating them with commas.")
             :default("CLI")
     ),
@@ -169,6 +170,22 @@ const function can_crash_editor()
     return false
 end
 
+--- clang compiles Luwu's Analysis sources ~40% faster than gcc (ConstraintGenerator.cpp takes 14s instead of 26s)
+const use_clang = env.os == "Linux" and #env.where("clang++") > 0 and #env.where("clang") > 0
+const has_ccache = #env.where("ccache") > 0
+
+--- -g1 keeps the line tables backtraces need but drops local variables, and compiles ~30% faster than -g.
+--- MSVC keeps CMake's own flags.
+const relwithdebinfo_flags: string? =
+    if env.os == "Windows" then nil
+    elseif parsed.flags["--full-debug-info"] == true then "-O2 -g -DNDEBUG"
+    else "-O2 -g1 -DNDEBUG"
+
+--- the value CMakeCache.txt holds for `key`, whatever its type
+const function cache_value(content: string, key: string): string?
+    return (string.match(content, `\n{key}:%w+=([^\n]*)`))
+end
+
 const function should_reconfigure(luwu_path: string)
     if fs.path.exists(build_dir_path) == false or parsed.flags["--clean"] == true then
         return true
@@ -188,6 +205,19 @@ const function should_reconfigure(luwu_path: string)
     const werror_splits = str.split(content, "LSP_WERROR:BOOL=")
     const current_werror = if werror_splits[2] then str.splitfront(werror_splits[2], "\n", 1)[1] else nil
     if current_werror ~= (if is_release then "OFF" else "ON") then
+        return true
+    end
+    -- cmake only picks a compiler when it configures a fresh build dir
+    const compiler = cache_value(content, "CMAKE_CXX_COMPILER") or ""
+    if use_clang and not str.endswith(compiler, "clang++") then
+        return true
+    end
+    const launcher = cache_value(content, "CMAKE_CXX_COMPILER_LAUNCHER")
+    if has_ccache and launcher == nil then
+        return true
+    end
+    const flags = cache_value(content, "CMAKE_CXX_FLAGS_RELWITHDEBINFO")
+    if relwithdebinfo_flags and flags ~= relwithdebinfo_flags then
         return true
     end
     return false
@@ -223,6 +253,18 @@ const function clean_and_configure(luwu_path: string)
     }
     if has_lld then
         table.insert(configure_args, "-DCMAKE_LINKER_TYPE:STRING=LLD")
+    end
+    if use_clang then
+        table.insert(configure_args, "-DCMAKE_CXX_COMPILER=clang++")
+        table.insert(configure_args, "-DCMAKE_C_COMPILER=clang")
+    end
+    if has_ccache then
+        table.insert(configure_args, "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+        table.insert(configure_args, "-DCMAKE_C_COMPILER_LAUNCHER=ccache")
+    end
+    if relwithdebinfo_flags then
+        table.insert(configure_args, `-DCMAKE_CXX_FLAGS_RELWITHDEBINFO={relwithdebinfo_flags}`)
+        table.insert(configure_args, `-DCMAKE_C_FLAGS_RELWITHDEBINFO={relwithdebinfo_flags}`)
     end
     if is_static then
         -- glibc, libstdc++ and libgcc all baked in. Safe because nothing here uses NSS

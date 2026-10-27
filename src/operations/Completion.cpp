@@ -87,6 +87,29 @@ static bool whenGuardLoopHasDo(const std::vector<Luau::AstNode*>& ancestry, cons
     return true;
 }
 
+// Luwu do expressions and table comprehensions never take an `end`: a `do` expression ends at its `give` (or another
+// leaving statement) and a comprehension at its `}`. Returns the index of the first node in `ancestry` inside the
+// innermost of them that can still need an `end` or a `do`, or 0 when the cursor is in neither. A `do` expression's
+// own body is skipped, and so are a comprehension's `for` clauses up to its item.
+static size_t firstNodeNeedingEnd(const std::vector<Luau::AstNode*>& ancestry)
+{
+    for (size_t i = ancestry.size(); i-- > 0;)
+    {
+        if (auto* exprDo = ancestry[i]->as<Luau::AstExprDo>())
+            return i + 1 < ancestry.size() && ancestry[i + 1] == exprDo->body ? i + 2 : i + 1;
+
+        if (ancestry[i]->is<Luau::AstExprTableComprehension>())
+        {
+            for (size_t j = i + 1; j < ancestry.size(); ++j)
+                if (ancestry[j]->is<Luau::AstStatComprehensionItem>())
+                    return j + 1;
+            return ancestry.size();
+        }
+    }
+
+    return 0;
+}
+
 void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
 {
     auto moduleName = fileResolver.getModuleName(params.textDocument.uri);
@@ -181,8 +204,13 @@ void WorkspaceFolder::endAutocompletion(const lsp::CompletionParams& params)
     if (parentNode && shouldSuppressKeywordInsertion(parentNode, cursorIsInErrorNode))
         return;
 
+    size_t firstWalked = firstNodeNeedingEnd(ancestry);
+    // A comprehension's `for` clause ends with `give` or `do` rather than a statement loop's `do`
+    if (parentNode && std::find(ancestry.begin() + firstWalked, ancestry.end(), parentNode) == ancestry.end())
+        parentNode = nullptr;
+
     auto unclosedBlock = false;
-    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+    for (auto it = ancestry.rbegin(); it != ancestry.rend() - firstWalked; ++it)
     {
         if (auto* statForIn = (*it)->as<Luau::AstStatForIn>(); statForIn && !statForIn->body->hasEnd)
             unclosedBlock = true;

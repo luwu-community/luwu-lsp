@@ -19,6 +19,7 @@
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuwuDoExpr)
+LUAU_FASTFLAG(DebugLuwuPoperators)
 
 namespace
 {
@@ -141,9 +142,24 @@ struct FindBracketListAtPosition : Luau::AstVisitor
 
     bool visit(Luau::AstExprTable* node) override
     {
-        if (node->items.size > 0 && node->location.containsClosed(targetPosition) && startsWith(node->location, '{'))
+        if (node->items.size == 0 || !node->location.containsClosed(targetPosition))
+            return true;
+
+        // Luwu Destructuring (rfcs/destructuring.md): a `.{a, b}` table starts at its `.`, and only the braces are laid
+        // out
+        Luau::Location location = node->location;
+        if (startsWith(location, '.'))
         {
-            BracketList list{node->location, {}, "entry", "entries", /* padded= */ true, /* trailingComma= */ true};
+            std::string text = textDocument.getText();
+            size_t open = skipWhitespaceAndComments(text, textDocument.offsetAt(textDocument.convertPosition(location.begin)) + 1);
+            if (open >= text.size() || text[open] != '{')
+                return true;
+            location.begin = textDocument.convertPosition(textDocument.positionAt(open));
+        }
+
+        if (startsWith(location, '{'))
+        {
+            BracketList list{location, {}, "entry", "entries", /* padded= */ true, /* trailingComma= */ true};
             for (const auto& item : node->items)
                 list.itemEnds.push_back(item.value->location.end);
             result = std::move(list);
@@ -514,6 +530,139 @@ void generateDestructureLayoutAction(const lsp::DocumentUri& uri, const lsp::Cod
     }
     else if (auto text = layOutDestructureOnePerLine(at.location, textDocument))
         addListLayoutAction(uri, context, "Put each field on its own line", range, *text, result);
+}
+
+// Luwu Table Comprehensions (rfcs/table-comprehensions.md): the innermost comprehension `position` sits in. Like a
+// bracket list, it isn't offered from inside a function body in it.
+struct FindComprehensionAtPosition : Luau::AstVisitor
+{
+    Luau::Position targetPosition;
+    Luau::AstExprTableComprehension* result = nullptr;
+
+    explicit FindComprehensionAtPosition(const Luau::Position& position)
+        : targetPosition(position)
+    {
+    }
+
+    bool visit(Luau::AstExprFunction* node) override
+    {
+        if (node->body && node->body->location.containsClosed(targetPosition))
+            result = nullptr;
+        return true;
+    }
+
+    bool visit(Luau::AstExprTableComprehension* node) override
+    {
+        if (node->location.containsClosed(targetPosition))
+            result = node;
+        return true;
+    }
+};
+
+// Where each clause of a comprehension starts: every `for` and `when`, then the `give`. Empty for an item written as a
+// `do` block, which has statements of its own to lay out.
+std::vector<Luau::Position> comprehensionClauseStarts(const Luau::AstExprTableComprehension* node)
+{
+    if (!node->item || !node->item->hasGive)
+        return {};
+
+    std::vector<Luau::Position> starts;
+    std::optional<Luau::Position> give;
+    Luau::AstStat* stat = node->loop;
+    while (stat)
+    {
+        Luau::AstStatBlock* body = nullptr;
+        Luau::AstStatIf* guard = nullptr;
+        if (auto loop = stat->as<Luau::AstStatFor>())
+        {
+            starts.push_back(loop->forLocation.begin);
+            body = loop->body;
+            guard = loop->whenGuard;
+            give = loop->doLocation.begin;
+        }
+        else if (auto loop = stat->as<Luau::AstStatForIn>())
+        {
+            starts.push_back(loop->forLocation.begin);
+            body = loop->body;
+            guard = loop->whenGuard;
+            give = loop->doLocation.begin;
+        }
+        else
+            break;
+
+        if (guard)
+        {
+            starts.push_back(guard->ifLocation.begin);
+            // the first clause can carry the `when` the guard starts at
+            for (const auto& clause : guard->clauses)
+                if (clause.whenLocation && clause.whenLocation->begin != guard->ifLocation.begin)
+                    starts.push_back(clause.whenLocation->begin);
+            body = guard->thenbody;
+        }
+
+        // the next `for` clause, or the item, ends the body
+        stat = body && body->body.size > 0 ? body->body.data[body->body.size - 1] : nullptr;
+    }
+
+    if (!give)
+        return {};
+    starts.push_back(*give);
+    return starts;
+}
+
+// Rewrites a comprehension between one clause per line (`for`, each `when` and `give` lined up one level in) and all
+// on one line
+void generateComprehensionLayoutAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context,
+    const Luau::AstExprTableComprehension* node, const std::vector<Luau::Comment>& comments, const TextDocument& textDocument,
+    std::vector<lsp::CodeAction>& result)
+{
+    for (const auto& comment : comments)
+        if (node->location.encloses(comment.location))
+            return;
+
+    std::vector<Luau::Position> starts = comprehensionClauseStarts(node);
+    if (starts.empty())
+        return;
+
+    lsp::Range range = textDocument.convertLocation(node->location);
+    std::string text = textDocument.getText(range);
+    if (text.size() < 2 || text.front() != '{' || text.back() != '}')
+        return;
+    size_t listStart = textDocument.offsetAt(range.start);
+
+    std::vector<std::string> clauses;
+    for (size_t i = 0; i < starts.size(); ++i)
+    {
+        size_t begin = textDocument.offsetAt(textDocument.convertPosition(starts[i])) - listStart;
+        size_t end = i + 1 < starts.size() ? textDocument.offsetAt(textDocument.convertPosition(starts[i + 1])) - listStart : text.size() - 1;
+        if (begin >= end || end >= text.size())
+            return;
+        while (end > begin && isspace(static_cast<unsigned char>(text[end - 1])))
+            --end;
+        clauses.push_back(text.substr(begin, end - begin));
+    }
+
+    if (text.find('\n') != std::string::npos)
+    {
+        std::string newText = "{";
+        for (const auto& clause : clauses)
+        {
+            // a clause spanning lines of its own can't be joined into one
+            if (clause.find('\n') != std::string::npos)
+                return;
+            newText += " " + clause;
+        }
+        addListLayoutAction(uri, context, "Put clauses on one line", range, newText + " }", result);
+    }
+    else
+    {
+        std::string baseIndent = getLineIndentation(textDocument, node->location.begin.line);
+        std::string clauseIndent = baseIndent + detectIndentUnit(textDocument);
+        std::string newText = "{\n";
+        for (const auto& clause : clauses)
+            newText += clauseIndent + clause + "\n";
+        addListLayoutAction(uri, context, "Put each clause on its own line", range, newText + baseIndent + "}", result);
+    }
 }
 
 void addEditsAction(const lsp::DocumentUri& uri, const lsp::CodeActionContext& context, std::string title, std::vector<lsp::TextEdit> edits,
@@ -1517,73 +1666,138 @@ Luau::AstExpr* stripGroups(Luau::AstExpr* expr)
     return expr;
 }
 
-// A statement has to start with a name, or a call or index on one, for `x or return` to parse as one: `not` can't start
-// a statement, and a `(` would continue the line before it as a call
-bool startsWithName(Luau::AstExpr* expr)
+// Luwu Push and Pop Operators (rfcs/push-pop-operators.md): an append of one value as a statement, `t <+ v` or
+// `table.insert(t, v)`
+struct Append
 {
-    while (true)
+    Luau::AstStat* stat = nullptr;
+    Luau::AstExpr* target = nullptr;
+    Luau::AstExpr* value = nullptr;
+    bool isPush = false;
+};
+
+std::optional<Append> asAppend(Luau::AstStat* stat)
+{
+    if (auto push = stat->as<Luau::AstStatPush>())
     {
-        if (auto binary = expr->as<Luau::AstExprBinary>())
-            expr = binary->left;
-        else if (auto call = expr->as<Luau::AstExprCall>())
-            expr = call->func;
-        else if (auto index = expr->as<Luau::AstExprIndexName>())
-            expr = index->expr;
-        else if (auto index = expr->as<Luau::AstExprIndexExpr>())
-            expr = index->expr;
-        else if (auto instantiate = expr->as<Luau::AstExprInstantiate>())
-            expr = instantiate->expr;
-        else
-            return expr->is<Luau::AstExprLocal>() || expr->is<Luau::AstExprGlobal>();
+        if (push->values.size != 1)
+            return std::nullopt;
+        return Append{stat, push->target, push->values.data[0], true};
     }
+
+    auto statExpr = stat->as<Luau::AstStatExpr>();
+    auto call = statExpr ? statExpr->expr->as<Luau::AstExprCall>() : nullptr;
+    if (!call || call->self || call->args.size != 2)
+        return std::nullopt;
+
+    auto function = call->func->as<Luau::AstExprIndexName>();
+    auto library = function ? function->expr->as<Luau::AstExprGlobal>() : nullptr;
+    if (!library || library->name != "table" || function->index != "insert")
+        return std::nullopt;
+    return Append{stat, call->args.data[0], call->args.data[1], false};
 }
 
-// An if-then-else expression at the end would take the `or return` into its `else` branch
-bool endsWithIfElse(Luau::AstExpr* expr)
-{
-    while (true)
-    {
-        if (auto binary = expr->as<Luau::AstExprBinary>())
-            expr = binary->right;
-        else if (auto unary = expr->as<Luau::AstExprUnary>())
-            expr = unary->expr;
-        else
-            return expr->is<Luau::AstExprIfElse>();
-    }
-}
-
-// The condition `x or return` needs in place of the guard's: `not x` gives `x`, and `==` and `~=` swap. Anything else
-// would need a `not` in front, which can't start a statement.
-std::optional<std::string> guardCondition(const TextDocument& textDocument, Luau::AstExpr* condition)
+// `append` written the other way, or nothing when that would push a different number of values. `t <+ f()` pushes every
+// value `f` returns, so it has no `table.insert` form; `table.insert(t, f())` becomes `t <+ (f())`, which matches it
+// whenever `f` returns one value (with two, `table.insert` takes the first as a position).
+std::optional<std::string> switchedAppend(const Append& append, const TextDocument& textDocument)
 {
     auto text = [&](Luau::AstExpr* expr)
     {
         return textDocument.getText(textDocument.convertLocation(expr->location));
     };
 
-    condition = stripGroups(condition);
-
-    Luau::AstExpr* guard = nullptr;
-    std::string guardText;
-    if (auto unary = condition->as<Luau::AstExprUnary>(); unary && unary->op == Luau::AstExprUnary::Op::Not)
+    bool manyValues = append.value->is<Luau::AstExprCall>() || append.value->is<Luau::AstExprVarargs>();
+    if (append.isPush)
     {
-        // `or` binds loosest, so whatever was in the parentheses needs none now
-        guard = stripGroups(unary->expr);
-        guardText = text(guard);
-    }
-    else if (auto binary = condition->as<Luau::AstExprBinary>();
-             binary && (binary->op == Luau::AstExprBinary::CompareEq || binary->op == Luau::AstExprBinary::CompareNe))
-    {
-        guard = binary;
-        guardText = text(binary->left) + (binary->op == Luau::AstExprBinary::CompareEq ? " ~= " : " == ") + text(binary->right);
+        if (manyValues)
+            return std::nullopt;
+        return "table.insert(" + text(append.target) + ", " + text(append.value) + ")";
     }
 
-    if (!guard || !startsWithName(guard) || endsWithIfElse(guard))
-        return std::nullopt;
-    return guardText;
+    std::string value = manyValues ? "(" + text(append.value) + ")" : text(append.value);
+    return text(append.target) + " <+ " + value;
 }
 
-// Luwu Do Expressions: `if not x then return y end` -> `x` with `or return y` on the next line, one level in
+// Whether two appends add to the same container: the same local, or the same code (`self.items`)
+bool sameAppendTarget(Luau::AstExpr* a, Luau::AstExpr* b, const TextDocument& textDocument)
+{
+    auto localA = stripGroups(a)->as<Luau::AstExprLocal>();
+    auto localB = stripGroups(b)->as<Luau::AstExprLocal>();
+    if (localA || localB)
+        return localA && localB && localA->local == localB->local;
+
+    auto text = [&](Luau::AstExpr* expr)
+    {
+        return textDocument.getText(textDocument.convertLocation(expr->location));
+    };
+    return text(a) == text(b);
+}
+
+// Every append statement in the module, and the one under the cursor
+struct FindAppends : Luau::AstVisitor
+{
+    Luau::Position position;
+    std::vector<Append> appends;
+    std::optional<Append> atCursor;
+
+    explicit FindAppends(Luau::Position position)
+        : position(position)
+    {
+    }
+
+    bool visit(Luau::AstStat* node) override
+    {
+        if (std::optional<Append> append = asAppend(node))
+        {
+            appends.push_back(*append);
+            if (node->location.containsClosed(position))
+                atCursor = append;
+        }
+        return true;
+    }
+};
+
+// Luwu Push and Pop Operators (rfcs/push-pop-operators.md): `t <+ v` <-> `table.insert(t, v)` on the append under the
+// cursor, and on every append to the same container written the same way. `<+` is only offered where it parses: a
+// Luwu file with the operator on.
+void generateAppendSwitches(const lsp::DocumentUri& uri, Luau::AstStatBlock* root, const TextDocument& textDocument, Luau::Position position,
+    std::vector<lsp::CodeAction>& result)
+{
+    FindAppends finder(position);
+    root->visit(&finder);
+    if (!finder.atCursor)
+        return;
+
+    const Append& here = *finder.atCursor;
+    bool pushAvailable = FFlag::DebugLuwuPoperators && isLuwuFile(textDocument);
+    if (!here.isPush && !pushAvailable)
+        return;
+
+    const char* to = here.isPush ? "'table.insert'" : "'<+'";
+    if (std::optional<std::string> switched = switchedAppend(here, textDocument))
+        addSingleEditAction(uri, std::string("Switch this append to ") + to, lsp::CodeActionKind::QuickFix, false,
+            {{textDocument.convertLocation(here.stat->location), *switched}}, std::nullopt, result);
+
+    std::vector<lsp::TextEdit> edits;
+    for (const Append& other : finder.appends)
+    {
+        if (other.isPush != here.isPush || !sameAppendTarget(other.target, here.target, textDocument))
+            continue;
+        if (std::optional<std::string> switched = switchedAppend(other, textDocument))
+            edits.push_back({textDocument.convertLocation(other.stat->location), *switched});
+    }
+
+    if (edits.size() > 1)
+    {
+        std::string target = textDocument.getText(textDocument.convertLocation(here.target->location));
+        addSingleEditAction(uri, "Switch all appends to '" + target + "' to " + to, lsp::CodeActionKind::QuickFix, false, std::move(edits),
+            std::nullopt, result);
+    }
+}
+
+// Luwu Do Expressions: `if not x then return y end` -> `x` with `or return y` on the next line, one level in, and
+// `if x then return y end` the same with `and`. An `if` with several conditions gets one guard per condition.
 void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* node, const Luau::SourceModule& sourceModule,
     const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
 {
@@ -1600,8 +1814,9 @@ void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* n
             return;
     }
 
-    std::optional<std::string> condition = guardCondition(textDocument, node->condition);
-    if (!condition)
+    std::vector<Luau::LanguageServer::LintFixes::GuardCondition> conditions =
+        Luau::LanguageServer::LintFixes::guardConditions(node->condition, textDocument);
+    if (conditions.empty())
         return;
 
     Luau::AstStat* leave = node->thenbody->body.data[0];
@@ -1616,10 +1831,17 @@ void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* n
     }
 
     std::string indent = getLineIndentation(textDocument, node->location.begin.line);
-    std::string newText = *condition + "\n" + indent + detectIndentUnit(textDocument) + "or " + leaveText;
+    std::string newText;
+    for (const auto& condition : conditions)
+    {
+        newText += newText.empty() ? "" : "\n" + indent;
+        newText += condition.tested + "\n" + indent + detectIndentUnit(textDocument) + condition.joiner + " " + leaveText;
+    }
 
-    addSingleEditAction(uri, std::string("Rewrite as 'or ") + leaveKeyword(leave) + "' guard", lsp::CodeActionKind::RefactorRewrite, false,
-        {{textDocument.convertLocation(node->location), newText}}, std::nullopt, result);
+    std::string title = conditions.size() == 1 ? std::string("Rewrite as '") + conditions[0].joiner + " " + leaveKeyword(leave) + "' guard"
+                                               : "Rewrite as one guard per condition";
+    addSingleEditAction(uri, title, lsp::CodeActionKind::RefactorRewrite, false, {{textDocument.convertLocation(node->location), newText}},
+        std::nullopt, result);
 }
 } // namespace
 
@@ -1729,6 +1951,8 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         sourceModule->root->visit(&traitListFinder);
         FindDestructurePatternAtPosition destructureFinder(requestRange.begin);
         sourceModule->root->visit(&destructureFinder);
+        FindComprehensionAtPosition comprehensionFinder(requestRange.begin);
+        sourceModule->root->visit(&comprehensionFinder);
 
         std::optional<Luau::Location> innermost;
         std::function<void()> layOut;
@@ -1759,6 +1983,13 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                 {
                     generateDestructureLayoutAction(params.textDocument.uri, params.context, *destructureFinder.result, *textDocument, layoutActions);
                 });
+        if (comprehensionFinder.result)
+            consider(comprehensionFinder.result->location,
+                [&]
+                {
+                    generateComprehensionLayoutAction(params.textDocument.uri, params.context, comprehensionFinder.result,
+                        sourceModule->commentLocations, *textDocument, layoutActions);
+                });
         if (layOut)
             layOut();
 
@@ -1782,6 +2013,10 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             }
         }
     }
+
+    // Luwu Push and Pop Operators (rfcs/push-pop-operators.md): `t <+ v` <-> `table.insert(t, v)` under the cursor
+    if (params.context.wants(lsp::CodeActionKind::QuickFix))
+        generateAppendSwitches(params.textDocument.uri, sourceModule->root, *textDocument, requestRange.begin, result);
 
     // Quick fixes from lint warnings
     if (params.context.wants(lsp::CodeActionKind::QuickFix))

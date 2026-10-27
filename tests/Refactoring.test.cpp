@@ -4,6 +4,7 @@
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuGenericNominals)
+LUAU_FASTFLAG(LuwuDoExpr)
 
 TEST_SUITE_BEGIN("Refactoring");
 
@@ -417,6 +418,181 @@ print(x)
     // Resolve should produce no edit when variable is reassigned
     auto resolved = workspace.codeActionResolve(*action, nullptr);
     CHECK_FALSE(resolved.edit);
+}
+
+// Inline Function
+
+// The source after the inline refactoring titled `title`, offered with the cursor at `position`. Nullopt when it isn't
+// offered.
+static std::optional<std::string> applyInline(
+    Fixture& fixture,
+    const std::string& fileName,
+    const std::string& source,
+    lsp::Position position,
+    const std::string& title
+)
+{
+    auto uri = fixture.newDocument(fileName, source);
+
+    lsp::CodeActionParams params;
+    params.textDocument.uri = uri;
+    params.range = {position, position};
+    params.context.only = {lsp::CodeActionKind::RefactorInline};
+
+    auto action = findCodeAction(fixture.workspace.codeAction(params, nullptr), title);
+    if (!action)
+        return std::nullopt;
+
+    auto resolved = fixture.workspace.codeActionResolve(*action, nullptr);
+    REQUIRE(resolved.edit);
+    return applyEdit(source, resolved.edit->changes.at(uri));
+}
+
+TEST_CASE_FIXTURE(Fixture, "inline_function_single_return")
+{
+    auto source = R"(
+-- Whether n is big
+local function is_big(n)
+    return n > 10
+end
+
+local x = 5
+if is_big(x) then
+    print(x)
+end
+)";
+    // Cursor on "is_big" in the call
+    auto inlined = applyInline(*this, "test.luau", source, {7, 5}, "Inline function 'is_big'");
+    REQUIRE(inlined);
+    CHECK_EQ(*inlined, R"(
+local x = 5
+if x > 10 then
+    print(x)
+end
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "inline_function_parenthesizes_operands_and_keeps_other_uses")
+{
+    auto source = R"(
+local function sum(a, b)
+    return a + b
+end
+local x = sum(1, 2) * 3
+local y = sum(x, 4)
+)";
+    auto inlined = applyInline(*this, "test.luau", source, {4, 11}, "Inline function 'sum'");
+    REQUIRE(inlined);
+    CHECK_EQ(*inlined, R"(
+local function sum(a, b)
+    return a + b
+end
+local x = (1 + 2) * 3
+local y = sum(x, 4)
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "inline_function_not_offered_when_a_name_is_shadowed")
+{
+    auto source = R"(
+local limit = 10
+local function over(n)
+    return n > limit
+end
+do
+    local limit = 3
+    print(over(5))
+end
+)";
+    CHECK_FALSE(applyInline(*this, "test.luau", source, {7, 11}, "Inline function 'over'"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "inline_variable_not_offered_for_functions")
+{
+    auto source = R"(
+local function f()
+    return 1
+end
+print(f())
+)";
+    CHECK_FALSE(applyInline(*this, "test.luau", source, {4, 6}, "Inline variable 'f'"));
+}
+
+// Luwu Do Expressions (rfcs/do-expressions.md): a body that isn't a single `return` is inlined as a do expression
+
+TEST_CASE_FIXTURE(Fixture, "inline_function_as_do_expression")
+{
+    ScopedFastFlag luwuDoExpr{FFlag::LuwuDoExpr, true};
+
+    auto source = R"(
+const function count_of(text: string): number
+    if text == "" then
+        return 0
+    end
+    const n = tonumber(text)
+    return n or 0
+end
+
+for _, text in { "1", "2" } do
+    const total = count_of(text)
+    print(total)
+end
+)";
+    auto inlined = applyInline(*this, "test.luwu", source, {10, 19}, "Inline as do-give expression");
+    REQUIRE(inlined);
+    CHECK_EQ(*inlined, R"(
+for _, text in { "1", "2" } do
+    const total = do
+        if text == "" then
+            give 0
+        end
+        const n = tonumber(text)
+        give n or 0
+    print(total)
+end
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "inline_function_as_do_expression_binds_arguments_with_effects")
+{
+    ScopedFastFlag luwuDoExpr{FFlag::LuwuDoExpr, true};
+
+    auto source = R"(
+const function twice(n: number): number
+    return n + n
+end
+
+const function read(): number
+    return 1
+end
+
+const x = twice(read())
+)";
+    auto inlined = applyInline(*this, "test.luwu", source, {9, 11}, "Inline as do-give expression");
+    REQUIRE(inlined);
+    CHECK_EQ(*inlined, R"(
+const function read(): number
+    return 1
+end
+
+const x = do
+    const n: number = read()
+    give n + n
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "inline_function_as_do_expression_not_offered_in_luau")
+{
+    ScopedFastFlag luwuDoExpr{FFlag::LuwuDoExpr, true};
+
+    auto source = R"(
+local function count_of(text: string): number
+    local n = tonumber(text)
+    return n or 0
+end
+local total = count_of("1")
+)";
+    CHECK_FALSE(applyInline(*this, "test.luau", source, {5, 15}, "Inline as do-give expression"));
 }
 
 // Luwu Traits (rfcs/classes/traits.md): Extract class into a trait

@@ -10,6 +10,8 @@ LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuDestructuring)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuDeclareStatements)
+LUAU_FASTFLAG(LuwuDoExpr)
+LUAU_FASTFLAG(LuwuTableComprehensions)
 
 std::optional<lsp::CompletionItem> getItem(const std::vector<lsp::CompletionItem>& items, const std::string& label)
 {
@@ -2147,6 +2149,88 @@ TEST_CASE_FIXTURE(Fixture, "autocomplete_then_when_cursor_after_string_in_if_con
     CHECK_EQ(edits[0].newText, " then");
     CHECK_EQ(edits[1].range, lsp::Range{{marker.line + 1, 0}, {marker.line + 1, 0}});
     CHECK_EQ(edits[1].newText, "        end\n");
+}
+
+static void requireNoEndAutocompletion(Fixture& fixture, const std::string& code)
+{
+    fixture.client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(code);
+    auto uri = fixture.newDocument("foo.luau", source);
+
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    params.context = lsp::CompletionContext{};
+    params.context->triggerCharacter = "\n";
+
+    auto queueSizeBefore = fixture.client->requestQueue.size();
+    fixture.workspace.completion(params, nullptr);
+    REQUIRE_EQ(fixture.client->requestQueue.size(), queueSizeBefore);
+}
+
+TEST_CASE_FIXTURE(Fixture, "no_autocomplete_end_after_do_expression")
+{
+    ScopedFastFlag luwuDoExpr{FFlag::LuwuDoExpr, true};
+
+    requireNoEndAutocompletion(*this, R"(
+        const x = do
+            |
+    )");
+}
+
+TEST_CASE_FIXTURE(Fixture, "no_autocomplete_end_after_table_comprehension_do")
+{
+    ScopedFastFlag luwuDoExpr{FFlag::LuwuDoExpr, true};
+    ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
+
+    requireNoEndAutocompletion(*this, R"(
+        local function search(lines: {string})
+            const r = {
+                for _, id in lines do
+                    |
+            }
+            return r
+        end
+    )");
+}
+
+TEST_CASE_FIXTURE(Fixture, "no_autocomplete_end_or_do_after_table_comprehension_for_clause")
+{
+    ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
+
+    requireNoEndAutocompletion(*this, R"(
+        const r = {
+            for _, id in lines
+            |
+        }
+    )");
+}
+
+TEST_CASE_FIXTURE(Fixture, "autocomplete_end_for_if_inside_do_expression")
+{
+    ScopedFastFlag luwuDoExpr{FFlag::LuwuDoExpr, true};
+    client->globalConfig.completion.autocompleteEnd = true;
+
+    auto [source, marker] = sourceWithMarker(R"(
+        const x = do
+            if cond then
+                |
+            give 1
+    )");
+
+    auto uri = newDocument("foo.luau", source);
+
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    params.context = lsp::CompletionContext{};
+    params.context->triggerCharacter = "\n";
+
+    auto result = workspace.completion(params, nullptr);
+    auto edits = requireEndAutocompletionEdits(client.get(), uri);
+    REQUIRE_EQ(edits.size(), 1);
+    CHECK_EQ(edits[0].newText, "            end\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "dont_mark_type_as_function_kind_when_autocompleting_in_type_context")

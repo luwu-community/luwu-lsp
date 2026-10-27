@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+LUAU_FASTFLAG(DebugLuwuPoperators)
+
 namespace
 {
 
@@ -448,10 +450,316 @@ return f
     auto fix = applyFixAll(*this, source, "LuaGuard");
     REQUIRE(fix);
     CHECK(fix->text.find("    x or return;\n") != std::string::npos);
-    CHECK(fix->text.find("    x ~= y or return 1\n") != std::string::npos);
-    // `not (x > 1) or return` can't start a statement
-    CHECK(fix->text.find("    if x > 1 then return end\n") != std::string::npos);
+    // a condition without `not` is kept as written, with `and`
+    CHECK(fix->text.find("    x == y and return 1\n") != std::string::npos);
+    CHECK(fix->text.find("    x > 1 and return;\n") != std::string::npos);
     CHECK(fix->text.find("    v.ok or (return x, y)\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_guard_splits_several_conditions_into_one_guard_each")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+local function f(r: { ok: boolean, out: string }, t: { { skip: boolean, ready: boolean } })
+    if not r.ok or r.out == "" then return nil end
+    for _, v in t do
+        if v.skip or not v.ready then continue end
+        print(v)
+    end
+    return r.out
+end
+return f
+)";
+    auto fix = applyFixAll(*this, source, "LuaGuard");
+    REQUIRE(fix);
+    // each condition is kept as written: `not x` becomes `x or`, anything else `x and`
+    CHECK(fix->text.find("    r.ok or return nil\n    r.out == \"\" and return nil\n") != std::string::npos);
+    CHECK(fix->text.find("        v.skip and continue\n        v.ready or continue\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "lua_guard_leaves_conditions_that_would_continue_the_line_above")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+local function f(x: number, s: string)
+    if -x > 1 then return end
+    if "a" == s then return end
+    if x + 1 then return end
+    return x
+end
+return f
+)";
+    auto fix = applyFixAll(*this, source, "LuaGuard");
+    REQUIRE(fix);
+    // `-x > 1 and return` and `"a" == s and return` would join the statement above them
+    CHECK(fix->text.find("    if -x > 1 then return end\n") != std::string::npos);
+    CHECK(fix->text.find("    if \"a\" == s then return end\n") != std::string::npos);
+    CHECK(fix->text.find("    x + 1 and return;\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "ambiguous_continuation")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    auto fix = applyQuickFix(*this, R"(
+local function f(xs: { number }, y: number)
+    for _, x in xs do
+        local a = y
+        -x < 0 or break
+        print(a)
+    end
+end
+return f
+)",
+        "End the line above with ';'");
+    REQUIRE(fix);
+    CHECK(fix->text.find("        local a = y;\n        -x < 0 or break\n") != std::string::npos);
+    CHECK_FALSE(fix->preferred);
+}
+
+TEST_CASE_FIXTURE(Fixture, "unflipped_guard")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+local function f(xs: { string }, n: number?, m: number?, k: number?)
+    for _, name in xs do
+        name == "" or continue
+        print(name)
+    end
+    not n or return 1
+    m ~= nil and return 2
+    if k then
+        return 3
+    end
+    print(n, m, k)
+    return 0
+end
+return f
+)";
+    auto fix = applyFixAll(*this, source, "UnflippedGuard");
+    REQUIRE(fix);
+    CHECK(fix->text.find("        name ~= \"\" or continue\n") != std::string::npos);
+    CHECK(fix->text.find("    n or return 1\n") != std::string::npos);
+    CHECK(fix->text.find("    m ~= nil or return 2\n") != std::string::npos);
+    CHECK(fix->text.find("    if not k then\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "loop_concat")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    auto fix = applyQuickFix(*this, R"(
+local function f(words: { string }): string
+    local sentence: string = "> "
+    local count = 0
+    for i, word in words do
+        if i > 1 then
+            sentence ..= " "
+        end
+        sentence = sentence .. word:upper()
+        count += 1
+    end
+    return sentence .. tostring(count)
+end
+return f
+)",
+        "Build a table of parts and join it with 'table.concat' after the loop");
+    REQUIRE(fix);
+    CHECK_EQ(fix->text, R"(
+local function f(words: { string }): string
+    local sentence_parts = { "> " }
+    local count = 0
+    for i, word in words do
+        if i > 1 then
+            table.insert(sentence_parts, " ")
+        end
+        table.insert(sentence_parts, (word:upper()))
+        count += 1
+    end
+    local sentence: string = table.concat(sentence_parts)
+    return sentence .. tostring(count)
+end
+return f
+)");
+    CHECK_FALSE(fix->preferred);
+}
+
+TEST_CASE_FIXTURE(Fixture, "loop_concat_pushes_with_the_push_operator")
+{
+    ScopedLuwuFlags luwu;
+    ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, true};
+    ENABLE_NEW_SOLVER();
+
+    auto fix = applyQuickFix(*this, R"(
+local function f(words: { string }): string
+    local text = ""
+    for _, word in words do
+        text ..= word
+        text = text .. word:gsub("a", "b")
+    end
+    return text
+end
+return f
+)",
+        "Build a table of parts and join it with 'table.concat' after the loop");
+    REQUIRE(fix);
+    // the parentheses keep gsub's count out of the push
+    CHECK(fix->text.find("        text_parts <+ word\n        text_parts <+ (word:gsub(\"a\", \"b\"))\n") != std::string::npos);
+    CHECK(fix->text.find("    local text = table.concat(text_parts)\n    return text\n") != std::string::npos);
+}
+
+// The shapes seal writes into every project's .seal directory: tt.maptostring, csv's parse_line and the guided tour
+TEST_CASE_FIXTURE(Fixture, "loop_concat_fixes_the_shapes_seal_generates")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+    const char* title = "Build a table of parts and join it with 'table.concat' after the loop";
+
+    // loops in both branches of an `if`
+    auto branches = applyQuickFix(*this, R"(
+local function maptostring(t: { [string]: string }, normal: boolean, sep: string): string
+    local result = ""
+    if normal then
+        for k, v in t do
+            result ..= v .. sep
+        end
+    else
+        for k, v in pairs(t) do
+            result ..= v .. sep
+        end
+    end
+    return result
+end
+return maptostring
+)",
+        title);
+    REQUIRE(branches);
+    CHECK(branches->text.find("            table.insert(result_parts, v .. sep)\n        end\n    else\n") != std::string::npos);
+    CHECK(branches->text.find("    end\n    local result = table.concat(result_parts)\n    return result\n") != std::string::npos);
+
+    // reset and read while it's built
+    auto resets = applyQuickFix(*this, R"(
+local function parse_line(graphemes: { string }): { string }
+    local result: { string } = {}
+    local current_word = ""
+    local quotes = 0
+    for _, grapheme in graphemes do
+        if grapheme == "," then
+            table.insert(result, current_word)
+            current_word = ""
+            continue
+        end
+        if quotes == 2 and current_word == "" then
+            continue
+        end
+        current_word ..= grapheme
+    end
+    table.insert(result, current_word)
+    return result
+end
+return parse_line
+)",
+        title);
+    REQUIRE(resets);
+    CHECK(resets->text.find("    local current_word_parts = {}\n") != std::string::npos);
+    CHECK(resets->text.find("            table.insert(result, table.concat(current_word_parts))\n"
+                            "            current_word_parts = {}\n") != std::string::npos);
+    CHECK(resets->text.find("        if quotes == 2 and table.concat(current_word_parts) == \"\" then\n") != std::string::npos);
+    CHECK(resets->text.find("        table.insert(current_word_parts, grapheme)\n") != std::string::npos);
+    CHECK(resets->text.find("    end\n"
+                            "    local current_word = table.concat(current_word_parts)\n"
+                            "    table.insert(result, current_word)\n") != std::string::npos);
+
+    // a `while` loop, with the string used after it
+    auto loop = applyQuickFix(*this, R"(
+local function read(next_text: () -> string?)
+    local text = ""
+    while true do
+        local new_text = next_text()
+        if not new_text then
+            break
+        end
+        text ..= new_text
+    end
+    print(text)
+end
+return read
+)",
+        title);
+    REQUIRE(loop);
+    CHECK(loop->text.find("        table.insert(text_parts, new_text)\n") != std::string::npos);
+    CHECK(loop->text.find("    end\n    local text = table.concat(text_parts)\n    print(text)\n") != std::string::npos);
+
+    // the guided tour never reads its string afterwards, so no joined local is added for LocalUnused to report
+    auto unread = applyQuickFix(*this, R"(
+local function drain(next_text: () -> string?)
+    local text = ""
+    while true do
+        local new_text = next_text()
+        if not new_text then
+            break
+        end
+        text ..= new_text
+    end
+end
+return drain
+)",
+        title);
+    REQUIRE(unread);
+    CHECK(unread->text.find("table.concat") == std::string::npos);
+    CHECK(unread->text.find("    local text_parts = {}\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "loop_concat_only_fixes_the_common_shape")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    // Each reads the string inside an appended value, uses it before the loop, doesn't start from a string literal, or
+    // appends in a closure
+    const char* sources[] = {
+        "local function f(xs: { string })\n    local s = \"\"\n    for _, x in xs do\n        s ..= x .. s\n    end\n    return s\nend\nreturn f\n",
+        "local function f(xs: { string })\n"
+            "    local s = \"\"\n"
+            "    print(s)\n"
+            "    for _, x in xs do\n"
+            "        s ..= x\n"
+            "    end\n"
+            "    return s\n"
+            "end\n"
+            "return f\n",
+        "local function f(xs: { string }, t: string)\n"
+            "    local s = t\n"
+            "    for _, x in xs do\n"
+            "        s ..= x\n"
+            "    end\n"
+            "    return s\n"
+            "end\n"
+            "return f\n",
+        "local function f(xs: { string })\n"
+            "    local s = \"\"\n"
+            "    for _, x in xs do\n"
+            "        local g = function() s ..= x end\n"
+            "        g()\n"
+            "    end\n"
+            "    return s\n"
+            "end\n"
+            "return f\n",
+    };
+
+    for (const char* source : sources)
+    {
+        INFO(source);
+        CHECK_FALSE(applyQuickFix(*this, source, "Build a table of parts and join it with 'table.concat' after the loop"));
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "inline_or_leave")

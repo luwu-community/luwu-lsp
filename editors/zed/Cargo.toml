@@ -1,0 +1,15 @@
+[package]
+name = "zed-luwu"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[lib]
+path = "src/luwu.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7.0"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_path_to_error = "0.1"

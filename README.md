@@ -19,52 +19,32 @@ every configuration.
 
 ## Getting Started
 
-Prebuilt binaries and VS Code extensions are on the
-[`luwu-latest` prerelease](https://github.com/luwu-community/luwu-lsp/releases/tag/luwu-latest). It's rebuilt from the
-`luwu` branch on every push, so download it again to update.
-
-| Platform | VS Code extension | Server only |
-|---|---|---|
-| Windows x64 | `luwu-lsp-win32-x64.vsix` | `luwu-lsp-windows-x64.zip` |
-| macOS (Apple Silicon) | `luwu-lsp-darwin-arm64.vsix` | `luwu-lsp-macos-universal.zip` |
-| macOS (Intel) | `luwu-lsp-darwin-x64.vsix` | `luwu-lsp-macos-universal.zip` |
-| Linux x64 | `luwu-lsp-linux-x64.vsix` | `luwu-lsp-linux-x64.zip` |
-| Linux arm64 | `luwu-lsp-linux-arm64.vsix` | `luwu-lsp-linux-arm64.zip` |
-
-The Linux builds run on any distribution with glibc 2.28 or newer (RHEL 8, Debian 10, Ubuntu 18.10 and later).
-
-### VS Code
-
-The `.vsix` has the server bundled. Run the command for your platform to install or update it.
+The installer sets up luwu-lsp for VS Code, Code - OSS, Cursor, VSCodium, Zed and Helix. It asks which of your editors
+to set up and whether to turn on Roblox support. Before it changes an editor's config it asks, and it backs the file up.
+Run it again to update.
 
 Windows (PowerShell):
 
 ```powershell
-$vsix = "$env:TEMP\luwu-lsp.vsix"
-Invoke-WebRequest "https://github.com/luwu-community/luwu-lsp/releases/download/luwu-latest/luwu-lsp-win32-x64.vsix" -OutFile $vsix
-code --install-extension $vsix
+irm https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1 | iex
 ```
 
-macOS and Linux:
+macOS, Linux and Android (Termux):
 
 ```sh
-case "$(uname -sm)" in
-    "Darwin arm64") target=darwin-arm64 ;;
-    "Darwin x86_64") target=darwin-x64 ;;
-    "Linux x86_64") target=linux-x64 ;;
-    "Linux aarch64") target=linux-arm64 ;;
-esac
-curl -fL -o "${TMPDIR:-/tmp}/luwu-lsp.vsix" "https://github.com/luwu-community/luwu-lsp/releases/download/luwu-latest/luwu-lsp-$target.vsix"
-code --install-extension "${TMPDIR:-/tmp}/luwu-lsp.vsix"
+curl -fsSL https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.sh | sh
 ```
 
-Or download the `.vsix` from the release and pick **Install from VSIX...** in the Extensions view's `...` menu.
+The installer is a [seal](https://github.com/seal-runtime/seal) script,
+[`scripts/install/install.luau`](scripts/install/install.luau). It runs with the seal on your PATH when that's 0.8.1 or
+newer, and otherwise downloads seal to run it and deletes it afterwards (pass `--keep-seal` to keep it). `--help` lists
+its options, which also let it run without a terminal.
 
-Then:
+To install by hand, the server and the VS Code extension for every platform and the Zed extension's source are on
+the [`luwu-latest` prerelease](https://github.com/luwu-community/luwu-lsp/releases/tag/luwu-latest) that every push to
+`luwu` rebuilds.
 
-1. If you have JohnnyMorganz's **Luau Language Server** extension installed, disable it (at least in workspaces where you
-   use Luwu). Otherwise both extensions start a server on the same files.
-2. Run **Developer: Reload Window**.
+### VS Code
 
 #### Settings
 
@@ -84,6 +64,15 @@ and it's easy to change the `luau-lsp.*` copy that a `luwu.*` value then overrid
 }
 ```
 
+### Zed
+
+The Luwu extension for Zed ([`editors/zed`](editors/zed/README.md)) adds the Luwu and Luau languages, highlighting,
+snippets and file icons and runs luwu-lsp for both. Until it's published, Zed builds it from source as a dev extension
+with the `cargo` on your PATH. After the installer finishes, run `zed: install dev extension` in Zed and pick the folder
+the installer names. To install it by hand, unzip `luwu-zed-extension.zip` from the release (or take `editors/zed` from
+a clone) and pick that folder instead. Uninstall zed-luau first: with both installed, Zed starts two servers for
+`.luau` files. The extension's settings and what Zed can't do yet are in its [README](editors/zed/README.md).
+
 ### Other editors
 
 Download the server zip for your platform and unzip `luwu-lsp` (`luwu-lsp.exe` on Windows) somewhere on your `PATH`. Then
@@ -97,7 +86,7 @@ The server also typechecks from the command line:
 luwu-lsp analyze --defs=globals.d.luau src/
 ```
 
-The bundled clients in [`editors/`](editors/README.md) are inherited from luau-lsp.
+Apart from the VS Code and Zed extensions, the clients in [`editors/`](editors/README.md) are inherited from luau-lsp.
 
 ### Build From Source
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" width="64" height="64">
+  <!-- A Luau configuration file (.luaurc, .config.luau): the Luau icon with a gear -->
+  <svg x="0" y="0" width="64" height="64" viewBox="0 0 60 60">
+    <path
+     id="rect24"
+     style="fill:#498ba7;fill-opacity:1"
+     d="M 15.857422 5.5058594 L 5.5058594 44.142578 L 44.142578 54.494141 L 54.494141 15.857422 L 15.857422 5.5058594 z M 36.695312 15.398438 L 49.369141 18.794922 L 45.972656 31.466797 L 33.300781 28.072266 L 36.695312 15.398438 z " />
+  </svg>
+  <path d="M 73.5 58.3 L 72.2 63.7 L 68.0 63.2 L 65.4 66.5 L 66.8 70.5 L 61.8 72.9 L 59.6 69.3 L 55.4 69.3 L 53.2 72.9 L 48.2 70.5 L 49.6 66.5 L 47.0 63.2 L 42.8 63.7 L 41.5 58.3 L 45.5 56.9 L 46.4 52.8 L 43.4 49.8 L 46.9 45.5 L 50.5 47.8 L 54.2 45.9 L 54.7 41.7 L 60.3 41.7 L 60.8 45.9 L 64.5 47.8 L 68.1 45.5 L 71.6 49.8 L 68.6 52.8 L 69.5 56.9 Z" fill="#3a4049" stroke="#f4f4f6" stroke-width="3" stroke-linejoin="round" />
+  <circle cx="57.5" cy="57.5" r="5" fill="#f4f4f6" />
+</svg>

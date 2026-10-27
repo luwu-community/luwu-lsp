@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- A Luwu configuration file (.config.luwon, luwu.luwon): the Luwu mask with a gear -->
+  <svg x="0" y="0" width="50" height="50" viewBox="0 0 64 64">
+    <defs>
+    <path id="half" d="M 18.5 0
+      C 16 6 13.5 13 12.5 21
+      C 12 27 11.6 33 11 40
+      L 0 45
+      L 12.5 49
+      L 9 57
+      L 17.5 53.5
+      L 22 64
+      L 25.5 58.5
+      L 30.4 59.5
+      L 30.4 21.5
+      C 28.5 21.5 25.5 16 22.5 9
+      Z" />
+    <rect id="eye" x="21" y="36" width="5" height="12" rx="2.5" />
+  </defs>
+  <use href="#half" fill="#f08a2a" />
+  <use href="#half" fill="#862a44" transform="translate(64 0) scale(-1 1)" />
+  <use href="#eye" fill="#1d1d1f" />
+  <use href="#eye" fill="#1d1d1f" transform="translate(64 0) scale(-1 1)" />
+  </svg>
+  <path d="M 59.5 46.7 L 58.4 51.2 L 54.3 50.5 L 52.3 53.1 L 53.9 57.0 L 49.7 59.0 L 47.6 55.4 L 44.4 55.4 L 42.3 59.0 L 38.1 57.0 L 39.7 53.1 L 37.7 50.5 L 33.6 51.2 L 32.5 46.7 L 36.5 45.5 L 37.2 42.3 L 34.1 39.5 L 37.1 35.9 L 40.5 38.3 L 43.4 36.9 L 43.7 32.7 L 48.3 32.7 L 48.6 36.9 L 51.5 38.3 L 54.9 35.9 L 57.9 39.5 L 54.8 42.3 L 55.5 45.5 Z" fill="#3a4049" stroke="#f4f4f6" stroke-width="3" stroke-linejoin="round" />
+  <circle cx="46" cy="46" r="4" fill="#f4f4f6" />
+</svg>

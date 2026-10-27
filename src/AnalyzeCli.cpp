@@ -10,20 +10,72 @@
 #include "Luau/PrettyPrinter.h"
 #include "LuauFileUtils.hpp"
 #include "LSP/LuauExt.hpp"
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <vector>
 
+#ifdef _WIN32
+#include <io.h>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+#else
+#include <unistd.h>
+#endif
+
 LUAU_FASTFLAG(DebugLuauTimeTracing)
 LUAU_FASTFLAG(LuauSolverV2)
 
+
+// Luwu: error labels (SyntaxError, TypeError, Typo) are colored with Nyla's colors when stderr is a terminal and
+// NO_COLOR isn't set
+static bool shouldColorLabels()
+{
+    static const bool enabled = []
+    {
+        const char* noColor = getenv("NO_COLOR");
+        if (noColor && *noColor)
+            return false;
+#ifdef _WIN32
+        HANDLE handle = GetStdHandle(STD_ERROR_HANDLE);
+        DWORD mode = 0;
+        if (!_isatty(_fileno(stderr)) || !GetConsoleMode(handle, &mode))
+            return false;
+        return SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+#else
+        return isatty(fileno(stderr)) != 0;
+#endif
+    }();
+    return enabled;
+}
+
+// The escape that starts an error label's color, or nullptr for a lint's label: Nyla's orange, maroon and lavender
+// as the background with her deep purple or white as the text
+static const char* labelColor(const char* type)
+{
+    if (strcmp(type, "SyntaxError") == 0 || strcmp(type, "DocSyntaxError") == 0)
+        return "\x1b[1;48;2;255;138;37;38;2;46;10;64m";
+    if (strcmp(type, "TypeError") == 0 || strcmp(type, "DocTypeError") == 0)
+        return "\x1b[1;48;2;107;41;57;38;2;255;255;255m";
+    if (strcmp(type, "Typo") == 0)
+        return "\x1b[1;48;2;179;107;214;38;2;46;10;64m";
+    return nullptr;
+}
 
 static void report(ReportFormat format, const char* name, const Luau::Location& loc, const char* type, const char* message)
 {
     switch (format)
     {
     case ReportFormat::Default:
-        fprintf(stderr, "%s(%d,%d): %s: %s\n", name, loc.begin.line + 1, loc.begin.column + 1, type, message);
+        if (const char* color = shouldColorLabels() ? labelColor(type) : nullptr)
+            fprintf(stderr, "%s(%d,%d): %s%s\x1b[0m: %s\n", name, loc.begin.line + 1, loc.begin.column + 1, color, type, message);
+        else
+            fprintf(stderr, "%s(%d,%d): %s: %s\n", name, loc.begin.line + 1, loc.begin.column + 1, type, message);
         break;
 
     case ReportFormat::Luacheck:
@@ -66,6 +118,10 @@ static bool reportError(WorkspaceFolder& workspace, ReportFormat format, const L
 
     if (const auto* syntaxError = Luau::get_if<Luau::SyntaxError>(&error.data))
         report(format, relativePath.c_str(), error.location, "SyntaxError", syntaxError->message.c_str());
+    // Luwu: a misspelled name is labeled as one, like luwu-analyze does
+    else if (Luau::isTypo(error))
+        report(format, relativePath.c_str(), error.location, "Typo",
+            Luau::toString(error, Luau::TypeErrorToStringOptions{workspace.frontend.fileResolver}).c_str());
     else
         report(format, relativePath.c_str(), error.location, "TypeError",
             Luau::toString(error, Luau::TypeErrorToStringOptions{workspace.frontend.fileResolver}).c_str());

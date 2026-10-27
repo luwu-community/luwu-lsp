@@ -27,9 +27,22 @@ env:
     -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
 jobs:
+  # luwu-lsp builds for every platform seal ships on. A platform marked `new` can fail without holding up the release;
+  # the publish job leaves out what didn't build.
   build-windows:
-    name: build (windows-x64)
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+            new: true
+
+    name: build (windows-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.new || false }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,10 +53,13 @@ jobs:
       # Ninja compiles files in parallel; the Visual Studio generator only builds whole projects in parallel, and
       # compiler launchers (sccache) don't work with it
       - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
 
       - name: Build Server
         shell: bash
         run: |
+          command -v ninja >/dev/null || pip install ninja
           # cl's options are written with `-`, since Git Bash rewrites a `/O2` argument into a Windows path
           cmake -S . -B build -G Ninja $CMAKE_FLAGS -DLSP_STATIC_CRT:BOOL=ON \
             "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -Ob1 -DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -Ob1 -DNDEBUG"
@@ -58,7 +74,48 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: bin-windows-x64
+          name: bin-windows-${{ matrix.arch }}
+          path: ./dist
+
+  # Android has no VS Code build, so these are server-only zips: for an editor running in Termux (Neovim, Helix, ...)
+  build-android:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            name: android-arm64
+          - abi: armeabi-v7a
+            name: android-armv7
+
+    name: build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Build Server
+        run: |
+          ndk="$ANDROID_NDK_LATEST_HOME"
+          cmake -S . -B build $CMAKE_FLAGS \
+            -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=24 \
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG" "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG"
+          cmake --build build --target Luwu.LanguageServer.CLI -j 4
+          sccache --show-stats
+          "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" build/luwu-lsp
+
+      - name: Stage binary
+        run: |
+          mkdir dist
+          cp build/luwu-lsp dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.name }}
           path: ./dist
 
   # One job per architecture, both on the arm64 runner (x86_64 cross-compiled), so they build in parallel. The
@@ -160,7 +217,7 @@ jobs:
           path: ./dist
 
   release:
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-windows, build-macos, build-linux, build-android]
     name: Publish luwu-latest
     runs-on: ubuntu-latest
     permissions:
@@ -204,30 +261,84 @@ jobs:
 
           # artifact name, binary file, server file in the extension, VS Code targets
           while read -r name bin server targets; do
+            # A platform that's allowed to fail (build-windows' `new`, build-android) may have no binary
+            if [ ! -f "bins/bin-$name/$bin" ]; then
+              echo "::warning::no $name build, leaving it out of the release"
+              continue
+            fi
             chmod 755 "bins/bin-$name/$bin"
             (cd "bins/bin-$name" && zip -q "../../release/luwu-lsp-$name.zip" "$bin")
             rm -f editors/code/bin/*
             cp "bins/bin-$name/$bin" "editors/code/bin/$server"
             for target in $targets; do
-              (cd editors/code && npx --yes @vscode/vsce package --target "$target" -o "../../release/luwu-lsp-$target.vsix" < /dev/null)
+              # Named like the server zips (windows-x64, macos-arm64), not VS Code's targets (win32-x64, darwin-arm64)
+              case "$target" in
+                win32-*) platform="windows-${target#win32-}" ;;
+                darwin-*) platform="macos-${target#darwin-}" ;;
+                *) platform="$target" ;;
+              esac
+              (cd editors/code && npx --yes @vscode/vsce package --target "$target" -o "../../release/luwu-lsp-$platform.vsix" < /dev/null)
             done
           done <<'TARGETS'
           windows-x64 luwu-lsp.exe server.exe win32-x64
+          windows-arm64 luwu-lsp.exe server.exe win32-arm64
           macos-universal luwu-lsp server darwin-x64 darwin-arm64
           linux-x64 luwu-lsp server linux-x64
           linux-arm64 luwu-lsp server linux-arm64
+          android-arm64 luwu-lsp server
+          android-armv7 luwu-lsp server
           TARGETS
+
+          # The Zed extension isn't published yet, so its source goes out for Zed to build as a dev extension
+          (cd editors/zed && zip -qr ../../release/luwu-zed-extension.zip . -x 'target/*' 'grammars/*' '*.wasm')
           ls -l release
 
       - name: Republish luwu-latest
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The platform table lists only what this run built: a platform that's allowed to fail may be missing
+          base="https://github.com/${{ github.repository }}/releases/download/luwu-latest"
+          {
+            echo "Latest build of the \`luwu\` branch ($GITHUB_SHA), rebuilt on every push."
+            echo
+            echo "Install with the [installer](https://github.com/${{ github.repository }}#getting-started), or by hand:"
+            echo
+            echo "| Platform | VS Code extension | Server |"
+            echo "|---|---|---|"
+            while IFS='|' read -r label vsix server; do
+              extension=""
+              if [ -n "$vsix" ] && [ -f "release/luwu-lsp-$vsix.vsix" ]; then
+                extension="[\`luwu-lsp-$vsix.vsix\`]($base/luwu-lsp-$vsix.vsix)"
+              fi
+              binary=""
+              if [ -f "release/luwu-lsp-$server.zip" ]; then
+                binary="[\`luwu-lsp-$server.zip\`]($base/luwu-lsp-$server.zip)"
+              fi
+              if [ -n "$extension$binary" ]; then
+                echo "| $label | $extension | $binary |"
+              fi
+            done <<'PLATFORMS'
+          Windows x64|windows-x64|windows-x64
+          Windows arm64|windows-arm64|windows-arm64
+          macOS (Apple Silicon)|macos-arm64|macos-universal
+          macOS (Intel)|macos-x64|macos-universal
+          Linux x64|linux-x64|linux-x64
+          Linux arm64|linux-arm64|linux-arm64
+          Android arm64 (Termux)||android-arm64
+          Android armv7 (Termux)||android-armv7
+          PLATFORMS
+            echo
+            echo "The Linux builds need glibc 2.28 or newer (RHEL 8, Debian 10, Ubuntu 18.10 and later)."
+            echo
+            echo "[\`luwu-zed-extension.zip\`]($base/luwu-zed-extension.zip) is the Zed extension's source. Unzip it and"
+            echo "install it with \`zed: install dev extension\` ([details](https://github.com/${{ github.repository }}/tree/luwu/editors/zed#installing))."
+          } > release-notes.md
+          cat release-notes.md
+
           gh release delete luwu-latest --cleanup-tag --yes || true
           gh release create luwu-latest release/* \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "luwu-latest" \
-            --notes "Latest build of the \`luwu\` branch ($GITHUB_SHA). Rebuilt on every push.
-
-          Server: \`luwu-lsp-<platform>.zip\`. VS Code extension: \`luwu-lsp-<vscode target>.vsix\` (install with \`code --install-extension\`). Linux builds need glibc 2.28 or newer."
+            --notes-file release-notes.md

@@ -488,8 +488,8 @@ std::string toStringNamedFunction(const Luau::ModulePtr& module, const Luau::Fun
     {
         parentIt = module->astTypes.find(indexName->expr);
         methodName = std::string(1, indexName->op) + indexName->index.value;
-        // If we are calling this as a method ':', we should implicitly hide self, and recompute the functionString
-        opts.hideFunctionSelfArgument = indexName->op == ':';
+        // A method call (':') hides self too, on top of a caller's hidden first parameter (a class's `__call`)
+        opts.hideFunctionSelfArgument = stringOpts.hideFirstParameter || indexName->op == ':';
         functionString = Luau::toStringNamedFunction("", *ftv, opts);
         replaceAll(functionString, "_: ", "");
         // We can try and give a temporary base name from what we can infer by the index, and then attempt to improve it with proper information
@@ -934,7 +934,7 @@ lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::Fi
     else if (error.inDocComment)
         message = "DocTypeError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
     // Luwu: a misspelled name is labeled as one, so it isn't read as a broken type
-    else if (Luau::get_if<Luau::Typo>(&error.data))
+    else if (Luau::isTypo(error))
         message = "Typo: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
     else
         message = "TypeError: " + Luau::toString(error, Luau::TypeErrorToStringOptions{fileResolver});
@@ -987,6 +987,10 @@ lsp::Diagnostic createLintDiagnostic(const Luau::LintWarning& lint, const TextDo
     diagnostic.code = lint.code;
     diagnostic.message = lintName + ": " + lint.text;
     diagnostic.severity = lsp::DiagnosticSeverity::Warning; // Configuration can convert this to an error
+    // Luwu: a lint reported quietly (a single loop's O(n²) outside code that asks for speed) is a hint, which VS Code and
+    // Zed show in the editor but leave out of their problem lists
+    if (lint.hint)
+        diagnostic.severity = lsp::DiagnosticSeverity::Hint;
     diagnostic.range = {toUTF16(textDocument, lint.location.begin), toUTF16(textDocument, lint.location.end)};
     diagnostic.codeDescription = {Uri::parse("https://luau.org/lint#" + toLower(lintName) + "-" + std::to_string(static_cast<int>(lint.code)))};
 

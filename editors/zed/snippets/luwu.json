@@ -1,0 +1,172 @@
+{
+  "Class": {
+    "prefix": "class",
+    "description": "A class with a primary constructor; its parameters are the fields",
+    "body": [
+      "class ${1:Name}(",
+      "    public const ${2:field}: ${3:string}",
+      ")",
+      "    $0",
+      "end"
+    ]
+  },
+  "Class without constructor": {
+    "prefix": "classp",
+    "description": "A class whose fields have defaults; built as Name { field = value }",
+    "body": [
+      "class ${1:Name}",
+      "    ${2:field} = ${3:value}",
+      "    $0",
+      "end"
+    ]
+  },
+  "Class implementing traits": {
+    "prefix": "impl",
+    "description": "A class that implements one or more traits",
+    "body": [
+      "class ${1:Name} implements ${2:Trait}",
+      "    $0",
+      "end"
+    ]
+  },
+  "Trait": {
+    "prefix": "trait",
+    "description": "A trait that expects a member from its implementors",
+    "body": [
+      "trait ${1:Name}",
+      "    expect function ${2:method}(self)$3",
+      "    $0",
+      "end"
+    ]
+  },
+  "Method": {
+    "prefix": "method",
+    "description": "A method; `self` first makes it one",
+    "body": [
+      "function ${1:name}(self${2})${3}",
+      "    $0",
+      "end"
+    ]
+  },
+  "Constructor": {
+    "prefix": "init",
+    "description": "An explicit constructor for a class without a primary constructor",
+    "body": [
+      "function __init(self${1})",
+      "    $0",
+      "end"
+    ]
+  },
+  "Const function": {
+    "prefix": "cfn",
+    "description": "A const function",
+    "body": [
+      "const function ${1:name}(${2})${3}",
+      "    $0",
+      "end"
+    ]
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "function ${1:name}(${2})${3}",
+      "    $0",
+      "end"
+    ]
+  },
+  "Anonymous function": {
+    "prefix": "afn",
+    "body": [
+      "function(${1})",
+      "    $0",
+      "end"
+    ]
+  },
+  "If const": {
+    "prefix": "ifc",
+    "description": "Bind a value in the condition and refine it with `when`",
+    "body": [
+      "if const ${1:value} = ${2:expression} when ${3:condition} then",
+      "    $0",
+      "end"
+    ]
+  },
+  "Do expression": {
+    "prefix": "do",
+    "description": "A block that produces one value; it ends at `give` and takes no `end`",
+    "body": [
+      "const ${1:result} = do",
+      "    $0",
+      "    give ${2:value}"
+    ]
+  },
+  "Table comprehension": {
+    "prefix": "comp",
+    "description": "Map and filter a sequence into a new table",
+    "body": [
+      "{",
+      "    for ${1:_, item} in ${2:items}",
+      "    when ${3:condition}",
+      "    give ${4:item}",
+      "}"
+    ]
+  },
+  "For with when": {
+    "prefix": "forw",
+    "description": "A loop that skips items failing the `when` clause",
+    "body": [
+      "for ${1:_, item} in ${2:items} when ${3:condition} do",
+      "    $0",
+      "end"
+    ]
+  },
+  "Or return": {
+    "prefix": "orr",
+    "description": "Bind a value or return when it's missing",
+    "body": ["const ${1:value} = ${2:expression} or return ${3:nil}"]
+  },
+  "Destructuring require": {
+    "prefix": "req",
+    "description": "Pull names out of a module",
+    "body": ["const .{ ${1:Name} } = require(\"${2:./module}\")"]
+  },
+  "Export class": {
+    "prefix": "eclass",
+    "body": [
+      "export class ${1:Name}(",
+      "    public const ${2:field}: ${3:string}",
+      ")",
+      "    $0",
+      "end"
+    ]
+  },
+  "Export function": {
+    "prefix": "efn",
+    "body": [
+      "export function ${1:name}(${2})${3}",
+      "    $0",
+      "end"
+    ]
+  },
+  "Type alias": {
+    "prefix": "type",
+    "body": ["type ${1:Name} = ${2:{ }}"]
+  },
+  "Union type": {
+    "prefix": "union",
+    "description": "A union spread over lines, every member starting with |",
+    "body": [
+      "type ${1:Name} =",
+      "    | ${2:{ kind: \"a\" }}",
+      "    | ${3:{ kind: \"b\" }}"
+    ]
+  },
+  "Doc comment": {
+    "prefix": "doc",
+    "body": ["--- ${1:What this is for}"]
+  },
+  "Long doc comment": {
+    "prefix": "ldoc",
+    "body": ["--[=[", "    ${1:What this is for}", "]=]"]
+  }
+}

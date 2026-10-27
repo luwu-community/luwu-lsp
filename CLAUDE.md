@@ -41,6 +41,12 @@ Use `rebuild.luau` (needs `seal` 0.8.1+) from the repo root. It configures `buil
 with `-DLSP_LUAU_PATH=<luwu dir>`, reconfigures automatically when that path changes, regenerates keyword hover docs
 (`scripts/generate_hovers`, writes `hovers.json`), and builds the requested targets.
 
+On Linux it configures with clang, ccache and `-O2 -g1` when they're installed (2026-10-25). clang compiles Luwu's
+Analysis sources ~40% faster than gcc, and `-g1` saves another ~30% over `-g`. It reconfigures (a full rebuild) when any
+of these change. `-g1` keeps the line tables backtraces need but drops local variables: **when a crash's backtrace
+isn't enough to debug it, rebuild with `--full-debug-info`** (`-g`), then switch back with a plain
+`seal ./rebuild.luau` once it's fixed.
+
 ```bash
 # Dev: build the CLI against LUWU_TEST_PATH (../luwu)
 seal ./rebuild.luau
@@ -54,6 +60,9 @@ seal ./rebuild.luau --release --luwu=here
 
 # Stale build artifacts? Wipe build/ and reconfigure
 seal ./rebuild.luau --clean
+
+# Full debug info (-g) for a crash that needs local variables in gdb
+seal ./rebuild.luau --full-debug-info
 ```
 
 Build errors are also written to `build_errors.log`.
@@ -138,8 +147,12 @@ Check the current name in `../luwu` rather than trusting existing tests.
 - **Protocol** (`src/include/Protocol/`): LSP structs with nlohmann/json serialization.
 - **Dependencies**: `luwu/` (don't touch, see above), `extern/` (json, glob, argparse, toml, doctest).
 - **Editor clients** (`editors/`): `code/` is ours (see Code style, and `src/settings.ts` for the namespace
-  fallback); `nvim/`, `zed/` and `intellij/` are one-line READMEs pointing at third-party projects. Those clients
-  send the `luau-lsp` config section, which is why `Client.cpp` must keep requesting it under that name.
+  fallback); `zed/` is our Zed extension (Rust launcher compiled to WASM by Zed, plus tree-sitter queries for the
+  Luwu and Luau languages; see its README). Its grammar is the `luwu-zed` branch of our
+  `luwu-community/tree-sitter-luau` fork, which renames the `end` token to `end_keyword` because Zed can't match a
+  WASM grammar's `end`: the queries in `editors/zed/languages` say `"end_keyword"` on purpose. `nvim/` and
+  `intellij/` are one-line READMEs pointing at third-party projects. Every client sends the `luau-lsp` config
+  section, which is why `Client.cpp` must keep requesting it under that name.
 
 ## Code style
 

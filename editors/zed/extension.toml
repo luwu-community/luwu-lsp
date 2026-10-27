@@ -1,0 +1,28 @@
+id = "luwu"
+name = "Luwu"
+version = "0.1.0"
+schema_version = 1
+authors = ["Luwu community <https://github.com/luwu-community>"]
+description = "Luwu and Luau support, with the Luwu language server (luwu-lsp)."
+repository = "https://github.com/luwu-community/luwu-lsp"
+snippets = ["./snippets/luwu.json", "./snippets/luau.json"]
+# File icons for .luwu and .luau. Zed only takes icons as a whole icon theme; this one adds two icons on top of
+# Zed's defaults (select it with "icon_theme": "Luwu", or "Luwu Light").
+icon_themes = ["icon_themes/luwu.json"]
+
+# One server for both languages: luwu-lsp checks .luau files as Luwu's Luau compatibility layer, and the
+# `luau_compat` setting turns Luwu's extensions off for projects that need plain Luau.
+[language_servers.luwu-lsp]
+name = "Luwu Language Server"
+languages = ["Luwu", "Luau"]
+
+# Stopgap until a tree-sitter grammar for Luwu exists: both languages parse with tree-sitter-luau, and the Luwu
+# highlights color Luwu's keywords by their text (see languages/luwu/highlights.scm). The fork's `luwu-zed` branch
+# carries three changes on top of upstream 5c70864, each its own commit: the `end` token is named `end_keyword`
+# (Zed can't match a WASM grammar's token named `end`, so every query here says `end_keyword`); the scanner no
+# longer lexes code as string or comment content while recovering from an error, which keeps doc comments in
+# class bodies readable; and a block comment's content is one node per line without its indentation, which lets
+# languages/*/injections.scm hand the lines to Markdown.
+[grammars.luau]
+repository = "https://github.com/luwu-community/tree-sitter-luau"
+rev = "cfbcece6620b978bcd6f326eb03e2d10a0740639"

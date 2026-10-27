@@ -41,6 +41,9 @@
     [".{", "}"],
     ["[", "]"],
     ["(", ")"],
+    // an explicit type instantiation, `f<<T>>()`, is one pair rather than two
+    // nested `<>` pairs coloured a level apart
+    ["<<", ">>"],
     ["<", ">"]
   ],
 

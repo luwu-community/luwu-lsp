@@ -132,6 +132,9 @@
                 "AnyCast": { "type": "boolean" },
                 "AnyAnnotation": { "type": "boolean" },
                 "LuwuOnlyApi": { "type": "boolean" },
+                "DuplicateKey": { "type": "boolean" },
+                "DuplicateProperty": { "type": "boolean" },
+                "DuplicateReadWrite": { "type": "boolean" },
                 "ReturnSelf": { "type": "boolean" },
                 "ReturnOnNextLine": { "type": "boolean" },
                 "OrContinue": { "type": "boolean" },
@@ -146,7 +149,9 @@
                 "OrReturnComma": { "type": "boolean" },
                 "MisleadingIndentation": { "type": "boolean" },
                 "LuaStringHelper": { "type": "boolean" },
-                "StringOperations": { "type": "boolean" }
+                "StringOperations": { "type": "boolean" },
+                "AmbiguousContinuation": { "type": "boolean" },
+                "UnflippedGuard": { "type": "boolean" }
             }
         }
     }

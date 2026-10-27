@@ -47,6 +47,16 @@ if (TARGET Luwu.Analysis)
 else ()
     set(LUWU_TARGET_PREFIX Luau)
 endif ()
+# Upstream code writes `if (T* x = ...)` without using x. luwu's Makefile (what its CI runs) silences the clang
+# warning for it, and its CMakeLists only does that for gcc.
+# -Wno-pass-failed: libstdc++ 16 puts `#pragma GCC unroll 4` in std::find_if, and clang warns wherever it can't unroll it.
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    foreach (luwu_target Ast Analysis Compiler Config CodeGen VM Require)
+        if (TARGET ${LUWU_TARGET_PREFIX}.${luwu_target})
+            target_compile_options(${LUWU_TARGET_PREFIX}.${luwu_target} PRIVATE -Wno-unused-but-set-variable -Wno-pass-failed)
+        endif ()
+    endforeach ()
+endif ()
 add_library(Luwu.LanguageServer STATIC)
 
 # Regenerated whenever one of the JSON files changes.
@@ -203,6 +213,11 @@ endif ()
 # gcc 14 reports false positives inside nlohmann json for std::optional members
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     list(APPEND LUAU_LSP_OPTIONS -Wno-maybe-uninitialized)
+endif ()
+
+# libstdc++ 16 puts `#pragma GCC unroll 4` in std::find_if, and clang warns wherever it can't unroll it
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    list(APPEND LUAU_LSP_OPTIONS -Wno-pass-failed)
 endif ()
 
 if (LSP_WERROR)

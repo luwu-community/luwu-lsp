@@ -5,9 +5,11 @@
 #include "Luau/AstQuery.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <unordered_set>
 
 LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuwuDoExpr)
 
 namespace
 {
@@ -1077,6 +1079,653 @@ std::optional<RefactoringResult> computeExtractFunctionsIntoTraitEdit(
     return extractIntoTrait(uri, sourceModule, textDocument, classStat, selected->moves, expectations);
 }
 
+// "Inline function" replaces a call to a local function with the function's body. A body that is a single `return`
+// becomes the call's value in place. In a Luwu module any other body becomes a do expression, with each `return` turned
+// into a `give`. The declaration goes too when the call was the function's last use.
+
+// The function a local names, when it's declared `local function f`, `const function f` or `local f = function`
+struct FindFunctionDeclaration : Luau::AstVisitor
+{
+    Luau::AstLocal* target;
+    Luau::AstStat* stat = nullptr;
+    Luau::AstExprFunction* func = nullptr;
+
+    explicit FindFunctionDeclaration(Luau::AstLocal* target)
+        : target(target)
+    {
+    }
+
+    bool visit(Luau::AstStatLocalFunction* node) override
+    {
+        if (node->name == target)
+        {
+            stat = node;
+            func = node->func;
+        }
+        return stat == nullptr;
+    }
+
+    bool visit(Luau::AstStatLocal* node) override
+    {
+        bool declaresTarget = node->vars.size == 1 && node->vars.data[0] == target && node->values.size == 1;
+        if (declaresTarget)
+        {
+            if (auto* value = node->values.data[0]->as<Luau::AstExprFunction>())
+            {
+                stat = node;
+                func = value;
+            }
+        }
+        return stat == nullptr;
+    }
+};
+
+// What inlining needs to know about a function's body. The `return`s of functions nested in it don't count.
+struct FunctionBodyFacts : Luau::AstVisitor
+{
+    Luau::AstExprFunction* func;
+    // The `return`s that leave the function
+    std::vector<Luau::AstStatReturn*> returns;
+    // A `return` inside a do expression (`x or return v` included), which a `give` can't stand in for
+    bool returnsFromDoExpression = false;
+    // The names of the locals the body declares
+    std::unordered_set<std::string> declaredNames;
+    // The locals declared outside the function that the body uses, and the globals it uses
+    std::vector<Luau::AstLocal*> outerLocals;
+    std::unordered_set<std::string> globals;
+    // Every read of a parameter
+    std::vector<Luau::AstExprLocal*> parameterReads;
+
+    int functionDepth = 0;
+    int doDepth = 0;
+
+    explicit FunctionBodyFacts(Luau::AstExprFunction* func)
+        : func(func)
+    {
+    }
+
+    bool isParameter(Luau::AstLocal* local) const
+    {
+        return std::find(func->args.begin(), func->args.end(), local) != func->args.end();
+    }
+
+    void declare(Luau::AstLocal* local)
+    {
+        declaredNames.insert(local->name.value);
+    }
+
+    bool visit(Luau::AstExprLocal* node) override
+    {
+        if (isParameter(node->local))
+            parameterReads.push_back(node);
+        else if (func->location.encloses(node->local->location))
+            declare(node->local);
+        else
+            outerLocals.push_back(node->local);
+        return true;
+    }
+
+    bool visit(Luau::AstExprGlobal* node) override
+    {
+        globals.insert(node->name.value);
+        return true;
+    }
+
+    bool visit(Luau::AstStatLocal* node) override
+    {
+        for (Luau::AstLocal* var : node->vars)
+            declare(var);
+        return true;
+    }
+
+    bool visit(Luau::AstStatLocalFunction* node) override
+    {
+        declare(node->name);
+        return true;
+    }
+
+    bool visit(Luau::AstStatFor* node) override
+    {
+        declare(node->var);
+        return true;
+    }
+
+    bool visit(Luau::AstStatForIn* node) override
+    {
+        for (Luau::AstLocal* var : node->vars)
+            declare(var);
+        return true;
+    }
+
+    bool visit(Luau::AstExprFunction* node) override
+    {
+        for (Luau::AstLocal* arg : node->args)
+            declare(arg);
+
+        ++functionDepth;
+        for (Luau::AstExpr* defaultValue : node->argsDefaults)
+        {
+            if (defaultValue)
+                defaultValue->visit(this);
+        }
+        node->body->visit(this);
+        --functionDepth;
+        return false;
+    }
+
+    bool visit(Luau::AstExprDo* node) override
+    {
+        ++doDepth;
+        node->body->visit(this);
+        --doDepth;
+        return false;
+    }
+
+    bool visit(Luau::AstStatReturn* node) override
+    {
+        if (functionDepth == 0)
+        {
+            returns.push_back(node);
+            if (doDepth > 0)
+                returnsFromDoExpression = true;
+        }
+        return true;
+    }
+};
+
+// The names an expression reads
+struct ReadNames : Luau::AstVisitor
+{
+    std::unordered_set<std::string> names;
+
+    bool visit(Luau::AstExprLocal* node) override
+    {
+        names.insert(node->local->name.value);
+        return true;
+    }
+
+    bool visit(Luau::AstExprGlobal* node) override
+    {
+        names.insert(node->name.value);
+        return true;
+    }
+};
+
+// The local each name means at `position`: the parameters and loop variables around it, and the locals declared before
+// it in the blocks around it. Luwu's other bindings (`if const`, comprehensions, destructuring) aren't read.
+std::unordered_map<std::string, Luau::AstLocal*> localsInScopeAt(const Luau::SourceModule& sourceModule, Luau::Position position)
+{
+    std::unordered_map<std::string, Luau::AstLocal*> locals;
+    auto bind = [&](Luau::AstLocal* local)
+    {
+        locals[local->name.value] = local;
+    };
+
+    // The ancestry runs outermost first, so an inner declaration replaces an outer one of the same name
+    for (Luau::AstNode* node : Luau::findAstAncestryOfPosition(sourceModule, position))
+    {
+        if (auto* block = node->as<Luau::AstStatBlock>())
+        {
+            for (Luau::AstStat* stat : block->body)
+            {
+                // A local function can call itself; any other declaration is only in scope after it
+                if (stat->location.containsClosed(position))
+                {
+                    if (auto* localFunction = stat->as<Luau::AstStatLocalFunction>())
+                        bind(localFunction->name);
+                    break;
+                }
+                if (position < stat->location.begin)
+                    break;
+
+                if (auto* local = stat->as<Luau::AstStatLocal>())
+                {
+                    for (Luau::AstLocal* var : local->vars)
+                        bind(var);
+                }
+                else if (auto* localFunction = stat->as<Luau::AstStatLocalFunction>())
+                {
+                    bind(localFunction->name);
+                }
+            }
+        }
+        else if (auto* forStat = node->as<Luau::AstStatFor>())
+        {
+            if (forStat->body->location.containsClosed(position))
+                bind(forStat->var);
+        }
+        else if (auto* forIn = node->as<Luau::AstStatForIn>())
+        {
+            if (forIn->body->location.containsClosed(position))
+            {
+                for (Luau::AstLocal* var : forIn->vars)
+                    bind(var);
+            }
+        }
+        else if (auto* function = node->as<Luau::AstExprFunction>())
+        {
+            if (function->self)
+                bind(function->self);
+            for (Luau::AstLocal* arg : function->args)
+                bind(arg);
+        }
+    }
+
+    return locals;
+}
+
+// An argument that can be written wherever its parameter is read, since reading it again does nothing else
+bool isRepeatable(Luau::AstExpr* expr)
+{
+    return expr->is<Luau::AstExprLocal>() || expr->is<Luau::AstExprGlobal>() || expr->is<Luau::AstExprConstantNil>() ||
+           expr->is<Luau::AstExprConstantBool>() || expr->is<Luau::AstExprConstantNumber>() || expr->is<Luau::AstExprConstantString>();
+}
+
+// The name an argument reads, when it's a local or a global
+std::optional<std::string> argumentName(Luau::AstExpr* expr)
+{
+    if (auto* local = expr->as<Luau::AstExprLocal>())
+        return std::string(local->local->name.value);
+    if (auto* global = expr->as<Luau::AstExprGlobal>())
+        return std::string(global->name.value);
+    return std::nullopt;
+}
+
+// Expressions that can be indexed or called as they are, without parentheses
+bool isPrefixExpression(Luau::AstExpr* expr)
+{
+    return expr->is<Luau::AstExprLocal>() || expr->is<Luau::AstExprGlobal>() || expr->is<Luau::AstExprIndexName>() ||
+           expr->is<Luau::AstExprIndexExpr>() || expr->is<Luau::AstExprCall>() || expr->is<Luau::AstExprGroup>();
+}
+
+bool isCommentLine(const std::string& line)
+{
+    size_t start = line.find_first_not_of(" \t");
+    return start != std::string::npos && line.compare(start, 2, "--") == 0;
+}
+
+// Whether `call` is the whole value of a `local`, `const` or assignment with one target: there a do expression reads
+// like the declaration it replaces
+bool isWholeValueOf(Luau::AstStat* stat, Luau::AstExprCall* call)
+{
+    if (auto* local = stat->as<Luau::AstStatLocal>())
+        return local->vars.size == 1 && local->values.size == 1 && local->values.data[0] == call;
+    if (auto* assign = stat->as<Luau::AstStatAssign>())
+        return assign->vars.size == 1 && assign->values.size == 1 && assign->values.data[0] == call;
+    return false;
+}
+
+// A text replacement inside one line
+struct LineEdit
+{
+    Luau::Location location;
+    std::string text;
+};
+
+// The source text from `begin` to `end` with `edits` (inside it, each within one line, none overlapping) applied
+std::string editedText(const TextDocument& textDocument, Luau::Position begin, Luau::Position end, std::vector<LineEdit> edits)
+{
+    std::vector<std::string> lines;
+    for (unsigned int line = begin.line; line <= end.line; ++line)
+        lines.push_back(textDocument.getLine(line));
+
+    // Cut the end first and the start last, so the edits' columns stay right in between
+    lines.back() = lines.back().substr(0, end.column);
+
+    std::sort(
+        edits.begin(),
+        edits.end(),
+        [](const LineEdit& a, const LineEdit& b)
+        {
+            return b.location.begin < a.location.begin;
+        }
+    );
+    for (const LineEdit& edit : edits)
+    {
+        std::string& line = lines[edit.location.begin.line - begin.line];
+        line.replace(edit.location.begin.column, edit.location.end.column - edit.location.begin.column, edit.text);
+    }
+
+    lines.front() = lines.front().substr(begin.column);
+
+    std::string text;
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        if (i > 0)
+            text += "\n";
+        text += lines[i];
+    }
+    return text;
+}
+
+// A call to a local function that can be inlined, and how
+struct InlinableCall
+{
+    Luau::AstExprCall* call = nullptr;
+    // The call's parent in the AST, which decides whether the inlined expression needs parentheses
+    Luau::AstNode* parent = nullptr;
+    Luau::AstLocal* local = nullptr;
+    Luau::AstStat* declaration = nullptr;
+    Luau::AstExprFunction* func = nullptr;
+    std::optional<FunctionBodyFacts> facts;
+    // The statement a do expression goes into
+    Luau::AstStat* statement = nullptr;
+    // For each parameter, the text its reads are replaced with, or nullopt when the do expression binds it with a `const`
+    // first
+    std::vector<std::optional<std::string>> substitutions;
+    // The body is a single `return` of one value, and every argument can be substituted into it
+    bool asExpression = false;
+};
+
+std::optional<InlinableCall> findInlinableCall(
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    Luau::Position position)
+{
+    InlinableCall result;
+
+    // The cursor is on the name of the function being called
+    std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(sourceModule, position);
+    for (size_t i = 1; i < ancestry.size(); ++i)
+    {
+        auto* call = ancestry[i]->as<Luau::AstExprCall>();
+        auto* callee = call ? call->func->as<Luau::AstExprLocal>() : nullptr;
+        if (callee && callee->location.containsClosed(position))
+        {
+            result.call = call;
+            result.parent = ancestry[i - 1];
+            result.local = callee->local;
+        }
+    }
+    if (!result.call || result.call->self)
+        return std::nullopt;
+
+    FindFunctionDeclaration declaration(result.local);
+    sourceModule.root->visit(&declaration);
+    if (!declaration.func)
+        return std::nullopt;
+    result.declaration = declaration.stat;
+    result.func = declaration.func;
+
+    Luau::AstExprFunction* func = result.func;
+    Luau::AstExprCall* call = result.call;
+    bool hasDefaults = std::any_of(
+        func->argsDefaults.begin(),
+        func->argsDefaults.end(),
+        [](Luau::AstExpr* defaultValue)
+        {
+            return defaultValue != nullptr;
+        }
+    );
+    bool simpleSignature = !func->vararg && !func->self && func->generics.size == 0 && func->genericPacks.size == 0 && !hasDefaults;
+    if (!simpleSignature || call->args.size > func->args.size)
+        return std::nullopt;
+
+    // A last argument that's a call or `...` spreads over the parameters left
+    if (call->args.size > 0 && call->args.size < func->args.size)
+    {
+        Luau::AstExpr* last = call->args.data[call->args.size - 1];
+        if (last->is<Luau::AstExprCall>() || last->is<Luau::AstExprVarargs>())
+            return std::nullopt;
+    }
+
+    IsReassignedVisitor reassigned(result.local);
+    sourceModule.root->visit(&reassigned);
+    if (reassigned.reassigned)
+        return std::nullopt;
+
+    result.facts.emplace(func);
+    func->body->visit(&*result.facts);
+    const FunctionBodyFacts& facts = *result.facts;
+
+    // The body must mean the same names at the call: no recursion, and nothing there shadowing what it uses
+    std::unordered_map<std::string, Luau::AstLocal*> inScope = localsInScopeAt(sourceModule, call->location.begin);
+    for (Luau::AstLocal* outer : facts.outerLocals)
+    {
+        auto it = inScope.find(outer->name.value);
+        if (outer == result.local || it == inScope.end() || it->second != outer)
+            return std::nullopt;
+    }
+    for (const std::string& global : facts.globals)
+    {
+        if (inScope.count(global))
+            return std::nullopt;
+    }
+
+    // An argument is substituted when it's repeatable and the body doesn't use its name for anything else
+    for (size_t i = 0; i < func->args.size; ++i)
+    {
+        if (i >= call->args.size)
+        {
+            result.substitutions.push_back("nil");
+            continue;
+        }
+
+        Luau::AstExpr* arg = call->args.data[i];
+        std::optional<std::string> name = argumentName(arg);
+        bool nameTaken = name && (facts.declaredNames.count(*name) || facts.globals.count(*name) ||
+                                     std::any_of(
+                                         facts.outerLocals.begin(),
+                                         facts.outerLocals.end(),
+                                         [&](Luau::AstLocal* outer)
+                                         {
+                                             return *name == outer->name.value;
+                                         }
+                                     ));
+        if (isRepeatable(arg) && !nameTaken)
+            result.substitutions.push_back(textDocument.getText(textDocument.convertLocation(arg->location)));
+        else
+            result.substitutions.push_back(std::nullopt);
+    }
+
+    bool allSubstituted = std::all_of(
+        result.substitutions.begin(),
+        result.substitutions.end(),
+        [](const std::optional<std::string>& substitution)
+        {
+            return substitution.has_value();
+        }
+    );
+    Luau::AstStatBlock* body = func->body;
+    auto* onlyReturn = body->body.size == 1 ? body->body.data[0]->as<Luau::AstStatReturn>() : nullptr;
+    result.asExpression = allSubstituted && onlyReturn && onlyReturn->list.size == 1;
+    if (result.asExpression)
+        return result;
+
+    // Luwu Do Expressions (rfcs/do-expressions.md): any other body becomes a do expression, so every `return` must be
+    // one a `give` can replace
+    if (sourceModule.language != Luau::Language::Luwu || !FFlag::LuwuDoExpr || facts.returnsFromDoExpression)
+        return std::nullopt;
+    for (Luau::AstStatReturn* ret : facts.returns)
+    {
+        if (ret->list.size > 1)
+            return std::nullopt;
+    }
+
+    result.statement = findEnclosingStatement(sourceModule, call);
+    if (!result.statement || !isWholeValueOf(result.statement, call))
+        return std::nullopt;
+
+    // A `const` binding a parameter comes before the arguments after it and the substituted ones, which mustn't read
+    // its name
+    std::unordered_set<std::string> boundNames;
+    for (size_t i = 0; i < func->args.size; ++i)
+    {
+        Luau::AstExpr* arg = i < call->args.size ? call->args.data[i] : nullptr;
+        ReadNames reads;
+        if (arg)
+            arg->visit(&reads);
+        for (const std::string& read : reads.names)
+        {
+            if (boundNames.count(read))
+                return std::nullopt;
+        }
+        if (!result.substitutions[i])
+            boundNames.insert(func->args.data[i]->name.value);
+    }
+    for (size_t i = 0; i < func->args.size; ++i)
+    {
+        Luau::AstExpr* arg = i < call->args.size ? call->args.data[i] : nullptr;
+        std::optional<std::string> name = arg ? argumentName(arg) : std::nullopt;
+        if (result.substitutions[i] && name && boundNames.count(*name))
+            return std::nullopt;
+    }
+
+    return result;
+}
+
+// Each read of a substituted parameter, replaced with its argument
+std::vector<LineEdit> substitutionEdits(const InlinableCall& inlinable)
+{
+    std::vector<LineEdit> edits;
+    for (Luau::AstExprLocal* read : inlinable.facts->parameterReads)
+    {
+        auto param = std::find(inlinable.func->args.begin(), inlinable.func->args.end(), read->local);
+        const std::optional<std::string>& substitution = inlinable.substitutions[param - inlinable.func->args.begin()];
+        if (substitution)
+            edits.push_back({read->location, *substitution});
+    }
+    return edits;
+}
+
+// The inlined call as one expression: the `return`ed value with the arguments substituted in
+std::string inlinedExpression(const TextDocument& textDocument, const InlinableCall& inlinable)
+{
+    Luau::AstExpr* value = inlinable.func->body->body.data[0]->as<Luau::AstStatReturn>()->list.data[0];
+    std::string text = editedText(textDocument, value->location.begin, value->location.end, substitutionEdits(inlinable));
+
+    Luau::AstNode* parent = inlinable.parent;
+    auto* parentIndexName = parent->as<Luau::AstExprIndexName>();
+    auto* parentIndexExpr = parent->as<Luau::AstExprIndexExpr>();
+    auto* parentCall = parent->as<Luau::AstExprCall>();
+    bool indexedOrCalled = (parentIndexName && parentIndexName->expr == inlinable.call) ||
+                           (parentIndexExpr && parentIndexExpr->expr == inlinable.call) || (parentCall && parentCall->func == inlinable.call);
+    bool operand = parent->is<Luau::AstExprBinary>() || parent->is<Luau::AstExprUnary>() || parent->is<Luau::AstExprTypeAssertion>();
+    bool wrap = (operand && needsParentheses(value)) || (indexedOrCalled && !isPrefixExpression(value));
+    return wrap ? "(" + text + ")" : text;
+}
+
+// Luwu Do Expressions (rfcs/do-expressions.md): the inlined call as a do expression. Parameters that can't be
+// substituted are bound with a `const` first, and each `return` becomes a `give`.
+std::string inlinedDoExpression(const TextDocument& textDocument, const InlinableCall& inlinable)
+{
+    Luau::AstExprFunction* func = inlinable.func;
+    std::string callIndent = getLineIndentation(textDocument, inlinable.statement->location.begin.line);
+    std::string declarationIndent = getLineIndentation(textDocument, inlinable.declaration->location.begin.line);
+
+    Luau::AstStatBlock* body = func->body;
+    std::string bodyIndent = body->body.size > 0 ? getLineIndentation(textDocument, body->body.data[0]->location.begin.line) : "";
+    std::string indentUnit = bodyIndent.size() > declarationIndent.size() ? bodyIndent.substr(declarationIndent.size()) : "    ";
+    std::string innerIndent = callIndent + indentUnit;
+
+    std::vector<std::string> lines;
+    for (size_t i = 0; i < func->args.size; ++i)
+    {
+        if (inlinable.substitutions[i])
+            continue;
+
+        Luau::AstLocal* param = func->args.data[i];
+        std::string line = innerIndent + "const " + param->name.value;
+        if (param->annotation)
+            line += ": " + textDocument.getText(textDocument.convertLocation(param->annotation->location));
+        Luau::AstExpr* arg = inlinable.call->args.data[i];
+        line += " = " + textDocument.getText(textDocument.convertLocation(arg->location));
+        lines.push_back(line);
+    }
+
+    if (body->body.size > 0)
+    {
+        std::vector<LineEdit> edits = substitutionEdits(inlinable);
+        for (Luau::AstStatReturn* ret : inlinable.facts->returns)
+        {
+            if (ret->list.size == 0)
+                edits.push_back({ret->location, "give nil"});
+            else
+                edits.push_back({{ret->location.begin, {ret->location.begin.line, ret->location.begin.column + 6}}, "give"});
+        }
+
+        // Whole lines when the body has them to itself, which keeps the comments above its first statement and after
+        // its last
+        Luau::Position begin = body->body.data[0]->location.begin;
+        Luau::Position end = body->body.data[body->body.size - 1]->location.end;
+        if (begin.column == bodyIndent.size())
+        {
+            begin.column = 0;
+            while (begin.line > func->location.begin.line + 1 && isCommentLine(textDocument.getLine(begin.line - 1)))
+                --begin.line;
+        }
+        if (end.line < func->location.end.line)
+            end.column = static_cast<unsigned int>(textDocument.getLine(end.line).size());
+
+        std::string text = editedText(textDocument, begin, end, std::move(edits));
+        size_t start = 0;
+        while (start <= text.size())
+        {
+            size_t newline = text.find('\n', start);
+            std::string line = text.substr(start, newline == std::string::npos ? std::string::npos : newline - start);
+            if (line.compare(0, bodyIndent.size(), bodyIndent) == 0)
+                line = line.substr(bodyIndent.size());
+            lines.push_back(line.find_first_not_of(" \t\r") == std::string::npos ? "" : innerIndent + line);
+            if (newline == std::string::npos)
+                break;
+            start = newline + 1;
+        }
+    }
+
+    // A do expression has to end in a `give`, so a body that can finish without a `return` gives nil
+    bool endsInReturn = body->body.size > 0 && body->body.data[body->body.size - 1]->is<Luau::AstStatReturn>();
+    if (!endsInReturn)
+        lines.push_back(innerIndent + "give nil");
+
+    std::string text = "do";
+    for (const std::string& line : lines)
+        text += "\n" + line;
+    return text;
+}
+
+std::optional<RefactoringResult> computeInlineFunctionEdit(
+    const lsp::DocumentUri& uri,
+    const Luau::SourceModule& sourceModule,
+    const TextDocument& textDocument,
+    const lsp::Range& range)
+{
+    Luau::Location luauRange = textDocument.convertRange(range);
+    std::optional<InlinableCall> inlinable = findInlinableCall(sourceModule, textDocument, luauRange.begin);
+    if (!inlinable)
+        return std::nullopt;
+
+    std::string replacement = inlinable->asExpression ? inlinedExpression(textDocument, *inlinable) : inlinedDoExpression(textDocument, *inlinable);
+
+    std::vector<lsp::TextEdit> edits;
+    edits.push_back({textDocument.convertLocation(inlinable->call->location), replacement});
+
+    // The declaration goes when this was the function's only use, with the comment lines right above it
+    std::vector<Luau::Location> references = findSymbolReferences(sourceModule, Luau::Symbol(inlinable->local));
+    auto uses = std::count_if(
+        references.begin(),
+        references.end(),
+        [&](const Luau::Location& reference)
+        {
+            return !(reference == inlinable->local->location);
+        }
+    );
+    if (uses == 1)
+    {
+        unsigned int firstLine = inlinable->declaration->location.begin.line;
+        while (firstLine > 0 && isCommentLine(textDocument.getLine(firstLine - 1)))
+            --firstLine;
+        unsigned int endLine = inlinable->declaration->location.end.line + 1;
+        bool blankBefore = firstLine == 0 || isBlankLine(textDocument, firstLine - 1);
+        if (blankBefore && endLine < textDocument.lineCount() && isBlankLine(textDocument, endLine))
+            ++endLine;
+        edits.push_back({{{firstLine, 0}, {endLine, 0}}, ""});
+    }
+
+    lsp::WorkspaceEdit workspaceEdit;
+    workspaceEdit.changes.emplace(uri, std::move(edits));
+    return RefactoringResult{std::move(workspaceEdit), std::nullopt};
+}
+
 } // anonymous namespace
 
 void computeRefactorings(
@@ -1155,7 +1804,14 @@ void computeRefactorings(
         if (local)
             sourceModule.root->visit(&facts);
 
-        if (local && !Destructure::isHiddenDestructureLocal(local) && !Destructure::isPatternField(local, facts))
+        // A local function is inlined by "Inline function" instead
+        FindFunctionDeclaration functionDeclaration(local);
+        if (local)
+            sourceModule.root->visit(&functionDeclaration);
+
+        bool inlinable = local && !Destructure::isHiddenDestructureLocal(local) && !Destructure::isPatternField(local, facts) &&
+                         !functionDeclaration.func;
+        if (inlinable)
         {
             lsp::CodeAction action;
             action.title = "Inline variable '" + std::string(local->name.value) + "'";
@@ -1163,6 +1819,22 @@ void computeRefactorings(
             action.data = nlohmann::json{
                 {"uri", params.textDocument.uri.toString()},
                 {"type", "inlineVariable"},
+                {"range", params.range},
+            };
+            result.push_back(std::move(action));
+        }
+
+        if (std::optional<InlinableCall> call = findInlinableCall(sourceModule, textDocument, requestRange.begin))
+        {
+            lsp::CodeAction action;
+            if (call->asExpression)
+                action.title = "Inline function '" + std::string(call->local->name.value) + "'";
+            else
+                action.title = "Inline as do-give expression";
+            action.kind = lsp::CodeActionKind::RefactorInline;
+            action.data = nlohmann::json{
+                {"uri", params.textDocument.uri.toString()},
+                {"type", "inlineFunction"},
                 {"range", params.range},
             };
             result.push_back(std::move(action));
@@ -1243,6 +1915,8 @@ lsp::CodeAction resolveRefactoring(
         refactorResult = computeExtractFunctionEdit(uri, *sourceModule, *textDocument, range);
     else if (type == "inlineVariable")
         refactorResult = computeInlineVariableEdit(uri, *sourceModule, *textDocument, range);
+    else if (type == "inlineFunction")
+        refactorResult = computeInlineFunctionEdit(uri, *sourceModule, *textDocument, range);
     else if (type == "extractTrait")
         refactorResult = computeExtractTraitEdit(uri, *sourceModule, *textDocument, range);
     else if (type == "extractFunctionsIntoTrait")

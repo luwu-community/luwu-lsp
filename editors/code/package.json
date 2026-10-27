@@ -65,6 +65,37 @@
           "light": "./assets/file-icon-light.svg",
           "dark": "./assets/file-icon-dark.svg"
         }
+      },
+      {
+        "id": "luwon",
+        "aliases": [
+          "Luwon",
+          "luwon"
+        ],
+        "extensions": [
+          ".luwon"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./assets/file-icon-luwon-light.svg",
+          "dark": "./assets/file-icon-luwon-dark.svg"
+        }
+      },
+      {
+        "id": "luwon-config",
+        "aliases": [
+          "Luwu configuration",
+          "luwon-config"
+        ],
+        "filenames": [
+          ".config.luwon",
+          "luwu.luwon"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./assets/file-icon-luwu-config-light.svg",
+          "dark": "./assets/file-icon-luwu-config-dark.svg"
+        }
       }
     ],
     "grammars": [
@@ -108,6 +139,16 @@
           "meta.embedded.block.luau": "luau",
           "meta.embedded.block.luwu": "luwu"
         }
+      },
+      {
+        "language": "luwon",
+        "scopeName": "source.luwon",
+        "path": "./syntaxes/Luwon.tmLanguage.json"
+      },
+      {
+        "language": "luwon-config",
+        "scopeName": "source.luwon.config",
+        "path": "./syntaxes/LuwonConfig.tmLanguage.json"
       }
     ],
     "semanticTokenTypes": [
@@ -488,6 +529,18 @@
             "markdownDescription": "Use strict DataModel types in diagnostics. When on, this is equivalent to the more expressive autocompletion types. When this is off, `game`/`script`/`workspace` (and their members) are all typed as `any`, and helps to prevent false positives. [Read More](https://github.com/JohnnyMorganz/luau-lsp/issues/83#issuecomment-1192865024)",
             "type": "boolean",
             "default": false,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.errorBadgePreview": {
+            "markdownDescription": "Show the start of each error's message after its `#luwu.diagnostics.errorBadges#` badge. Its colour is `luwu.errorBadgePreviewForeground` in `workbench.colorCustomizations`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luwu.diagnostics.errorBadges": {
+            "markdownDescription": "Show the kind of each error (`SyntaxError`, `TypeError`, `Typo`) or the lint's name as a coloured badge after its line. The colours are `luwu.syntaxErrorBadgeBackground`, `luwu.typeErrorBadgeBackground`, `luwu.typoBadgeBackground`, `luwu.lintBadgeBackground` and their `Foreground` counterparts in `workbench.colorCustomizations`.",
+            "type": "boolean",
+            "default": true,
             "scope": "resource"
           },
           "luwu.diagnostics.showHelp": {
@@ -1265,6 +1318,18 @@
             "default": false,
             "scope": "resource"
           },
+          "luau-lsp.diagnostics.errorBadgePreview": {
+            "markdownDescription": "Show the start of each error's message after its `#luau-lsp.diagnostics.errorBadges#` badge. Its colour is `luwu.errorBadgePreviewForeground` in `workbench.colorCustomizations`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
+          "luau-lsp.diagnostics.errorBadges": {
+            "markdownDescription": "Show the kind of each error (`SyntaxError`, `TypeError`, `Typo`) or the lint's name as a coloured badge after its line. The colours are `luwu.syntaxErrorBadgeBackground`, `luwu.typeErrorBadgeBackground`, `luwu.typoBadgeBackground`, `luwu.lintBadgeBackground` and their `Foreground` counterparts in `workbench.colorCustomizations`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
           "luau-lsp.diagnostics.showHelp": {
             "markdownDescription": "Show the `Help (...)` paragraphs in diagnostics, and the diagnostics that are only help. Turn it off to see only what is wrong. `Luwu: Show or Hide Help in Diagnostics` toggles it.",
             "type": "boolean",
@@ -1816,6 +1881,96 @@
       }
     ],
     "colors": [
+      {
+        "id": "luwu.errorBadgePreviewForeground",
+        "description": "Text of the error message shown after an error's badge.",
+        "defaults": {
+          "dark": "editorCodeLens.foreground",
+          "light": "editorCodeLens.foreground",
+          "highContrast": "editorCodeLens.foreground",
+          "highContrastLight": "editorCodeLens.foreground"
+        }
+      },
+      {
+        "id": "luwu.syntaxErrorBadgeBackground",
+        "description": "Background of the SyntaxError badge after a line.",
+        "defaults": {
+          "dark": "#FF8A25",
+          "light": "#FF8A25",
+          "highContrast": "#FF8A25",
+          "highContrastLight": "#FF8A25"
+        }
+      },
+      {
+        "id": "luwu.syntaxErrorBadgeForeground",
+        "description": "Text of the SyntaxError badge after a line.",
+        "defaults": {
+          "dark": "#2E0A40",
+          "light": "#2E0A40",
+          "highContrast": "#2E0A40",
+          "highContrastLight": "#2E0A40"
+        }
+      },
+      {
+        "id": "luwu.typeErrorBadgeBackground",
+        "description": "Background of the TypeError badge after a line.",
+        "defaults": {
+          "dark": "#6B2939",
+          "light": "#6B2939",
+          "highContrast": "#6B2939",
+          "highContrastLight": "#6B2939"
+        }
+      },
+      {
+        "id": "luwu.typeErrorBadgeForeground",
+        "description": "Text of the TypeError badge after a line.",
+        "defaults": {
+          "dark": "#FFFFFF",
+          "light": "#FFFFFF",
+          "highContrast": "#FFFFFF",
+          "highContrastLight": "#FFFFFF"
+        }
+      },
+      {
+        "id": "luwu.typoBadgeBackground",
+        "description": "Background of the Typo badge after a line.",
+        "defaults": {
+          "dark": "#B36BD6",
+          "light": "#B36BD6",
+          "highContrast": "#B36BD6",
+          "highContrastLight": "#B36BD6"
+        }
+      },
+      {
+        "id": "luwu.typoBadgeForeground",
+        "description": "Text of the Typo badge after a line.",
+        "defaults": {
+          "dark": "#2E0A40",
+          "light": "#2E0A40",
+          "highContrast": "#2E0A40",
+          "highContrastLight": "#2E0A40"
+        }
+      },
+      {
+        "id": "luwu.lintBadgeBackground",
+        "description": "Background of a lint's badge after a line.",
+        "defaults": {
+          "dark": "#2E0A40",
+          "light": "#2E0A40",
+          "highContrast": "#2E0A40",
+          "highContrastLight": "#2E0A40"
+        }
+      },
+      {
+        "id": "luwu.lintBadgeForeground",
+        "description": "Text of a lint's badge after a line.",
+        "defaults": {
+          "dark": "#FFFFFF",
+          "light": "#FFFFFF",
+          "highContrast": "#FFFFFF",
+          "highContrastLight": "#FFFFFF"
+        }
+      },
       {
         "id": "luwu.docCodeBlockBackground",
         "description": "Background of code fenced in a doc comment.",

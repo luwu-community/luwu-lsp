@@ -6,8 +6,11 @@
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuDoExpr)
+LUAU_FASTFLAG(DebugLuwuPoperators)
 LUAU_FASTFLAG(LuwuDestructuring)
 LUAU_FASTFLAG(LuwuStringExtensions)
+LUAU_FASTFLAG(LuwuTableComprehensions)
+LUAU_FASTFLAG(LuwuIfLocal)
 
 TEST_SUITE_BEGIN("CodeAction");
 
@@ -1154,6 +1157,73 @@ TEST_CASE_FIXTURE(Fixture, "destructure_layout_works_on_type_destructures_and_sk
     CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 4, 4), "Put fields on one line"));
 }
 
+TEST_CASE_FIXTURE(Fixture, "dot_table_layout_puts_each_entry_on_its_own_line")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local id, name = 1, 2\n"
+                         "local t = .{id, name}\n";
+    auto uri = newDocument("test.luwu", source);
+
+    std::string laidOut = "local id, name = 1, 2\n"
+                          "local t = .{\n"
+                          "    id,\n"
+                          "    name,\n"
+                          "}\n";
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 13), "Put each entry on its own line", uri, source), laidOut);
+
+    auto back = newDocument("back.luwu", laidOut);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, back, 2, 5), "Put entries on one line", back, laidOut),
+        "local id, name = 1, 2\n"
+        "local t = .{ id, name }\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "comprehension_layout_puts_each_clause_on_its_own_line")
+{
+    ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
+    ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local function f(lines: {string})\n"
+                         "    return { for _, id in lines when id ~= \"\" when const n = tonumber(id) give n }\n"
+                         "end\n";
+    auto uri = newDocument("test.luwu", source);
+
+    std::string laidOut = "local function f(lines: {string})\n"
+                          "    return {\n"
+                          "        for _, id in lines\n"
+                          "        when id ~= \"\"\n"
+                          "        when const n = tonumber(id)\n"
+                          "        give n\n"
+                          "    }\n"
+                          "end\n";
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 16), "Put each clause on its own line", uri, source), laidOut);
+
+    auto back = newDocument("back.luwu", laidOut);
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, back, 5, 9), "Put clauses on one line", back, laidOut), source);
+}
+
+TEST_CASE_FIXTURE(Fixture, "comprehension_layout_lines_up_nested_for_clauses")
+{
+    ScopedFastFlag luwuTableComprehensions{FFlag::LuwuTableComprehensions, true};
+    ScopedFastFlag luwuIfLocal{FFlag::LuwuIfLocal, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local grid = {{1}}\n"
+                         "local filled = { for _, row in grid for _, cell in row when cell ~= 0 give cell }\n";
+    auto uri = newDocument("test.luwu", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 20), "Put each clause on its own line", uri, source),
+        "local grid = {{1}}\n"
+        "local filled = {\n"
+        "    for _, row in grid\n"
+        "    for _, cell in row\n"
+        "    when cell ~= 0\n"
+        "    give cell\n"
+        "}\n");
+}
+
 TEST_CASE_FIXTURE(Fixture, "import_field_adds_it_to_the_pattern_and_unqualifies_its_uses")
 {
     ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
@@ -1248,12 +1318,68 @@ TEST_CASE_FIXTURE(Fixture, "qualify_field_takes_it_out_of_the_pattern")
         "print(chimera.Card)\n");
 }
 
+TEST_CASE_FIXTURE(Fixture, "append_switches_between_push_and_table_insert")
+{
+    ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, true};
+
+    std::string source = R"(
+local names = {}
+local other = {}
+table.insert(names, "a")
+table.insert(names, string.upper("b"))
+table.insert(other, "c")
+names <+ "d"
+)";
+    auto uri = newDocument("test.luwu", source);
+
+    // one append, and every append to `names` written the same way; a call keeps one value in parentheses
+    auto actions = codeActionsAt(*this, uri, 3, 3);
+    CHECK_EQ(applyCodeAction(actions, "Switch this append to '<+'", uri, source),
+        "\nlocal names = {}\nlocal other = {}\nnames <+ \"a\"\ntable.insert(names, string.upper(\"b\"))\n"
+        "table.insert(other, \"c\")\nnames <+ \"d\"\n");
+    CHECK_EQ(applyCodeAction(actions, "Switch all appends to 'names' to '<+'", uri, source),
+        "\nlocal names = {}\nlocal other = {}\nnames <+ \"a\"\nnames <+ (string.upper(\"b\"))\ntable.insert(other, \"c\")\nnames <+ \"d\"\n");
+
+    // and back; a single `<+` to 'names' has no "all" form
+    auto back = codeActionsAt(*this, uri, 6, 2);
+    CHECK_EQ(applyCodeAction(back, "Switch this append to 'table.insert'", uri, source),
+        "\nlocal names = {}\nlocal other = {}\ntable.insert(names, \"a\")\ntable.insert(names, string.upper(\"b\"))\ntable.insert(other, \"c\")\n"
+        "table.insert(names, \"d\")\n");
+    CHECK_FALSE(findCodeAction(back, "Switch all appends to 'names' to 'table.insert'"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "append_switches_keep_the_number_of_values")
+{
+    ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, true};
+
+    // `t <+ f()` pushes every value f returns, which `table.insert` can't, and `<+` of several values has no single insert
+    auto uri = newDocument("test.luwu", "local t = {}\nlocal function f() return 1, 2 end\nt <+ f()\nt <+ 1, 2\n");
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 2, 1), "Switch this append to 'table.insert'"));
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 3, 1), "Switch this append to 'table.insert'"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "append_switch_to_push_needs_the_operator_and_a_luwu_file")
+{
+    std::string source = "local t = {}\ntable.insert(t, 1)\n";
+    {
+        ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, false};
+        auto uri = newDocument("off.luwu", source);
+        CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 1, 3), "Switch this append to '<+'"));
+    }
+
+    ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, true};
+    auto uri = newDocument("test.luau", source);
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 1, 3), "Switch this append to '<+'"));
+}
+
 static std::optional<lsp::TextEdit> orLeaveGuardRewrite(Fixture& fixture, const lsp::DocumentUri& uri, size_t line, size_t column)
 {
     auto actions = codeActionsAt(fixture, uri, line, column, {lsp::CodeActionKind::RefactorRewrite});
     for (const auto& action : actions)
     {
-        if (action.title.rfind("Rewrite as 'or ", 0) == 0)
+        bool guard = action.title.rfind("Rewrite as 'or ", 0) == 0 || action.title.rfind("Rewrite as 'and ", 0) == 0 ||
+                     action.title == "Rewrite as one guard per condition";
+        if (guard)
         {
             REQUIRE(action.edit);
             auto edits = action.edit->changes.at(uri);
@@ -1305,11 +1431,12 @@ end
 
     auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "typeof(v) == \"string\"\n        or continue");
+    // a condition without `not` is kept as written, with `and`
+    CHECK_EQ(edit->newText, "typeof(v) ~= \"string\"\n        and continue");
 
     edit = orLeaveGuardRewrite(*this, uri, 3, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v ~= nil\n        or break");
+    CHECK_EQ(edit->newText, "v == nil\n        and break");
 
     edit = orLeaveGuardRewrite(*this, uri, 4, 6);
     REQUIRE(edit);
@@ -1349,15 +1476,45 @@ end
     for (size_t line = 2; line <= 18; ++line)
     {
         INFO("line " << line);
-        if (line == 5)
+        if (line == 2 || line == 4 || line == 5)
             continue;
         CHECK_FALSE(orLeaveGuardRewrite(*this, uri, line, 6));
     }
 
-    // a parenthesized if-then-else is its own operand
-    auto edit = orLeaveGuardRewrite(*this, uri, 5, 6);
+    // a comparison is kept as written, and a statement can start with `#`
+    auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "a ~= (if b then c else nil)\n        or return;");
+    CHECK_EQ(edit->newText, "a < b\n        and return;");
+
+    edit = orLeaveGuardRewrite(*this, uri, 4, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "#a\n        or return;");
+
+    // a parenthesized if-then-else is its own operand
+    edit = orLeaveGuardRewrite(*this, uri, 5, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "a == (if b then c else nil)\n        and return;");
+}
+
+TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_each_condition_as_its_own_guard")
+{
+    ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
+
+    auto uri = newDocument("test.luau", R"(
+local function f(r)
+    if not r.ok or r.out == "" then
+        return nil
+    end
+    return r.out
+end
+)");
+
+    auto actions = codeActionsAt(*this, uri, 2, 8, {lsp::CodeActionKind::RefactorRewrite});
+    REQUIRE(findCodeAction(actions, "Rewrite as one guard per condition"));
+
+    auto edit = orLeaveGuardRewrite(*this, uri, 2, 8);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "r.ok\n        or return nil\n    r.out == \"\"\n        and return nil");
 }
 
 TEST_CASE_FIXTURE(Fixture, "or_leave_guard_needs_the_do_expression_flag")

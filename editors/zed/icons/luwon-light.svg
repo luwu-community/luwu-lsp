@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- A .luwon data file: braces like a JSON icon, in the two colours of the Luwu mask -->
+  <path d="M 24 6 C 14 6 18 20 16 27 C 15 30 10 32 7 32 C 10 32 15 34 16 37 C 18 44 14 58 24 58" fill="none" stroke="#f08a2a" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M 24 6 C 14 6 18 20 16 27 C 15 30 10 32 7 32 C 10 32 15 34 16 37 C 18 44 14 58 24 58" fill="none" stroke="#862a44" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(64 0) scale(-1 1)" />
+</svg>

@@ -457,6 +457,97 @@ static std::string moduleNameForUri(const lsp::DocumentUri& uri)
     return name;
 }
 
+// Summarizes a class that has no source to read, like a builtin class from a definition file, from its types alone.
+// Members come in name order because the declaration order is gone, and nothing marks a primary constructor, so the
+// header shows `__call`'s parameters whenever the class value has one.
+static std::string buildDeclaredClassSummary(
+    const Luau::ModulePtr& module, const Luau::ExternType* et, const Luau::ScopePtr& scope, bool showTableKinds, bool isClassValue,
+    size_t maxMembers
+)
+{
+    const Luau::ExternType* objectEt = et;
+    if (isClassValue && et->relation)
+        if (const auto* obj = Luau::get_if<Luau::Obj>(&*et->relation))
+            if (const auto* objectExternType = Luau::get<Luau::ExternType>(Luau::follow(obj->ty)))
+                objectEt = objectExternType;
+
+    std::string header = "class " + et->name;
+    if (isClassValue && et->metatable)
+        if (auto mt = Luau::get<Luau::TableType>(Luau::follow(*et->metatable)))
+            if (auto it = mt->props.find("__call"); it != mt->props.end() && it->second.readTy)
+                if (auto ctorFtv = Luau::get<Luau::FunctionType>(Luau::follow(*it->second.readTy)))
+                {
+                    types::ToStringNamedFunctionOpts funcOpts;
+                    funcOpts.hideTableKind = !showTableKinds;
+                    funcOpts.hideFirstParameter = true;
+                    header += extractArgList(types::toStringNamedFunction(module, ctorFtv, std::string(""), scope, funcOpts));
+                }
+
+    std::vector<std::string> fieldLines;
+    std::vector<std::string> functionLines;
+    size_t totalFields = 0;
+    size_t totalFunctions = 0;
+
+    // `skip` holds members listed from elsewhere: the class value also carries a copy of each instance method
+    auto addMembers = [&](const Luau::ExternType* owner, const Luau::ExternType* skip)
+    {
+        for (const auto& [name, prop] : owner->props())
+        {
+            if (isDunderName(name) || (prop.isPrivate && !isClassValue))
+                continue;
+            if (skip && skip->props().count(name))
+                continue;
+
+            std::optional<Luau::TypeId> ty = prop.readTy ? prop.readTy : prop.writeTy;
+            if (!ty)
+                continue;
+
+            std::string qualifiers = std::string(prop.isPrivate ? "private " : "public ") + (prop.isConst ? "const " : "");
+            if (auto ftv = Luau::get<Luau::FunctionType>(Luau::follow(*ty)))
+            {
+                totalFunctions++;
+                if (functionLines.size() >= maxMembers)
+                    continue;
+
+                types::ToStringNamedFunctionOpts funcOpts;
+                funcOpts.hideTableKind = !showTableKinds;
+                funcOpts.hideFirstParameterType = !ftv->argNames.empty() && ftv->argNames[0] && ftv->argNames[0]->name == "self";
+                funcOpts.baseIndent = "    ";
+                functionLines.push_back("    " + qualifiers + types::toStringNamedFunction(module, ftv, name, scope, funcOpts));
+            }
+            else
+            {
+                totalFields++;
+                if (fieldLines.size() >= maxMembers)
+                    continue;
+
+                fieldLines.push_back("    " + qualifiers + name + ": " + Luau::toString(Luau::follow(*ty)));
+            }
+        }
+    };
+
+    // Statics first, as in a class with source: they're called on the class value the header describes
+    if (isClassValue && objectEt != et)
+        addMembers(et, objectEt);
+    addMembers(objectEt, nullptr);
+
+    auto elidedLine = [](size_t elided)
+    {
+        return "    -- ⋯ " + std::to_string(elided) + " more member" + (elided == 1 ? "" : "s") + "\n";
+    };
+
+    std::string summary = header + "\n";
+    for (const auto& line : fieldLines)
+        summary += line + "\n";
+    if (totalFields > fieldLines.size())
+        summary += elidedLine(totalFields - fieldLines.size());
+    for (const auto& line : functionLines)
+        summary += line + "\n";
+    if (totalFunctions > functionLines.size())
+        summary += elidedLine(totalFunctions - functionLines.size());
+    return summary + "end";
+}
+
 static std::optional<std::string> buildClassFieldSummary(
     Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::ModuleName& moduleName, Luau::TypeId typeId, const Luau::ExternType* et,
     const Luau::ScopePtr& scope, bool showTableKinds, bool isClassValue, size_t maxMembers = kMaxSummaryMembers
@@ -469,11 +560,11 @@ static std::optional<std::string> buildClassFieldSummary(
     // up whenever it isn't the current one.
     const Luau::ModuleName& definitionModuleName = et->definitionModuleName;
     if (definitionModuleName.empty())
-        return std::nullopt;
+        return buildDeclaredClassSummary(module, et, scope, showTableKinds, isClassValue, maxMembers);
 
     auto sourceModule = frontend.getSourceModule(definitionModuleName);
     if (!sourceModule)
-        return std::nullopt;
+        return buildDeclaredClassSummary(module, et, scope, showTableKinds, isClassValue, maxMembers);
 
     // Needed only to resolve an annotation the ExternType's own props don't already carry a type
     // for. Those lookups are keyed by AST node, so they have to be made against the declaring
@@ -484,7 +575,7 @@ static std::optional<std::string> buildClassFieldSummary(
     FindClassStatByName finder(et->name);
     sourceModule->root->visit(&finder);
     if (!finder.result)
-        return std::nullopt;
+        return buildDeclaredClassSummary(module, et, scope, showTableKinds, isClassValue, maxMembers);
 
     // Fields and functions are collected separately so the summary can always print every field
     // before any function, regardless of the order they appear in the source. A class's fields are

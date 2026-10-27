@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Luwu's mask: a two-tone cat face split down the middle, with pointed ears, whisker spikes and two eye
+       slits. After the contributor's icon concept (luau-svg-icons-concept.fig), with flatter sides. -->
+  <defs>
+    <path id="half" d="M 18.5 0
+      C 16 6 13.5 13 12.5 21
+      C 12 27 11.6 33 11 40
+      L 0 45
+      L 12.5 49
+      L 9 57
+      L 17.5 53.5
+      L 22 64
+      L 25.5 58.5
+      L 30.4 59.5
+      L 30.4 21.5
+      C 28.5 21.5 25.5 16 22.5 9
+      Z" />
+    <rect id="eye" x="21" y="36" width="5" height="12" rx="2.5" />
+  </defs>
+  <use href="#half" fill="#f08a2a" />
+  <use href="#half" fill="#8b5cf6" transform="translate(64 0) scale(-1 1)" />
+  <use href="#eye" fill="#1d1d1f" />
+  <use href="#eye" fill="#1d1d1f" transform="translate(64 0) scale(-1 1)" />
+</svg>

@@ -56,3 +56,6 @@ trace.json
 # Archives made by package.luau
 /luwu-linux-*.tar.gz
 /luwu-language-server-*.tar.gz
+
+# Agent notes, kept out of the repo
+*.ignore.md

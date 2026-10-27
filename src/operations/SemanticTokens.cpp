@@ -312,6 +312,13 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     // way Hover and CodeAction do it.
     bool visit(Luau::AstStatClass* klass) override
     {
+        // The name a class or trait declares. Uses of it are coloured through its type, but the declaration
+        // is no expression, so without this the header's name is the one place the name goes uncoloured
+        // (a tree-sitter editor has no grammar for the header either).
+        tokens.emplace_back(SemanticToken{klass->name->location.begin, klass->name->location.end,
+            klass->isTrait ? lsp::SemanticTokenTypes::Interface : lsp::SemanticTokenTypes::Class,
+            lsp::SemanticTokenModifiers::Declaration});
+
         if (!klass->primaryConstructor)
             return true;
 

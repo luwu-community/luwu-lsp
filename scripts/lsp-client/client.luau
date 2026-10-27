@@ -332,6 +332,30 @@ function Client.hover(self: Client, file: string, position: Position): string?
     return if type(hover.contents) == "string" then hover.contents else hover.contents.value
 end
 
+--- The labels of the signatures signature help shows at a position, the active one first
+function Client.signature_help(self: Client, file: string, position: Position): { string }
+    type SignatureHelp = {
+        signatures: { { label: string } },
+        activeSignature: number?,
+    }
+    const help = self:request("textDocument/signatureHelp", text_document_position(self:uri(file), position)) :: SignatureHelp?
+    if type(help) ~= "table" then
+        return {}
+    end
+
+    const labels = {}
+    const active = (help.activeSignature or 0) + 1
+    if help.signatures[active] then
+        table.insert(labels, help.signatures[active].label)
+    end
+    for index, signature in help.signatures do
+        if index ~= active then
+            table.insert(labels, signature.label)
+        end
+    end
+    return labels
+end
+
 --- The labels of the completions at a position. luwu-lsp answers with a plain list of items.
 function Client.completion(self: Client, file: string, position: Position): { string }
     const items = self:request("textDocument/completion", text_document_position(self:uri(file), position)) :: { CompletionItem }?

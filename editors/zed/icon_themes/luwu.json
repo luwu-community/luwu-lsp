@@ -1,0 +1,77 @@
+{
+  "$schema": "https://zed.dev/schema/icon_themes/v0.3.0.json",
+  "name": "Luwu",
+  "author": "Luwu community",
+  "themes": [
+    {
+      "name": "Luwu",
+      "appearance": "dark",
+      "directory_icons": {},
+      "chevron_icons": {},
+      "file_suffixes": {
+        "luwu": "luwu",
+        "luau": "luau",
+        "luaurc": "luau-config",
+        "luwon": "luwon"
+      },
+      "file_icons": {
+        "luwu": {
+          "path": "./icons/luwu-dark.svg"
+        },
+        "luau": {
+          "path": "./icons/luau-dark.svg"
+        },
+        "luau-config": {
+          "path": "./icons/luau-config-dark.svg"
+        },
+        "luwu-config": {
+          "path": "./icons/luwu-config-dark.svg"
+        },
+        "luwon": {
+          "path": "./icons/luwon-dark.svg"
+        }
+      },
+      "file_stems": {
+        ".luaurc": "luau-config",
+        ".config.luau": "luau-config",
+        ".config.luwon": "luwu-config",
+        "luwu.luwon": "luwu-config"
+      }
+    },
+    {
+      "name": "Luwu Light",
+      "appearance": "light",
+      "directory_icons": {},
+      "chevron_icons": {},
+      "file_suffixes": {
+        "luwu": "luwu",
+        "luau": "luau",
+        "luaurc": "luau-config",
+        "luwon": "luwon"
+      },
+      "file_icons": {
+        "luwu": {
+          "path": "./icons/luwu-light.svg"
+        },
+        "luau": {
+          "path": "./icons/luau-light.svg"
+        },
+        "luau-config": {
+          "path": "./icons/luau-config-light.svg"
+        },
+        "luwu-config": {
+          "path": "./icons/luwu-config-light.svg"
+        },
+        "luwon": {
+          "path": "./icons/luwon-light.svg"
+        }
+      },
+      "file_stems": {
+        ".luaurc": "luau-config",
+        ".config.luau": "luau-config",
+        ".config.luwon": "luwu-config",
+        "luwu.luwon": "luwu-config"
+      }
+    }
+  ]
+}

@@ -17,6 +17,8 @@
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
+LUAU_FASTFLAG(LuauExportValueSyntax)
+LUAU_FASTFLAG(LuauExportValueTypecheck)
 LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTINT(LuauTableTypeMaximumStringifierLength)
@@ -119,6 +121,12 @@ void applyLuwuFlags(bool luauCompatibilityMode)
     // be called `class` -- an upstream-named flag, so the loop above doesn't reach it. Without it the whole library
     // types as an error, and the refinements `isinstance` and `implements` carry are never attached.
     FFlag::LuauAllowGlobalDeclarationToBeCalledClass.value = enabled;
+
+    // Export values (`export name = value`) are an upstream RFC that Luwu ships, parsed and typechecked behind these
+    // upstream-named flags (rfcs/UPSTREAM.md). Without them, a client that leaves `fflags.enableByDefault` off (the
+    // extension's default) reports `export` as an unknown variable.
+    FFlag::LuauExportValueSyntax.value = enabled;
+    FFlag::LuauExportValueTypecheck.value = enabled;
 
     // Lets a file's `--!trust` take effect when the server compiles it (compiler remarks, inlining in hovers), as it does
     // in seal, which turns this on. The directive does nothing without it.
