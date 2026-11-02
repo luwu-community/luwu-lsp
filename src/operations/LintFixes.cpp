@@ -255,7 +255,7 @@ std::optional<LintFix> fixTableTruthiness(const Luau::LintWarning& lint, const F
 }
 
 // DiscardedResult: a pure builtin or `@nodiscard` function called as a statement. Discarding it on purpose is the fix
-// that applies to every one; a string method gets a second fix that keeps its result.
+// that applies to every one; a string method gets a second fix that assigns its result.
 std::vector<LintFix> fixDiscardedResult(const Luau::LintWarning& lint, const FixContext& context)
 {
     auto call = context.find<Luau::AstExprCall>(lint.location);
@@ -424,7 +424,7 @@ bool needsParenthesesAsFloorDivision(Luau::AstStatBlock* root, Luau::AstExpr* ex
     return finder.result;
 }
 
-// FloorDivision: `math.floor(a / b)` is `a // b`. The operands keep their text, comments included.
+// FloorDivision: `math.floor(a / b)` is `a // b`. The operands' text doesn't change, comments included.
 std::optional<LintFix> fixFloorDivision(const Luau::LintWarning& lint, const FixContext& context)
 {
     auto call = context.find<Luau::AstExprCall>(lint.location);

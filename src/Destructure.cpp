@@ -173,7 +173,7 @@ std::optional<std::string> layOutDestructureOnOneLine(
 }
 
 // The pattern one field per line, each with a trailing comma, and the `}` back at the indentation of the line the
-// pattern starts on. Nested patterns keep their layout.
+// pattern starts on. Nested patterns' layout doesn't change.
 std::string layOutFieldsOnePerLine(const std::string& opening, const std::vector<std::string>& fields, size_t line, const TextDocument& textDocument)
 {
     std::string baseIndent = getLineIndentation(textDocument, line);

@@ -562,10 +562,24 @@ const cat: Cat = { -- throws type error if missing any fields
 <!-- /keyword -->
 
 <!-- keyword: read -->
-Set a table property as readonly.
+Makes a field of a table type readonly. Code can read the field but can't assign to it.
+
+```luwu
+type Point = { read x: number, read y: number }
+const tags: { read string } = { "cat", "dog" }
+```
+
+On an indexer (`{ read string }` or `{ read [string]: number }`) every entry is readonly.
 <!-- /keyword -->
 
 <!-- keyword: write -->
+Makes a field of a table type write-only. Code can assign to the field but can't read it.
+
+```luwu
+type Sink = { write value: number }
+```
+
+A field written without `read` or `write` can be both read and assigned.
 <!-- /keyword -->
 
 <!-- keyword: self -->

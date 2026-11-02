@@ -273,13 +273,17 @@ const handleExternalFiles = async (
 
 /// The language ID each entry of `luwu.fileExtensions` corresponds to.
 /// `.luwu` and `.luau` are our own contributed languages; `.lua` is VSCode's
-/// built-in one, which we attach to without claiming (it keeps its own icon
+/// built-in one, which we attach to without claiming (it uses its own icon
 /// and grammar).
 const LANGUAGE_ID_BY_FILE_EXTENSION: Record<string, string> = {
   luwu: "luwu",
   luau: "luau",
   lua: "lua",
 };
+
+/// `.luwon` data files (`luwon-config` for Luwu's configuration) are served
+/// whatever `luwu.fileExtensions` says: no other language server reads them.
+const ALWAYS_SERVED_LANGUAGE_IDS: readonly string[] = ["luwon", "luwon-config"];
 
 /// The documents the language client attaches to. Dropping an extension from
 /// `luwu.fileExtensions` leaves those files to whichever language server
@@ -288,11 +292,12 @@ const LANGUAGE_ID_BY_FILE_EXTENSION: Record<string, string> = {
 export function buildDocumentSelector(
   fileExtensions: readonly string[],
 ): NonNullable<LanguageClientOptions["documentSelector"]> {
-  const languages = new Set(
-    fileExtensions
+  const languages = new Set([
+    ...fileExtensions
       .map((extension) => LANGUAGE_ID_BY_FILE_EXTENSION[extension])
       .filter((language): language is string => language !== undefined),
-  );
+    ...ALWAYS_SERVED_LANGUAGE_IDS,
+  ]);
 
   return [...languages].flatMap((language) => [
     { language, scheme: "file" },
@@ -630,7 +635,7 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
       workspace: {
         // The server asks for the `luau-lsp` section, which is the wire
         // name every client uses -- including the nvim and zed ones, which
-        // we don't ship and can't rename. Our settings live under
+        // we don't ship and can't rename. Our settings go under
         // `luwu-lsp` and fall back to `luau-lsp`, and only the client can
         // tell a value someone wrote from a declared default, so the two
         // namespaces are reconciled here rather than in the server.

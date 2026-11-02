@@ -28,7 +28,17 @@ NLOHMANN_DEFINE_OPTIONAL(ConfigurationParams, items)
 using GetConfigurationResponse = std::vector<json>;
 
 using Pattern = std::string;
-using GlobPattern = Pattern; // | RelativePattern
+
+// A pattern matched against paths relative to `baseUri`, which may be outside every workspace folder
+struct RelativePattern
+{
+    DocumentUri baseUri;
+    Pattern pattern;
+};
+NLOHMANN_DEFINE_OPTIONAL(RelativePattern, baseUri, pattern)
+
+// A Pattern or a RelativePattern
+using GlobPattern = json;
 
 enum WatchKind
 {

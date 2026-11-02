@@ -106,6 +106,8 @@ struct FindBracketListAtPosition : Luau::AstVisitor
     {
         if (node->body && node->body->location.containsClosed(targetPosition))
             result.reset();
+        else
+            considerGenerics(node->generics, node->genericPacks);
         if (node->argLocation && node->argLocation->containsClosed(targetPosition))
             result = BracketList{*node->argLocation, {}, "parameter", "parameters"};
         return true;
@@ -113,9 +115,29 @@ struct FindBracketListAtPosition : Luau::AstVisitor
 
     bool visit(Luau::AstStatClass* node) override
     {
+        if (!node->location.containsClosed(targetPosition))
+            return true;
+
+        considerGenerics(node->generics, node->genericPacks);
         if (node->primaryConstructor && node->primaryConstructor->argLocation.containsClosed(targetPosition))
             result = BracketList{node->primaryConstructor->argLocation, {}, "parameter", "parameters"};
+
+        // Luwu Traits: a trait's arguments in an `implements` list, `Element("div", 2)`
+        for (const auto& ref : node->implements)
+        {
+            std::vector<Luau::Position> itemEnds;
+            for (const auto* arg : ref.args)
+                itemEnds.push_back(arg->location.end);
+            considerList(ref.argsLocation.begin, '(', std::move(itemEnds), "argument", "arguments", false, false);
+        }
         return true;
+    }
+
+    // Luwu Declare Statements: `declare class` and `class type` store their class as a shape, which the visitor doesn't
+    // walk
+    bool visit(Luau::AstStatDeclareClass* node) override
+    {
+        return visit(node->shape);
     }
 
     bool visit(Luau::AstExprCall* node) override
@@ -164,6 +186,184 @@ struct FindBracketListAtPosition : Luau::AstVisitor
                 list.itemEnds.push_back(item.value->location.end);
             result = std::move(list);
         }
+        return true;
+    }
+
+    // A list written in brackets whose AST records only its items: the first `open` bracket at or after `from`, through
+    // the bracket closing it after the last item (and a trailing separator, if any)
+    void considerList(const Luau::Position& from, char open, std::vector<Luau::Position> itemEnds, const char* singular, const char* plural,
+        bool padded, bool trailingComma)
+    {
+        if (itemEnds.empty())
+            return;
+
+        static const std::unordered_map<char, char> closers{{'{', '}'}, {'(', ')'}, {'[', ']'}, {'<', '>'}};
+        const std::string& text = textDocument.getText();
+        auto offsetOf = [&](const Luau::Position& position)
+        {
+            return textDocument.offsetAt(textDocument.convertPosition(position));
+        };
+
+        size_t openAt = skipWhitespaceAndComments(text, offsetOf(from));
+        if (openAt >= text.size() || text[openAt] != open)
+            return;
+
+        size_t closeAt = skipWhitespaceAndComments(text, offsetOf(itemEnds.back()));
+        if (closeAt < text.size() && (text[closeAt] == ',' || text[closeAt] == ';'))
+            closeAt = skipWhitespaceAndComments(text, closeAt + 1);
+        if (closeAt >= text.size() || text[closeAt] != closers.at(open))
+            return;
+
+        Luau::Location location{textDocument.convertPosition(textDocument.positionAt(openAt)),
+            textDocument.convertPosition(textDocument.positionAt(closeAt + 1))};
+        if (location.containsClosed(targetPosition))
+            result = BracketList{location, std::move(itemEnds), singular, plural, padded, trailingComma};
+    }
+
+    // A generic declaration list, `<T, U...>`, found from the `<` before its first generic
+    void considerGenerics(const Luau::AstArray<Luau::AstGenericType*>& generics, const Luau::AstArray<Luau::AstGenericTypePack*>& genericPacks)
+    {
+        std::vector<Luau::Location> locations;
+        for (const auto* generic : generics)
+            locations.push_back(generic->location);
+        for (const auto* genericPack : genericPacks)
+            locations.push_back(genericPack->location);
+        if (locations.empty())
+            return;
+        std::sort(locations.begin(), locations.end(), [](const auto& a, const auto& b) { return a.begin < b.begin; });
+
+        const std::string& text = textDocument.getText();
+        size_t openAt = textDocument.offsetAt(textDocument.convertPosition(locations.front().begin));
+        while (openAt > 0 && isspace(static_cast<unsigned char>(text[openAt - 1])))
+            --openAt;
+        if (openAt == 0 || text[openAt - 1] != '<')
+            return;
+
+        std::vector<Luau::Position> itemEnds;
+        for (const auto& location : locations)
+            itemEnds.push_back(location.end);
+        considerList(textDocument.convertPosition(textDocument.positionAt(openAt - 1)), '<', std::move(itemEnds), "generic", "generics", false, false);
+    }
+
+    // Where a parameter list starts: past the `>` of the generics before it, if there are any
+    std::optional<Luau::Position> afterGenerics(
+        Luau::Position from, const Luau::AstArray<Luau::AstGenericType*>& generics, const Luau::AstArray<Luau::AstGenericTypePack*>& genericPacks)
+    {
+        Luau::Position lastEnd = from;
+        for (const auto* generic : generics)
+            lastEnd = std::max(lastEnd, generic->location.end);
+        for (const auto* genericPack : genericPacks)
+            lastEnd = std::max(lastEnd, genericPack->location.end);
+        if (lastEnd == from)
+            return from;
+
+        const std::string& text = textDocument.getText();
+        size_t close = skipWhitespaceAndComments(text, textDocument.offsetAt(textDocument.convertPosition(lastEnd)));
+        if (close >= text.size() || text[close] != '>')
+            return std::nullopt;
+        return textDocument.convertPosition(textDocument.positionAt(close + 1));
+    }
+
+    bool visit(Luau::AstStatTypeAlias* node) override
+    {
+        considerGenerics(node->generics, node->genericPacks);
+        return true;
+    }
+
+    // `declare function f(name: string, age: number): boolean`
+    bool visit(Luau::AstStatDeclareFunction* node) override
+    {
+        if (!node->location.containsClosed(targetPosition))
+            return true;
+        considerGenerics(node->generics, node->genericPacks);
+
+        std::vector<Luau::Position> itemEnds;
+        for (auto* type : node->params.types)
+            itemEnds.push_back(type->location.end);
+        if (node->params.tailType)
+            itemEnds.push_back(node->params.tailType->location.end);
+        if (auto from = afterGenerics(node->nameLocation.end, node->generics, node->genericPacks))
+            considerList(*from, '(', std::move(itemEnds), "parameter", "parameters", false, false);
+        return true;
+    }
+
+    // Types are left out of a visit unless asked for, which would leave every list written in a type without a layout
+    bool visit(Luau::AstType*) override
+    {
+        return true;
+    }
+
+    bool visit(Luau::AstTypePack*) override
+    {
+        return true;
+    }
+
+    // `{ name: string, age: number }` or `{ T }`. The array shorthand takes no trailing comma.
+    bool visit(Luau::AstTypeTable* node) override
+    {
+        if (!node->location.containsClosed(targetPosition))
+            return true;
+
+        std::vector<Luau::Position> itemEnds;
+        for (const auto& prop : node->props)
+            itemEnds.push_back(prop.type->location.end);
+        if (node->indexer)
+            itemEnds.push_back(node->indexer->resultType->location.end);
+        std::sort(itemEnds.begin(), itemEnds.end());
+
+        const std::string& text = textDocument.getText();
+        size_t first = skipWhitespaceAndComments(text, textDocument.offsetAt(textDocument.convertPosition(node->location.begin)) + 1);
+        bool arrayShorthand = node->props.size == 0 && node->indexer && first < text.size() && text[first] != '[';
+
+        considerList(node->location.begin, '{', std::move(itemEnds), "field", "fields", /* padded= */ true, /* trailingComma= */ !arrayShorthand);
+        return true;
+    }
+
+    // `pair<Semver, Semver>`
+    bool visit(Luau::AstTypeReference* node) override
+    {
+        if (!node->hasParameterList || !node->location.containsClosed(targetPosition))
+            return true;
+
+        std::vector<Luau::Position> itemEnds;
+        for (const auto& parameter : node->parameters)
+            itemEnds.push_back(parameter.type ? parameter.type->location.end : parameter.typePack->location.end);
+        considerList(node->nameLocation.end, '<', std::move(itemEnds), "type argument", "type arguments", false, false);
+        return true;
+    }
+
+    // `(name: string, age: number) -> ()`, after its generics if it has any
+    bool visit(Luau::AstTypeFunction* node) override
+    {
+        if (!node->location.containsClosed(targetPosition))
+            return true;
+
+        considerGenerics(node->generics, node->genericPacks);
+        std::optional<Luau::Position> from = afterGenerics(node->location.begin, node->generics, node->genericPacks);
+        if (!from)
+            return true;
+
+        std::vector<Luau::Position> itemEnds;
+        for (auto* type : node->argTypes.types)
+            itemEnds.push_back(type->location.end);
+        if (node->argTypes.tailType)
+            itemEnds.push_back(node->argTypes.tailType->location.end);
+        considerList(*from, '(', std::move(itemEnds), "parameter", "parameters", false, false);
+        return true;
+    }
+
+    // A function type's returns, `-> (string, number)`
+    bool visit(Luau::AstTypePackExplicit* node) override
+    {
+        if (!node->location.containsClosed(targetPosition) || node->typeList.types.size + (node->typeList.tailType ? 1 : 0) < 2)
+            return true;
+
+        std::vector<Luau::Position> itemEnds;
+        for (auto* type : node->typeList.types)
+            itemEnds.push_back(type->location.end);
+        if (node->typeList.tailType)
+            itemEnds.push_back(node->typeList.tailType->location.end);
+        considerList(node->location.begin, '(', std::move(itemEnds), "type", "types", false, false);
         return true;
     }
 };
@@ -224,7 +424,7 @@ std::string layOutOnePerLine(const std::vector<std::string>& elements, const Tex
     return text;
 }
 
-// `item`'s lines after its first moved from the indentation `from` to `to`, so a multi-line item keeps its shape when
+// `item`'s lines after its first moved from the indentation `from` to `to`, so a multi-line item's shape doesn't change when
 // the list around it is laid out again. A long string's lines are its contents and stay as they are.
 std::string reindent(const std::string& item, const std::string& from, const std::string& to)
 {
@@ -431,7 +631,7 @@ void generateTraitListWrapAction(const lsp::DocumentUri& uri, const lsp::CodeAct
         addListLayoutAction(uri, context, "Put traits on one line", range, layOutOnOneLine(traits), result);
     else
     {
-        // Only the list is replaced, so `implements A, B` keeps its space and becomes `implements (`
+        // Only the list is replaced, so the space in `implements A, B` stays and it becomes `implements (`
         std::string newText = layOutOnePerLine(traits, textDocument, traitList.keyword.begin.line);
         addListLayoutAction(uri, context, "Put each trait on its own line", range, newText, result);
     }
@@ -462,6 +662,11 @@ struct FindTraitListAtPosition : Luau::AstVisitor
                 result = traitList;
         }
         return true;
+    }
+
+    bool visit(Luau::AstStatDeclareClass* node) override
+    {
+        return visit(node->shape);
     }
 };
 
@@ -1378,7 +1583,7 @@ struct FindAndOrExpressions : Luau::AstVisitor
 {
     std::vector<Luau::Location> targets;
     std::vector<Luau::AstExprBinary*> found;
-    // An and-or that is an operand of another expression has to keep its own parentheses once it's an if-then-else,
+    // An and-or that is an operand of another expression needs its own parentheses once it's an if-then-else,
     // which reaches as far right as it can: `a and b or c or d` would become `if a then b else (c or d)`
     std::unordered_set<Luau::AstExprBinary*> needsParentheses;
 
@@ -1796,8 +2001,9 @@ void generateAppendSwitches(const lsp::DocumentUri& uri, Luau::AstStatBlock* roo
     }
 }
 
-// Luwu Do Expressions: `if not x then return y end` -> `x` with `or return y` on the next line, one level in, and
-// `if x then return y end` the same with `and`. An `if` with several conditions gets one guard per condition.
+// Luwu Do Expressions: `if not x then return y end` -> `x or return y`, and `if x then return y end` -> `x and return y`.
+// An `if` with several conditions gets one guard per condition. A guard stays on one line. When that line is too long,
+// the InlineOrLeave lint's fix moves the exit to the next line.
 void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* node, const Luau::SourceModule& sourceModule,
     const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
 {
@@ -1835,7 +2041,7 @@ void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* n
     for (const auto& condition : conditions)
     {
         newText += newText.empty() ? "" : "\n" + indent;
-        newText += condition.tested + "\n" + indent + detectIndentUnit(textDocument) + condition.joiner + " " + leaveText;
+        newText += condition.tested + " " + condition.joiner + " " + leaveText;
     }
 
     std::string title = conditions.size() == 1 ? std::string("Rewrite as '") + conditions[0].joiner + " " + leaveKeyword(leave) + "' guard"
@@ -2003,7 +2209,7 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             generateImportFieldAction(params.textDocument.uri, params.context, requestRange.begin, *sourceModule, *module, builtinTypes, facts,
                 *textDocument, importActions);
 
-            if (destructureFinder.result && destructureFinder.result->pattern)
+            if (destructureFinder.result && destructureFinder.result->pattern && !destructureFinder.result->pattern->positional)
             {
                 const Luau::AstDestructurePattern& pattern = *destructureFinder.result->pattern;
                 generateQualifyFieldAction(params.textDocument.uri, params.context, requestRange.begin, pattern, *module, builtinTypes, facts,

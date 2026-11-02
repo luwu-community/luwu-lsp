@@ -5,11 +5,17 @@
 #include "Flags.hpp"
 
 LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(DebugLuwuMatchExpressions)
+LUAU_FASTFLAG(LuwuDestructuring)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuTableFunctionFields)
 LUAU_FASTFLAG(DebugLuwuUserDefinedRefinements)
 LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
+LUAU_FASTFLAG(DebugLuwuCollections)
+LUAU_FASTFLAG(DebugLuwuTryExpressions)
+LUAU_FASTFLAG(LuwuNonePrimitive)
+LUAU_FASTFLAG(LuwuDeclareStatements)
 
 TEST_SUITE_BEGIN("Hover");
 
@@ -160,6 +166,97 @@ TEST_CASE_FIXTURE(Fixture, "named_function_in_a_table_literal_hovers_as_the_func
     REQUIRE(result);
     CHECK_MESSAGE(result->contents.value.find("string") == std::string::npos, result->contents.value);
     CHECK_MESSAGE(result->contents.value.find("number") != std::string::npos, result->contents.value);
+}
+
+TEST_CASE_FIXTURE(Fixture, "type_test_keyword_does_not_hover_as_the_class_library")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("main.luwu", "class Point(public x: number) end\n"
+                                        "local p: unknown = Point(1)\n"
+                                        "local a = p is Point\n");
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+
+    // `is`, which is between the operands of the `class.isinstance(p, Point)` it's parsed as
+    params.position = lsp::Position{2, 13};
+    CHECK_FALSE(workspace.hover(params, nullptr));
+
+    // `Point` is still hovered as the class
+    params.position = lsp::Position{2, 16};
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_MESSAGE(result->contents.value.find("class Point") != std::string::npos, result->contents.value);
+}
+
+TEST_CASE_FIXTURE(Fixture, "type_test_operands_and_bindings_in_a_condition_hover_with_their_types")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("main.luwu", "class Point(public x: number) end\n"
+                                        "local p: unknown = Point(1)\n"
+                                        "if p is Point.(px) then\n"
+                                        "    print(px)\n"
+                                        "end\n"
+                                        "if p is Point.{x as py} then\n"
+                                        "    print(py)\n"
+                                        "end\n"
+                                        "if p is Point then\n"
+                                        "    print(p)\n"
+                                        "end\n");
+
+    auto hoverAt = [&](size_t line, size_t column) -> std::string
+    {
+        lsp::HoverParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = lsp::Position{line, column};
+        auto result = workspace.hover(params, nullptr);
+        return result ? result->contents.value : "";
+    };
+
+    // The tested value, before and after a pattern
+    for (size_t line : {2, 5, 8})
+    {
+        std::string tested = hoverAt(line, 3);
+        CHECK_MESSAGE(tested.find("local p: unknown") != std::string::npos, line << ": " << tested);
+    }
+
+    // Each binding, where the pattern declares it
+    std::string px = hoverAt(2, 15);
+    CHECK_MESSAGE(px.find("px: number") != std::string::npos, px);
+    std::string py = hoverAt(5, 20);
+    CHECK_MESSAGE(py.find("py: number") != std::string::npos, py);
+}
+
+TEST_CASE_FIXTURE(Fixture, "read_and_write_in_table_types_hover_as_keywords")
+{
+    ENABLE_NEW_SOLVER();
+
+    auto uri = newDocument("main.luwu", "type Markup = { name: string }\n"
+                                        "type A = { read Markup }\n"
+                                        "type B = { read [string]: number }\n"
+                                        "type C = { write name: string, read age: number }\n");
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+
+    auto hoverAt = [&](unsigned int line, unsigned int character)
+    {
+        params.position = lsp::Position{line, character};
+        auto result = workspace.hover(params, nullptr);
+        return result ? result->contents.value : std::string("<no hover>");
+    };
+
+    CHECK_EQ(hoverAt(1, 12), getKeywordHoverDocs("read").value_or("<no docs>"));
+    CHECK_EQ(hoverAt(2, 12), getKeywordHoverDocs("read").value_or("<no docs>"));
+    CHECK_EQ(hoverAt(3, 12), getKeywordHoverDocs("write").value_or("<no docs>"));
+    CHECK_EQ(hoverAt(3, 33), getKeywordHoverDocs("read").value_or("<no docs>"));
 }
 
 TEST_CASE_FIXTURE(Fixture, "basic_type_alias_declaration")
@@ -371,7 +468,7 @@ TEST_CASE_FIXTURE(Fixture, "documentation_to_the_right_of_a_property")
 
 TEST_CASE_FIXTURE(Fixture, "documentation_a_type_function_put_in_metadata")
 {
-    // a rebuilt type keeps its source's docs; a type function can set its own, and only `---` and block comments count
+    // a rebuilt type has its source's docs; a type function can set its own, and only `---` and block comments count
     auto source = R"(
         type function Redoc(t)
             local out = types.copy(t)
@@ -1698,7 +1795,7 @@ TEST_CASE_FIXTURE(Fixture, "primary_constructor_parameter_hover_prefers_its_own_
 
 TEST_CASE_FIXTURE(Fixture, "class_summary_works_for_a_class_required_from_another_module")
 {
-    // The summary is built from the class's AST, which lives in the module that declared it -- this
+    // The summary is built from the class's AST, which is in the module that declared it -- this
     // used to bail out whenever that wasn't the module being hovered in, so a class reached through
     // a require (the ordinary way to use one) fell back to printing just its name.
     ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
@@ -1907,6 +2004,35 @@ TEST_CASE_FIXTURE(ClassFixture, "hovering_over_the_class_type_doesnt_call_it_an_
     CHECK(hover.find("class") != std::string::npos);
 }
 
+TEST_CASE_FIXTURE(Fixture, "implements_entry_shows_the_members_documentation")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+
+    // `implements luwon.data` is documented the same way
+    auto uri = newDocument("foo.luwu", R"(
+trait Named
+    expect public name: string
+end
+type Traits = {
+    --- The trait for named things
+    Named: trait<Named>,
+}
+const traits: Traits = { Named = Named }
+class Cat(public name: string) implements traits.Named end
+)");
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{9, 50};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_NE(result->contents.value.find("The trait for named things"), std::string::npos);
+    CHECK_EQ(result->contents.value.find("A trait's value"), std::string::npos);
+}
+
 TEST_CASE_FIXTURE(Fixture, "class_and_trait_hovers_reference_their_traits")
 {
     ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
@@ -1972,6 +2098,26 @@ struct RefinementFixture
     , Fixture
 {
 };
+
+TEST_CASE_FIXTURE(RefinementFixture, "implements_luwon_data_shows_its_documentation")
+{
+    client->documentation["@luau/global/luwon.data"] = Luau::BasicDocumentation{"How a class is built from data files"};
+
+    // The trait's own docs, not what a trait is
+    auto uri = newDocument("foo.luwu", R"(
+class Semver(public major: number) implements luwon.data
+end
+)");
+
+    lsp::HoverParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = lsp::Position{1, 52};
+
+    auto result = workspace.hover(params, nullptr);
+    REQUIRE(result);
+    CHECK_NE(result->contents.value.find("How a class is built from data files"), std::string::npos);
+    CHECK_EQ(result->contents.value.find("A trait's value"), std::string::npos);
+}
 
 TEST_CASE_FIXTURE(RefinementFixture, "hover_says_what_a_function_refines")
 {
@@ -2230,6 +2376,68 @@ print(add(1, 2))
 )";
 
     CHECK(hoverAt(*this, source, {3, 7}).find("inlined") == std::string::npos);
+}
+
+// The collections library is declared with the builtins, so its flags are on before the Fixture is built
+struct CollectionsFlags : ClassFlags
+{
+    ScopedFastFlag collections{FFlag::DebugLuwuCollections, true};
+    ScopedFastFlag tryExpressions{FFlag::DebugLuwuTryExpressions, true};
+    ScopedFastFlag nonePrimitive{FFlag::LuwuNonePrimitive, true};
+    ScopedFastFlag declareStatements{FFlag::LuwuDeclareStatements, true};
+    ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
+};
+
+struct CollectionsFixture
+    : CollectionsFlags
+    , Fixture
+{
+};
+
+TEST_CASE_FIXTURE(CollectionsFixture, "hover_names_a_result_instead_of_expanding_it")
+{
+    std::string source = R"(type Problem = { message: string }
+const function reader(path: string): string ! Problem
+    return path
+end
+const result = try reader("main.luau")
+)";
+
+    std::string hover = hoverAt(*this, source, {4, 8});
+    INFO(hover);
+    CHECK(hover.find("const result: result<string, Problem | unknown>") != std::string::npos);
+    CHECK(hover.find("ok<string> |") == std::string::npos);
+    CHECK(hover.find("| ok<string>") == std::string::npos);
+
+    // The user's own type comes before the note on the builtin classes, which elides their functions
+    size_t problem = hover.find("type Problem = ");
+    size_t note = hover.find("-- result<string, Problem | unknown> is one of the builtin collections classes");
+    REQUIRE(problem != std::string::npos);
+    REQUIRE(note != std::string::npos);
+    CHECK(problem < note);
+    CHECK(hover.find("public const value: string") != std::string::npos);
+    CHECK(hover.find("public const error: Problem | unknown") != std::string::npos);
+    CHECK(hover.find("public function expect") == std::string::npos);
+}
+
+TEST_CASE_FIXTURE(CollectionsFixture, "hover_names_an_option_in_a_signature")
+{
+    std::string source = R"(type Thing = { name: string }
+const function finder(name: string): collections.option<Thing>
+    return none
+end
+const found = finder("x")
+)";
+
+    std::string signature = hoverAt(*this, source, {1, 16});
+    INFO(signature);
+    CHECK(signature.find("function finder(name: string): option<Thing>") != std::string::npos);
+
+    std::string hover = hoverAt(*this, source, {4, 7});
+    INFO(hover);
+    CHECK(hover.find("const found: option<Thing>") != std::string::npos);
+    CHECK(hover.find("-- option<Thing> is none or the builtin collections class some") != std::string::npos);
+    CHECK(hover.find("type Thing = ") < hover.find("-- option<Thing>"));
 }
 
 TEST_SUITE_END();

@@ -6,7 +6,7 @@ import { getSettingOr, settingChanged } from "./settings";
  * so next to actual code it can be hard to tell apart. A TextMate grammar can
  * only pick a token's colour and font style, so the fence gets a left border
  * and its text is faded a little here instead: it reads as part of the comment
- * while keeping its highlighting. No background by default: a background competes
+ * and is still highlighted. No background by default: a background competes
  * with the editor's own (current line, selection, hover) and looks different in
  * every theme. `luwu.docCodeBlockBackground` can still give it one.
  *

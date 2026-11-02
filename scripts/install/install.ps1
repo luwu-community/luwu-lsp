@@ -1,13 +1,13 @@
 # Installs luwu-lsp and sets up your editors on Windows:
 #
-#     irm https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1 | iex
+#     irm 'https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1' | iex
 #
 # Everything the installer does is in install.luau, a seal script. This only finds a seal to run it with: the one on
 # your PATH when it's newer than 0.8.0, or else the latest release, downloaded into a temporary directory that's deleted
 # afterwards. To pass install.luau arguments (`--help` lists them; `--keep-seal` keeps the downloaded seal), run this as
 # a script block:
 #
-#     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1))) --help
+#     & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1'))) --help
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"

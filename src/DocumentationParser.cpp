@@ -814,15 +814,16 @@ std::optional<std::string> WorkspaceFolder::getDocumentationForTypeReference(con
             return std::nullopt;
         if (const auto it = importedModule->exportedTypeBindings.find(typeName);
             it != importedModule->exportedTypeBindings.end() && it->second.definitionLocation)
-            return printMoonwaveDocumentation(getComments(*importedModuleName, *it->second.definitionLocation));
+            return printMoonwaveDocumentation(
+                getComments(it->second.definitionModuleName.value_or(*importedModuleName), *it->second.definitionLocation));
         return std::nullopt;
     }
     else
     {
-        auto typeLocation = lookupTypeLocation(*scope, typeName);
-        if (!typeLocation)
+        auto definition = lookupTypeDefinition(*scope, typeName, moduleName);
+        if (!definition)
             return std::nullopt;
-        return printMoonwaveDocumentation(getComments(moduleName, *typeLocation));
+        return printMoonwaveDocumentation(getComments(definition->moduleName, definition->location));
     }
 }
 

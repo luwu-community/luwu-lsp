@@ -877,7 +877,8 @@ std::optional<std::string> WorkspaceFolder::getDocumentationForAutocompleteEntry
             return documentation;
     }
 
-    if (entry.prop)
+    // A Luwu class body's completions can hold an empty `prop` (a metamethod has no property)
+    if (entry.prop && *entry.prop)
     {
         // Luwu doc references: a property's own doc comments, which a type function may have written
         if (const auto& metadata = entry.prop.value()->metadata)

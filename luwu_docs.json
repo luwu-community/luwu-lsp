@@ -117,6 +117,150 @@
   "@luau/global/class.of/returns/0": {
     "documentation": "If `o` is an object, then the object's class. Returns `nil` if `o` is not an object."
   },
+  "@luau/global/luwon": {
+    "documentation": "Reads and writes `.luwon` data files (Luwu Object Notation).\n\nA data file is a list of `const` declarations that ends in `return <value>`. Because reading one never\nruns code, it's safe to read a file you didn't write.\n\n```luwu\n-- chimera.luwon\nconst dependencies = {\n    json = \"1.0.0\", -- pinned until 2.0 ships\n}\n\nreturn {\n    name = \"chimera\",\n    dependencies = dependencies,\n}\n```\n\nRead it, change it and write it back. Only the values you changed are rewritten and comments stay where\nthey are:\n\n```luwu\nconst manifest = luwon.decode<<Manifest>>(fs.readfile(\"./chimera.luwon\"))\nmanifest.dependencies.http = \"2.0.0\"\nfs.writefile(\"./chimera.luwon\", luwon.encode(manifest))\n```\n\n`require(\"./chimera\")` reads a data file too.\n",
+    "keys": {
+      "comments": "@luau/global/luwon.comments",
+      "data": "@luau/global/luwon.data",
+      "decode": "@luau/global/luwon.decode",
+      "encode": "@luau/global/luwon.encode",
+      "reader": "@luau/global/luwon.reader",
+      "setcomments": "@luau/global/luwon.setcomments",
+      "source": "@luau/global/luwon.source",
+      "tagged": "@luau/global/luwon.tagged"
+    }
+  },
+  "@luau/global/luwon.comments": {
+    "documentation": "Returns the comments and location of `t[key]`, or `nil` if there are none.\n\n```luwu\nconst info = luwon.comments(manifest, \"dependencies\") or return\nprint(info.above[1].text) -- the comment line above `dependencies = ...`\nprint(info.after)         -- the comment at the end of its line\nprint(info.binding)       -- the const it's written with, and that const's comments\n```\n\nWithout `key`, returns every comment in the file.\n\nChanging the result changes nothing. Use `luwon.setcomments` for that.\n",
+    "params": [
+      {
+        "documentation": "@luau/global/luwon.comments/params/0",
+        "name": "t"
+      },
+      {
+        "documentation": "@luau/global/luwon.comments/params/1",
+        "name": "key"
+      }
+    ],
+    "returns": [
+      "@luau/global/luwon.comments/returns/0"
+    ]
+  },
+  "@luau/global/luwon.comments/params/0": {
+    "documentation": "A table from a data file."
+  },
+  "@luau/global/luwon.comments/params/1": {
+    "documentation": "The key whose comments you want."
+  },
+  "@luau/global/luwon.comments/returns/0": {
+    "documentation": "`{ above, after?, location?, keylocation?, binding? }`, or `nil`."
+  },
+  "@luau/global/luwon.data": {
+    "documentation": "Lets a `luwon.reader` build a class that has methods or its own `__init`.\n\nBy default the reader passes the call to the constructor and `luwon.encode` writes the object's\nfields back. `__todata` and `__fromdata` let the file hold a different shape than the object:\n\n```luwu\nclass Rect(public min: vector, public max: vector) implements luwon.data\n    -- luwon.encode calls this and writes the values it returns between the parentheses, one per slot\n    public function __todata(self)\n        const size = self.max - self.min\n        return self.min.x, self.min.y, size.x, size.y\n    end\n\n    -- reader:decode calls this with the values between the parentheses and uses the object it returns\n    public function __fromdata(x: number, y: number, width: number, height: number): Rect\n        return Rect(vector.create(x, y, 0), vector.create(x + width, y + height, 0))\n    end\nend\n\ntype Layout = { window: Rect }\n\nconst layout = luwon.reader({ Rect }):decode<<Layout>>(\"return { window = Rect(10, 20, 640, 480) }\")\nprint(layout.window.max) -- 650, 500, 0\n\nlayout.window = Rect(vector.create(0, 0, 0), vector.create(800, 600, 0))\nprint(luwon.encode(layout)) -- return { window = Rect(0, 0, 800, 600) }\n```\n\nWhen `__todata` returns a single table, the file holds the braces form and `__fromdata` gets that table back:\n\n```luwu\nclass Duration implements luwon.data\n    public seconds: number\n\n    -- luwon.encode writes the table this returns as `Duration { minutes = 2, seconds = 30 }`\n    public function __todata(self)\n        return {\n            minutes = self.seconds // 60,\n            seconds = self.seconds % 60,\n        }\n    end\n\n    -- reader:decode calls this with the table between the braces and uses the object it returns\n    public function __fromdata(parts: { minutes: number, seconds: number }): Duration\n        return Duration { seconds = parts.minutes * 60 + parts.seconds }\n    end\nend\n```\n\nBoth are optional.\n",
+    "keys": {}
+  },
+  "@luau/global/luwon.decode": {
+    "documentation": "Reads a data file's text and returns its value.\n\n```luwu\nconst manifest = luwon.decode<<Manifest>>(text)\n```\n\nThe type argument says what you expect back. The file isn't checked against it.\n\nA class call like `Point(1, 2)` comes back as a `luwon.tagged`. Use a `luwon.reader` to get\nreal objects.\n\nRaises an error with the line number when the text isn't a valid data file.\n",
+    "params": [
+      {
+        "documentation": "@luau/global/luwon.decode/params/0",
+        "name": "text"
+      }
+    ],
+    "returns": [
+      "@luau/global/luwon.decode/returns/0"
+    ]
+  },
+  "@luau/global/luwon.decode/params/0": {
+    "documentation": "The data file's text."
+  },
+  "@luau/global/luwon.decode/returns/0": {
+    "documentation": "The file's value."
+  },
+  "@luau/global/luwon.encode": {
+    "documentation": "Writes a value as a data file's text.\n\nA value that came from a data file is written back into that file. Only what changed is rewritten,\nand comments, consts and layout stay as they were. A new dependency goes into `const dependencies`\nand the `return` keeps saying `dependencies`.\n\nAnything else is written fresh.\n\nAn object is written as its class call, like `Point(1, 2)`. A class that implements\n`luwon.data` can choose what goes in the call with `__todata`.\n\nRaises an error for what a data file can't hold, like a function or a table that contains itself.\n",
+    "params": [
+      {
+        "documentation": "@luau/global/luwon.encode/params/0",
+        "name": "value"
+      }
+    ],
+    "returns": [
+      "@luau/global/luwon.encode/returns/0"
+    ]
+  },
+  "@luau/global/luwon.encode/params/0": {
+    "documentation": "The value to write."
+  },
+  "@luau/global/luwon.encode/returns/0": {
+    "documentation": "The data file's text."
+  },
+  "@luau/global/luwon.reader": {
+    "documentation": "Makes a reader that builds the classes you give it.\n\n```luwu\nconst reader = luwon.reader({ Color, Point })\nconst theme = reader:decode<<Theme>>(text)\nprint(class.isinstance(theme.accent, Color)) -- true\n```\n\nA reader can't hold two classes with the same name because a data file names classes by name. A\ncall to a class the reader doesn't have comes back as a `luwon.tagged`.\n\nA class with methods or its own `__init` has to implement `luwon.data` to go in a reader.\n",
+    "params": [
+      {
+        "documentation": "@luau/global/luwon.reader/params/0",
+        "name": "classes"
+      }
+    ],
+    "returns": [
+      "@luau/global/luwon.reader/returns/0"
+    ]
+  },
+  "@luau/global/luwon.reader/params/0": {
+    "documentation": "The classes data files may build."
+  },
+  "@luau/global/luwon.reader/returns/0": {
+    "documentation": "A reader. `reader:decode(text)` works like `luwon.decode`."
+  },
+  "@luau/global/luwon.setcomments": {
+    "documentation": "Sets the comments of `t[key]`. `luwon.encode` writes them.\n\n```luwu\nluwon.setcomments(manifest, \"name\", {\n    above = { \"the registry's name\" },\n    after = \"lowercase\",\n})\n```\n\n`--` is added for you. It also works on a table you built yourself, unless it has a metatable of\nits own.\n",
+    "params": [
+      {
+        "documentation": "@luau/global/luwon.setcomments/params/0",
+        "name": "t"
+      },
+      {
+        "documentation": "@luau/global/luwon.setcomments/params/1",
+        "name": "key"
+      },
+      {
+        "documentation": "@luau/global/luwon.setcomments/params/2",
+        "name": "comments"
+      }
+    ]
+  },
+  "@luau/global/luwon.setcomments/params/0": {
+    "documentation": "The table holding the value."
+  },
+  "@luau/global/luwon.setcomments/params/1": {
+    "documentation": "The value's key."
+  },
+  "@luau/global/luwon.setcomments/params/2": {
+    "documentation": "`{ above = { string }?, after = string? }`. What you leave out is removed."
+  },
+  "@luau/global/luwon.source": {
+    "documentation": "Returns the text of the file `t` came from, when `t` is the table the file returned. It doesn't\nchange when you edit `t`.\n",
+    "params": [
+      {
+        "documentation": "@luau/global/luwon.source/params/0",
+        "name": "t"
+      }
+    ],
+    "returns": [
+      "@luau/global/luwon.source/returns/0"
+    ]
+  },
+  "@luau/global/luwon.source/params/0": {
+    "documentation": "The table a data file returned."
+  },
+  "@luau/global/luwon.source/returns/0": {
+    "documentation": "The file's text, or `nil`."
+  },
+  "@luau/global/luwon.tagged": {
+    "documentation": "A class call from a data file, kept as its name and arguments.\n\n```luwu\nconst theme = luwon.decode(\"return { origin = Point(1, 2) }\")\nprint(theme.origin.name) -- \"Point\"\nprint(theme.origin.args) -- { 1, 2 }\n```\n\n`args` is what the call holds: `Point(1, 2)` gives `{ 1, 2 }` and `Size { width = 3 }` gives\n`{ { width = 3 } }`.\n\n`luwon.encode` writes it back as the call it holds now. A `luwon.reader` with the class gives you a\nreal object instead.\n",
+    "keys": {}
+  },
   "@luau/global/require": {
     "documentation": "Imports the module at `path`, returning what the module returned. Require paths use require-by-string syntax, which is described below.\n\n```luwu\n-- sibling of the requiring module/file.\nconst utils = require(\"./utils\")\n-- sibling of the parent of the requiring file/module.\nconst doc = require(\"../doc\")\n-- `@packages` is a require alias.\nconst html = require(\"@packages/html\")\n-- `@self` is a hardcoded alias only visible in `init` modules.\nconst li = require(\"@self/li\")\n```\nOn the filesystem, the term 'module' is mostly synonymous with 'file'. The term 'require-by-string module' may refer to either a file or\na folder with a file named `init.luau`.\n\n### Caching\n\nRequires are cached. The first time a module's required in your codebase, all top-level code in the module will be evaluated.\nSubsequent requires to the same module will return the cached value without re-evaluating the entire module. This allows modules\nto be used to keep track of state between multiple files in a codebase.\n\n### Require-By-String syntax\n\nLuwu uses Luau's require-by-string syntax for module paths.\n\nAssume you have the following directory structure:\n\n```\nproject/\n├── .luaurc\n├── utils/\n│   ├── list.luau\n│   └── html/\n│       ├── elements.luau\n│       ├── serde.luau\n│       └── init.luau\n└── src/\n    ├── parse_html.luau\n    └── main.luau\n```\n\n- To reach `parse_html.luau` from `main.luau`, use `require(\"./parse_html\")`.\n- To reach `list.luau` from `main.luau` via relative path, use `require(\"../utils/list\")`\n- To reach `html` from `parse_html.luau`, use `require(\"../utils/html\")`. This is allowed because you can directly require a directory if it contains a file named `init.luau`.\n- To reach `elements.luau` from `init.luau`, use `require(\"@self/elements)`. You need `@self` here because `init.luau` is treated *as* its enclosing directory.\n- To reach `list.luau` from `html/init.luau`, use `require(\"./list\")`.\n- To reach `elements.luau` from `serde.luau`, use `require(\"./elements\")`.\n\nIf `.luaurc` defines a require alias `\"utils\": \"./utils\"`:\n- To reach `list.luau` from `main.luau`, use `require(\"@utils/list)`\n- To reach `html` from `parse_html.luau`, use `require(\"@utils/html)`\n\nKeep in mind that not all embedders may support the full require-by-string specification, but relative requires and require-by-alias are typically supported.\nRequire aliases that depend on other require aliases are in the spec but not yet commonly supported.\n\nOn the filesystem, you can define your own require aliases by making a `.luaurc` (jsonc-syntax) or `.config.luau` file.\nKeep in mind some require aliases may be hardcoded by the embedder and cannot be overriden: for example, in *seal*,\n`@std` and `@interop` are hardcoded aliases.\n",
     "params": [

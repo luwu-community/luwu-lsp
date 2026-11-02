@@ -68,7 +68,7 @@ static std::optional<std::string> rewriteRelativeRequire(const Uri& fromFile, co
 static bool isSourceFile(const Uri& uri)
 {
     auto extension = uri.extension();
-    return extension == ".luau" || extension == ".luwu" || extension == ".lua";
+    return extension == ".luau" || extension == ".luwu" || extension == ".lua" || extension == ".luwon";
 }
 
 std::optional<lsp::WorkspaceEdit> WorkspaceFolder::willRenameFiles(const lsp::RenameFilesParams& params)

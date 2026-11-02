@@ -1,4 +1,5 @@
 #pragma once
+#include <set>
 #include <memory>
 #include <unordered_map>
 #include "Platform/LSPPlatform.hpp"
@@ -55,7 +56,17 @@ public:
     /// When a new request comes in and the workspace is not ready, we will prepare it then.
     bool isReady = false;
 
+    /// Whether this workspace has checked `moduleName`, so a change to its file affects this workspace
+    bool hasModule(const Luau::ModuleName& moduleName) const;
+
 private:
+    /// Directories outside the workspace folder holding modules it requires, which `watchExternalModules` watches
+    std::set<std::string> watchedExternalDirectories;
+    /// How many modules the frontend had when `watchExternalModules` last looked
+    size_t externalModulesScanSize = 0;
+
+    void watchExternalModules();
+
     struct DefinitionsFileState
     {
         TextDocument textDocument;

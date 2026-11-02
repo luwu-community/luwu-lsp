@@ -1,6 +1,7 @@
 #include "LSP/Workspace.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <set>
 
@@ -211,6 +212,7 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
     // treated as deleted, so a later event for the same module takes it back out of the set.
     std::set<Luau::ModuleName> deletedModules;
     bool pluginFileChanged = false;
+    bool refreshDiagnostics = false;
 
     for (const auto& change : changes)
     {
@@ -241,6 +243,7 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
 
             // Note: we should always mark as dirty, even if the file is ignored
             auto moduleName = fileResolver.getModuleName(change.uri);
+            bool known = hasModule(moduleName);
             frontend.markDirty(moduleName, &dirtyFiles);
 
             if (change.type == lsp::FileChangeType::Deleted)
@@ -251,6 +254,25 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
             else
             {
                 deletedModules.erase(moduleName);
+            }
+
+            // A file that isn't open changed on disk, so nothing else tells the client that what requires it has new
+            // diagnostics
+            if (known && !fileResolver.getTextDocument(change.uri))
+                refreshDiagnostics = true;
+        }
+        else if (change.type == lsp::FileChangeType::Deleted)
+        {
+            // A deleted directory comes as one event, without one for each file in it. Every module under it is gone.
+            for (const auto& [moduleName, _] : frontend.sourceNodes)
+            {
+                Uri uri = fileResolver.getUri(moduleName);
+                if (!change.uri.isAncestorOf(uri))
+                    continue;
+
+                frontend.markDirty(moduleName, &dirtyFiles);
+                deletedFiles.push_back(uri);
+                deletedModules.insert(moduleName);
             }
         }
     }
@@ -284,6 +306,10 @@ void WorkspaceFolder::onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>&
 
     // Clear the diagnostics for files in case it was not managed
     clearDiagnosticsForFiles(deletedFiles);
+
+    // The modules that required a deleted file now report the broken require
+    if (refreshDiagnostics || !deletedModules.empty())
+        recomputeDiagnostics(config);
 
     client->sendWorkDoneProgressEnd(kWatchedFilesProgressToken);
 }
@@ -371,7 +397,9 @@ Luau::CheckResult WorkspaceFolder::checkSimple(const Luau::ModuleName& moduleNam
     {
         Luau::FrontendOptions options{/* retainFullTypeGraphs: */ false, /* forAutocomplete: */ false, /* runLintChecks: */ true};
         options.cancellationToken = cancellationToken;
-        return frontend.check(moduleName, options);
+        Luau::CheckResult result = frontend.check(moduleName, options);
+        watchExternalModules();
+        return result;
     }
     catch (Luau::InternalCompilerError& err)
     {
@@ -403,7 +431,53 @@ Luau::CheckResult WorkspaceFolder::checkStrict(
 
     Luau::FrontendOptions options{/* retainFullTypeGraphs: */ true, forAutocomplete, /* runLintChecks: */ true};
     options.cancellationToken = cancellationToken;
-    return frontend.check(moduleName, options);
+    Luau::CheckResult result = frontend.check(moduleName, options);
+    watchExternalModules();
+    return result;
+}
+
+bool WorkspaceFolder::hasModule(const Luau::ModuleName& moduleName) const
+{
+    return frontend.sourceNodes.find(moduleName) != frontend.sourceNodes.end();
+}
+
+static const char* kExternalModulesRegistrationPrefix = "luwu/externalModules/";
+
+// The workspace's file watchers only see files inside the workspace folder, so a module required from outside it (a
+// library in another checkout, say) would never be rechecked after it changes. Watch the directory of each one.
+void WorkspaceFolder::watchExternalModules()
+{
+    if (isNullWorkspace() || frontend.sourceNodes.size() == externalModulesScanSize)
+        return;
+    externalModulesScanSize = frontend.sourceNodes.size();
+
+    const auto& workspaceCapabilities = client->capabilities.workspace;
+    if (!workspaceCapabilities || !workspaceCapabilities->didChangeWatchedFiles || !workspaceCapabilities->didChangeWatchedFiles->dynamicRegistration ||
+        !workspaceCapabilities->didChangeWatchedFiles->relativePatternSupport)
+        return;
+
+    bool added = false;
+    for (const auto& [moduleName, _] : frontend.sourceNodes)
+    {
+        Uri uri = fileResolver.getUri(moduleName);
+        if (uri.scheme != "file" || rootUri.isAncestorOf(uri))
+            continue;
+
+        std::string directory = std::filesystem::path(uri.fsPath()).parent_path().generic_string();
+        if (watchedExternalDirectories.insert(directory).second)
+            added = true;
+    }
+
+    if (!added)
+        return;
+
+    std::vector<lsp::FileSystemWatcher> watchers;
+    for (const std::string& directory : watchedExternalDirectories)
+        watchers.push_back(lsp::FileSystemWatcher{lsp::RelativePattern{Uri::file(directory), "*.{lua,luau,luwu,luwon}"}});
+
+    std::string registrationId = kExternalModulesRegistrationPrefix + rootUri.toString();
+    client->unregisterCapability(registrationId, "workspace/didChangeWatchedFiles");
+    client->registerCapability(registrationId, "workspace/didChangeWatchedFiles", lsp::DidChangeWatchedFilesRegistrationOptions{watchers});
 }
 
 static const char* kIndexProgressToken = "luau/indexFiles";

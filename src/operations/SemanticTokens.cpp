@@ -57,7 +57,7 @@ static bool isUserDefinedClassValue(const Luau::TypeId ty, Luau::NotNull<Luau::B
 }
 
 // Luwu Traits (rfcs/classes/traits.md): the trait value itself, as opposed to an object of a class implementing it.
-// The trait info lives on the object type, so the value is recognised through its relation to that type.
+// The trait info is on the object type, so the value is recognised through its relation to that type.
 static bool isTraitValue(const Luau::TypeId ty)
 {
     const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
@@ -342,6 +342,14 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // Luwu Declare Statements: `declare class Name` is followed by a global the parser makes up for it, `declare Name:
+    // class<Name>`, whose type is located on the `class` keyword and the class's name. Colouring it would make the
+    // keyword a class name and colour the name a second time. A written declaration has its type after the name.
+    bool visit(Luau::AstStatDeclareGlobal* global) override
+    {
+        return !(global->type && global->type->location.begin < global->nameLocation.begin);
+    }
+
     // Luwu Declare Statements: a declared class's shape is not visited as a class, and its methods are signatures, so
     // their parameters and restated fields are coloured from here. Its type annotations are visited as usual.
     bool visit(Luau::AstStatDeclareClass* declared) override
@@ -433,6 +441,19 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         }
 
         return true;
+    }
+
+    // Luwu match expressions: `x is Point` is parsed as `class.isinstance(x, Point)` (and `x is string` as
+    // `type(x) == "string"`). The made-up callee is located on the whole test, so colouring it would paint the test as
+    // a function. Only the operands are written in the source.
+    bool visit(Luau::AstExprCall* call) override
+    {
+        if (!call->fromTypeTest)
+            return true;
+
+        for (Luau::AstExpr* arg : call->args)
+            arg->visit(this);
+        return false;
     }
 
     bool visit(Luau::AstExprIndexName* index) override

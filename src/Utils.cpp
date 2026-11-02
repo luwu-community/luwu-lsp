@@ -8,7 +8,7 @@
 #include "LSP/TextDocument.hpp"
 #include "Flags.hpp"
 
-const std::vector<std::string_view> kSourceFileExtensions{".luwu", ".luau", ".lua"};
+const std::vector<std::string_view> kSourceFileExtensions{".luwu", ".luau", ".lua", ".luwon"};
 
 bool isSourceFileExtension(std::string_view extension)
 {
@@ -19,6 +19,10 @@ bool isEnabledSourceFileExtension(const std::vector<std::string>& enabledExtensi
 {
     if (!isSourceFileExtension(extension))
         return false;
+
+    // Luwu object notation: `.luwon` data files are always ours, since no other language server reads them
+    if (extension == ".luwon")
+        return true;
 
     // the client lists extensions without the leading dot
     extension.remove_prefix(1);
@@ -132,7 +136,7 @@ std::string codeBlock(const std::string& language, const std::string& code)
 
 bool isLuwuFile(const TextDocument& textDocument)
 {
-    return textDocument.uri().extension() == ".luwu" || textDocument.languageId() == "luwu";
+    return textDocument.uri().extension() == ".luwu" || textDocument.uri().extension() == ".luwon" || textDocument.languageId() == "luwu";
 }
 
 const char* codeBlockLanguage(const TextDocument& textDocument)

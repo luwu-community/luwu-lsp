@@ -804,7 +804,7 @@ RefactoringResult extractIntoTrait(
     std::string traitName = uniqueTopLevelName(sourceModule, std::string(classStat.name->name.value) + "Behavior");
     TraitGenerics generics = traitGenerics(textDocument, classStat);
 
-    // Fields keep their grouping; functions are separated by a blank line
+    // Fields stay grouped; functions are separated by a blank line
     std::string fields;
     std::string functions;
     std::vector<lsp::TextEdit> edits;

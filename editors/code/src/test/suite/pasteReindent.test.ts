@@ -120,7 +120,7 @@ suite("Paste Reindent Test Suite", () => {
     );
   });
 
-  test("a 2-space source keeps its columns", () => {
+  test("a 2-space source's columns don't change", () => {
     assert.deepStrictEqual(
       paste(["if x then", "      y()", "      z()", "    end"], {
         previousLine: "do",

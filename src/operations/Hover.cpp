@@ -140,6 +140,23 @@ static bool isDeclaredGlobal(const Luau::SourceModule& sourceModule, const Luau:
     return moduleScope->parent && moduleScope->parent->lookup(Luau::Symbol(name)).has_value();
 }
 
+// Luwu Classes (rfcs/classes): the class value when `ty` is the object type of a class called `name`
+static std::optional<Luau::TypeId> classNamedBy(Luau::TypeId ty, const char* name)
+{
+    const auto* objectType = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    if (!objectType || !objectType->relation)
+        return std::nullopt;
+
+    const auto* klass = objectType->relation->get_if<Luau::Klass>();
+    if (!klass)
+        return std::nullopt;
+
+    const auto* classType = Luau::get<Luau::ExternType>(Luau::follow(klass->ty));
+    if (!classType || classType->name != name)
+        return std::nullopt;
+    return Luau::follow(klass->ty);
+}
+
 // Visitor to find a class statement by name (used to build a hover summary for class values)
 struct FindClassStatByName : Luau::AstVisitor
 {
@@ -554,7 +571,7 @@ static std::optional<std::string> buildClassFieldSummary(
 )
 {
     // Everything this summary is built from -- visibility, `const`, the primary constructor, the
-    // declaration order of members -- lives in the AST of whichever module declared the class, not
+    // declaration order of members -- is in the AST of whichever module declared the class, not
     // in the one being hovered in. A class reached across a require (`require("./list").List`) is
     // the ordinary case rather than an edge case, so resolve the declaring module instead of giving
     // up whenever it isn't the current one.
@@ -687,7 +704,7 @@ static std::optional<std::string> buildClassFieldSummary(
         return isClassValue || !isPrivate;
     };
 
-    // Instance fields (e.g. `const inner = ...` with no annotation) only live in the *object*
+    // Instance fields (e.g. `const inner = ...` with no annotation) are only in the *object*
     // type's props -- the class value's own `et` only has static members and the constructor. So
     // when summarizing the class value, resolve instance member types off the object type
     // (reached via `relation`) rather than off `et` itself.
@@ -937,8 +954,8 @@ static std::optional<std::string> buildClassFieldSummary(
         if (!isClassValue && isStatic)
             continue;
 
-        // Static methods live on the class's own `et`; instance methods (like instance fields)
-        // only live on the object type, reached via `objectEt`.
+        // Static methods are on the class's own `et`; instance methods (like instance fields)
+        // are only on the object type, reached via `objectEt`.
         std::string line = formatMethodLine(module, isStatic ? et : objectEt, method, scope, showTableKinds);
         if (line.empty())
             continue;
@@ -1351,6 +1368,25 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
 
     auto ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position);
 
+    // Luwu match expressions: `x is Point` is parsed as `class.isinstance(x, Point)`, whose made-up callee is located
+    // on the whole test. Between the operands is the `is`, which shouldn't show the `class` library's hover. The
+    // pattern after the type (`x is Point.(px)`) declares its bindings, which hover as locals.
+    for (auto ancestor : ancestry)
+    {
+        auto call = ancestor->as<Luau::AstExprCall>();
+        if (!call || !call->fromTypeTest)
+            continue;
+
+        bool inOperand = std::any_of(call->args.begin(), call->args.end(),
+            [&](Luau::AstExpr* arg)
+            {
+                return arg->location.containsClosed(position);
+            });
+        bool inPattern = call->typeTestPattern && call->typeTestPattern->location && call->typeTestPattern->location->containsClosed(position);
+        if (!inOperand && !inPattern)
+            return std::nullopt;
+    }
+
     // A method's function spans its name (it starts at `function`), so the name finds the function rather than the
     // class it belongs to; the class's members are what know a method's name, visibility and `?`
     if (node->is<Luau::AstExprFunction>() && ancestry.size() >= 2)
@@ -1358,7 +1394,10 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             for (const auto& member : parentClass->members)
                 if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->nameLocation.containsClosed(position))
                     node = parentClass;
-    if (auto keywordMatch = findKeywordDocKeyAtPosition(ancestry, position))
+    auto keywordMatch = findKeywordDocKeyAtPosition(ancestry, position);
+    if (!keywordMatch)
+        keywordMatch = findTableAccessKeywordAtPosition(node, position);
+    if (keywordMatch)
     {
         if (auto docs = getKeywordHoverDocs(keywordMatch->docKey))
             return lsp::Hover{{lsp::MarkupKind::Markdown, *docs}, textDocument->convertLocation(keywordMatch->range)};
@@ -1523,7 +1562,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
                 else if (auto classTypeFun = scope->lookupType(classStat->name->name.value))
                 {
                     // A declared method is only a signature, so no expression has its type; the class's own
-                    // member does. A static lives on the class value rather than the instance.
+                    // member does. A static is on the class value rather than the instance.
                     std::vector<PropLookup> propInfo = lookupProp(Luau::follow(classTypeFun->type), method->functionName.value);
                     if (propInfo.empty())
                         if (auto object = Luau::get<Luau::ExternType>(Luau::follow(classTypeFun->type)); object && object->relation)
@@ -1645,8 +1684,18 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
 
         if (!typeFun)
             return std::nullopt;
-        typeAliasInformation = std::make_pair(typeName, *typeFun);
-        type = typeFun->type;
+
+        // Luwu Classes (rfcs/classes): a class's own name in a type (`p: Player`) shows the class, as hovering the class
+        // value does. Printed as an alias, it read `type Player = Player`.
+        if (std::optional<Luau::TypeId> classTy = classNamedBy(typeFun->type, ref->name.value))
+        {
+            type = *classTy;
+        }
+        else
+        {
+            typeAliasInformation = std::make_pair(typeName, *typeFun);
+            type = typeFun->type;
+        }
     }
     else if (auto alias = node->as<Luau::AstStatTypeAlias>())
     {
@@ -1731,15 +1780,28 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
         // Handle table properties (so that we can get documentation info)
         if (auto index = expr->as<Luau::AstExprIndexName>())
         {
-            if (auto parentIt = module->astTypes.find(index->expr))
+            // Luwu Traits (rfcs/classes/traits.md): an `implements` or `needs` entry (`luwon.data`) has no recorded
+            // types, so its prefix is looked up by name
+            std::optional<Luau::TypeId> parentTy;
+            if (auto recorded = module->astTypes.find(index->expr))
+                parentTy = *recorded;
+            else if (auto global = index->expr->as<Luau::AstExprGlobal>())
+                parentTy = scope->lookup(global->name);
+            else if (auto local = index->expr->as<Luau::AstExprLocal>())
+                parentTy = scope->lookup(local->local);
+
+            if (parentTy)
             {
-                auto parentType = Luau::follow(*parentIt);
+                auto parentType = Luau::follow(*parentTy);
                 auto indexName = index->index.value;
                 if (auto propInformation = lookupProp(parentType, indexName); !propInformation.empty())
                 {
                     auto [baseTy, prop] = propInformation[0];
                     if (propInformation.size() == 1 && prop.readTy)
                         type = prop.readTy;
+                    // getDocumentationSymbolAtPosition reads the prefix's recorded type too, so it misses the same entries
+                    if (!documentationSymbol)
+                        documentationSymbol = prop.documentationSymbol;
                     if (prop.metadata)
                     {
                         std::vector<std::string> lines = Luau::metadataDocLines(*prop.metadata);
@@ -1851,8 +1913,54 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             opts.maxTypeLength = maxTypeLength;
         }
     }
+    // Luwu collections: `result<T, E>` and `option<T>` print by name, not as the `ok<T> | err<E>` they expand to. The
+    // root is named too, so it isn't expanded like an alias.
+    types::CollectionsTypeNames collectionsNames;
+    types::nameCollectionsTypes(*type, collectionsNames, opts);
+    if (!collectionsNames.unions.empty())
+        opts.repeatedTypeNames = &collectionsNames.names;
+    if (collectionsNames.names.contains(Luau::follow(*type)))
+        opts.alwaysExpandRootAlias = false;
+
     Luau::ToStringResult typeResult = Luau::toStringDetailed(*type, opts);
     std::string typeString = typeResult.name;
+
+    // A named union's type arguments print inside its name, which records no span for them. Print each on its own to
+    // get the alias clauses and spans it would have had (`Thing` in `option<Thing>`).
+    {
+        auto addWhereClause = [&](const std::string& clause)
+        {
+            if (!clause.empty() && typeResult.whereClauses.find(clause) == std::string::npos)
+                typeResult.whereClauses += (typeResult.whereClauses.empty() ? "" : "\n") + clause;
+        };
+
+        for (Luau::TypeId argument : collectionsNames.typeArguments)
+        {
+            Luau::TypeId followed = Luau::follow(argument);
+            if (collectionsNames.names.contains(followed))
+                continue;
+
+            // An alias that is the whole argument (`Thing` in `option<Thing>`) is a root, which ToString doesn't give a
+            // clause of its own
+            std::optional<std::string> aliasName;
+            if (Luau::get<Luau::TableType>(followed) || Luau::get<Luau::UnionType>(followed) || Luau::get<Luau::IntersectionType>(followed))
+            {
+                if (const std::string* name = Luau::getName(followed))
+                    aliasName = *name;
+            }
+
+            Luau::ToStringOptions argumentOpts = opts;
+            argumentOpts.alwaysExpandRootAlias = aliasName.has_value();
+            Luau::ToStringResult argumentResult = Luau::toStringDetailed(argument, argumentOpts);
+            typeResult.typeSpans.insert(typeResult.typeSpans.end(), argumentResult.typeSpans.begin(), argumentResult.typeSpans.end());
+            if (aliasName)
+            {
+                typeResult.typeSpans.push_back(Luau::ToStringSpan{0, 0, followed});
+                addWhereClause("type " + *aliasName + " = " + argumentResult.name);
+            }
+            addWhereClause(argumentResult.whereClauses);
+        }
+    }
 
     // Inside a class, the class itself is the one thing the reader doesn't need told: both its
     // summary and a link to it are noise in every hover written within its own body
@@ -2292,6 +2400,75 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             referencedTypes += (referencedTypes.empty() ? "" : "\n\n") + externTypeSummaries;
     }
 
+    // Luwu collections: a short note on the builtin classes a `result` or `option` holds, after the user's own types.
+    // Their fields are what code reads (`.value`, `.error`), so only those print in full.
+    if (limits.expandReferencedTypes && !collectionsNames.unions.empty())
+    {
+        Luau::ToStringOptions memberOpts = opts;
+        memberOpts.useLineBreaks = false;
+        memberOpts.includeWhereClauses = false;
+        memberOpts.alwaysExpandRootAlias = false;
+
+        std::string note;
+        Luau::DenseHashSet<Luau::TypeId> noted{nullptr};
+        for (const auto& named : collectionsNames.unions)
+        {
+            std::vector<std::string> classNames;
+            std::string bodies;
+            for (Luau::TypeId classTy : named.classes)
+            {
+                classTy = Luau::follow(classTy);
+                const auto* et = Luau::get<Luau::ExternType>(classTy);
+                if (!et)
+                    continue;
+                classNames.push_back(et->name);
+                if (noted.contains(classTy))
+                    continue;
+                noted.insert(classTy);
+
+                std::string fields;
+                std::vector<std::string> elided;
+                std::vector<std::string> elidedFunctions;
+                for (const auto& [name, prop] : et->props())
+                {
+                    if (name.rfind("__", 0) == 0 || !prop.readTy)
+                        continue;
+                    if (Luau::get<Luau::FunctionType>(Luau::follow(*prop.readTy)))
+                        elidedFunctions.push_back(name + "()");
+                    else if (name == "value" || name == "error")
+                        fields += "\n    public const " + name + ": " + Luau::toString(*prop.readTy, memberOpts);
+                    else
+                        elided.push_back(name);
+                }
+                std::sort(elided.begin(), elided.end());
+                std::sort(elidedFunctions.begin(), elidedFunctions.end());
+                elided.insert(elided.end(), elidedFunctions.begin(), elidedFunctions.end());
+
+                bodies += "\nclass " + et->name + fields;
+                if (!elided.empty())
+                {
+                    bodies += "\n    -- ⋯ ";
+                    for (size_t i = 0; i < elided.size(); ++i)
+                        bodies += (i == 0 ? "" : ", ") + elided[i];
+                }
+                bodies += "\nend";
+            }
+
+            if (classNames.empty())
+                continue;
+            if (!note.empty())
+                note += "\n\n";
+            if (classNames.size() == 1)
+                note += "-- " + named.name + " is none or the builtin collections class " + classNames[0];
+            else
+                note += "-- " + named.name + " is one of the builtin collections classes " + classNames[0] + " and " + classNames[1];
+            note += bodies;
+        }
+
+        if (!note.empty())
+            referencedTypes += (referencedTypes.empty() ? "" : "\n\n") + note;
+    }
+
     // Rendered for the hovered type itself; types it referred to follow in their own block. Summaries
     // that stand on their own (a class, an extern type) don't go through this.
     bool showReferencedTypes = false;
@@ -2338,8 +2515,13 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
              primitive && (!typeAliasInformation || typeAliasInformation->first == primitive->name))
     {
         // A primitive hovered directly, rather than through an alias that happens to resolve to one
-        // -- that still reads better as `type Foo = object`
-        typeString = codeBlock(codeLanguage, primitive->name) + "\n" + kDocumentationBreaker + primitive->docs;
+        // -- that still reads better as `type Foo = object`. What's hovered may have docs of its own (`luwon.data`); then
+        // those are what the reader is here for, not what a trait is.
+        std::optional<std::string> ownDocs = documentationSymbol ? printDocumentation(client->documentation, *documentationSymbol) : std::nullopt;
+        bool documented = !propertyDocs.empty() || (ownDocs && !ownDocs->empty());
+        typeString = codeBlock(codeLanguage, primitive->name);
+        if (!documented)
+            typeString += "\n" + kDocumentationBreaker + primitive->docs;
     }
     else if (auto et = Luau::get<Luau::ExternType>(*type); et && et->parent != frontend.builtinTypes->objectType)
     {

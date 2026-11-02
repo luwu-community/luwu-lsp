@@ -11,6 +11,7 @@ LUAU_FASTFLAG(LuwuDestructuring)
 LUAU_FASTFLAG(LuwuStringExtensions)
 LUAU_FASTFLAG(LuwuTableComprehensions)
 LUAU_FASTFLAG(LuwuIfLocal)
+LUAU_FASTFLAG(LuwuDeclareStatements)
 
 TEST_SUITE_BEGIN("CodeAction");
 
@@ -1048,7 +1049,7 @@ class Single implements (Named, Aged) end
     CHECK_EQ(edits[0].range, lsp::Range{{3, 24}, {6, 1}});
     CHECK_EQ(edits[0].newText, "Named, Aged");
 
-    // A parenthesized list on one line goes one trait per line, keeping its parentheses
+    // A parenthesized list on one line goes one trait per line, parentheses included
     auto single = codeActionsAt(*this, uri, 8, 31);
     REQUIRE(!single.empty());
     CHECK_EQ(single[0].title, "Put each trait on its own line");
@@ -1177,6 +1178,141 @@ TEST_CASE_FIXTURE(Fixture, "dot_table_layout_puts_each_entry_on_its_own_line")
     CHECK_EQ(applyCodeAction(codeActionsAt(*this, back, 2, 5), "Put entries on one line", back, laidOut),
         "local id, name = 1, 2\n"
         "local t = .{ id, name }\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "declared_class_parameters_can_be_put_on_their_own_lines")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDeclareStatements{FFlag::LuwuDeclareStatements, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "declare class Semver(public const major: number, public const minor: number)\n"
+                         "end\n"
+                         "class type Point(public x: number, public y: number)\n"
+                         "end\n";
+    auto uri = newDocument("test.luwu", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 0, 21), "Put each parameter on its own line", uri, source),
+        "declare class Semver(\n"
+        "    public const major: number,\n"
+        "    public const minor: number\n"
+        ")\n"
+        "end\n"
+        "class type Point(public x: number, public y: number)\n"
+        "end\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 17), "Put each parameter on its own line", uri, source),
+        "declare class Semver(public const major: number, public const minor: number)\n"
+        "end\n"
+        "class type Point(\n"
+        "    public x: number,\n"
+        "    public y: number\n"
+        ")\n"
+        "end\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "table_type_layout_puts_each_field_on_its_own_line")
+{
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "local raw = {}\n"
+                         "local data = raw :: {\n"
+                         "    dependencies: { { name: string, version: number } }\n"
+                         "}\n";
+    auto uri = newDocument("test.luau", source);
+
+    // In the inner table type, that one is laid out
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 23), "Put each field on its own line", uri, source),
+        "local raw = {}\n"
+        "local data = raw :: {\n"
+        "    dependencies: { {\n"
+        "        name: string,\n"
+        "        version: number,\n"
+        "    } }\n"
+        "}\n");
+
+    // The array shorthand around it can't take a trailing comma
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 19), "Put each field on its own line", uri, source),
+        "local raw = {}\n"
+        "local data = raw :: {\n"
+        "    dependencies: {\n"
+        "        { name: string, version: number }\n"
+        "    }\n"
+        "}\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 21), "Put fields on one line", uri, source),
+        "local raw = {}\n"
+        "local data = raw :: { dependencies: { { name: string, version: number } } }\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "type_argument_and_function_type_lists_have_a_layout")
+{
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "type Pair<A, B> = { first: A, second: B }\n"
+                         "type P = Pair<string, number>\n"
+                         "type F = <T>(name: string, value: T) -> (boolean, string)\n";
+    auto uri = newDocument("test.luau", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 16), "Put each type argument on its own line", uri, source),
+        "type Pair<A, B> = { first: A, second: B }\n"
+        "type P = Pair<\n"
+        "    string,\n"
+        "    number\n"
+        ">\n"
+        "type F = <T>(name: string, value: T) -> (boolean, string)\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 15), "Put each parameter on its own line", uri, source),
+        "type Pair<A, B> = { first: A, second: B }\n"
+        "type P = Pair<string, number>\n"
+        "type F = <T>(\n"
+        "    name: string,\n"
+        "    value: T\n"
+        ") -> (boolean, string)\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 43), "Put each type on its own line", uri, source),
+        "type Pair<A, B> = { first: A, second: B }\n"
+        "type P = Pair<string, number>\n"
+        "type F = <T>(name: string, value: T) -> (\n"
+        "    boolean,\n"
+        "    string\n"
+        ")\n");
+}
+
+TEST_CASE_FIXTURE(Fixture, "generic_and_declared_function_lists_have_a_layout")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDeclareStatements{FFlag::LuwuDeclareStatements, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "type Map<K, V> = { [K]: V }\n"
+                         "local function f<T, U>(t: T, u: U) end\n"
+                         "declare function g(name: string, age: number): boolean\n";
+    auto uri = newDocument("test.luwu", source);
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 0, 10), "Put each generic on its own line", uri, source),
+        "type Map<\n"
+        "    K,\n"
+        "    V\n"
+        "> = { [K]: V }\n"
+        "local function f<T, U>(t: T, u: U) end\n"
+        "declare function g(name: string, age: number): boolean\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 1, 18), "Put each generic on its own line", uri, source),
+        "type Map<K, V> = { [K]: V }\n"
+        "local function f<\n"
+        "    T,\n"
+        "    U\n"
+        ">(t: T, u: U) end\n"
+        "declare function g(name: string, age: number): boolean\n");
+
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 2, 20), "Put each parameter on its own line", uri, source),
+        "type Map<K, V> = { [K]: V }\n"
+        "local function f<T, U>(t: T, u: U) end\n"
+        "declare function g(\n"
+        "    name: string,\n"
+        "    age: number\n"
+        "): boolean\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "comprehension_layout_puts_each_clause_on_its_own_line")
@@ -1318,6 +1454,25 @@ TEST_CASE_FIXTURE(Fixture, "qualify_field_takes_it_out_of_the_pattern")
         "print(chimera.Card)\n");
 }
 
+TEST_CASE_FIXTURE(Fixture, "positional_patterns_are_left_out_of_field_imports")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    // A positional element has no key to qualify it or import it by
+    auto uri = newDocument("test.luau", "class Okay(name: string) end\n"
+                                        "const res = Okay(\"hi\")\n"
+                                        "const .{ name } = res\n"
+                                        "const .(some) = res\n"
+                                        "print(name, some, res.name)\n");
+
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 3, 9), "Qualify 'some' as 'res.some'"));
+
+    // Importing `res.name` looks through every pattern on `res`
+    codeActionsAt(*this, uri, 4, 23);
+}
+
 TEST_CASE_FIXTURE(Fixture, "append_switches_between_push_and_table_insert")
 {
     ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, true};
@@ -1411,7 +1566,7 @@ end
     auto edit = orLeaveGuardRewrite(*this, uri, 3, 12);
     REQUIRE(edit);
     CHECK_EQ(edit->range, lsp::Range{{2, 4}, {4, 7}});
-    CHECK_EQ(edit->newText, "value:is(\"singleton\")\n        or return error(\"Library name must be a stringleton\")");
+    CHECK_EQ(edit->newText, "value:is(\"singleton\") or return error(\"Library name must be a stringleton\")");
 }
 
 TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_conditions_and_leaves")
@@ -1432,19 +1587,19 @@ end
     auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
     REQUIRE(edit);
     // a condition without `not` is kept as written, with `and`
-    CHECK_EQ(edit->newText, "typeof(v) ~= \"string\"\n        and continue");
+    CHECK_EQ(edit->newText, "typeof(v) ~= \"string\" and continue");
 
     edit = orLeaveGuardRewrite(*this, uri, 3, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v == nil\n        and break");
+    CHECK_EQ(edit->newText, "v == nil and break");
 
     edit = orLeaveGuardRewrite(*this, uri, 4, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v.a and v.b\n        or return;");
+    CHECK_EQ(edit->newText, "v.a and v.b or return;");
 
     edit = orLeaveGuardRewrite(*this, uri, 7, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v\n        or (return 1, 2)");
+    CHECK_EQ(edit->newText, "v or (return 1, 2)");
 }
 
 TEST_CASE_FIXTURE(Fixture, "or_leave_guard_not_offered_when_it_would_not_parse_or_lose_code")
@@ -1484,16 +1639,16 @@ end
     // a comparison is kept as written, and a statement can start with `#`
     auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "a < b\n        and return;");
+    CHECK_EQ(edit->newText, "a < b and return;");
 
     edit = orLeaveGuardRewrite(*this, uri, 4, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "#a\n        or return;");
+    CHECK_EQ(edit->newText, "#a or return;");
 
     // a parenthesized if-then-else is its own operand
     edit = orLeaveGuardRewrite(*this, uri, 5, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "a == (if b then c else nil)\n        and return;");
+    CHECK_EQ(edit->newText, "a == (if b then c else nil) and return;");
 }
 
 TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_each_condition_as_its_own_guard")
@@ -1514,7 +1669,7 @@ end
 
     auto edit = orLeaveGuardRewrite(*this, uri, 2, 8);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "r.ok\n        or return nil\n    r.out == \"\"\n        and return nil");
+    CHECK_EQ(edit->newText, "r.ok or return nil\n    r.out == \"\" and return nil");
 }
 
 TEST_CASE_FIXTURE(Fixture, "or_leave_guard_needs_the_do_expression_flag")

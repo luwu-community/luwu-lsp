@@ -151,17 +151,24 @@ std::optional<Luau::SourceCode> WorkspaceFileResolver::readSource(const Luau::Mo
     LUAU_TIMETRACE_SCOPE("WorkspaceFileResolver::readSource", "LSP");
     auto uri = getUri(name);
     auto sourceType = platform->sourceCodeTypeFromPath(uri);
+    // Luwu object notation: a `.luwon` data file parses as Luwu restricted to the notation
+    auto sourceCode = [&uri, sourceType](std::string text)
+    {
+        Luau::SourceCode code{std::move(text), sourceType};
+        code.luwon = uri.extension() == ".luwon";
+        return code;
+    };
 
     // Check if this is a managed file - use getTextDocument which handles plugin transformation
     if (auto* textDoc = getTextDocument(uri))
-        return Luau::SourceCode{textDoc->getText(), sourceType};
+        return sourceCode(textDoc->getText());
 
     // Fallback to reading from platform
     if (auto source = platform->readSourceCode(name, uri))
     {
         if (auto transformed = applyPluginTransformation(*source, uri, name))
-            return Luau::SourceCode{std::move(transformed->transformedSource), sourceType};
-        return Luau::SourceCode{*source, sourceType};
+            return sourceCode(std::move(transformed->transformedSource));
+        return sourceCode(*source);
     }
 
     return std::nullopt;

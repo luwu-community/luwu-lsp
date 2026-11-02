@@ -1,5 +1,5 @@
--- Usage: seal scripts/luwu_docs.luau
--- needs seal 0.8.x or up
+-- Usage: seal scripts/luwu_docs.luwu
+-- needs a seal that runs Luwu (0.9.x), since the entries are classes
 
 const json = require("@std/serde/json")
 const str = require("@std/str")
@@ -271,7 +271,271 @@ const luwu_libraries: { [string]: Table | Function } = {
                 }
             }
         }
-    }
+    },
+    ["luwon"] = Table {
+        documentation = un(3, [[
+            Reads and writes `.luwon` data files (Luwu Object Notation).
+
+            A data file is a list of `const` declarations that ends in `return <value>`. Because reading one never
+            runs code, it's safe to read a file you didn't write.
+
+            ```luwu
+            -- chimera.luwon
+            const dependencies = {
+                json = "1.0.0", -- pinned until 2.0 ships
+            }
+
+            return {
+                name = "chimera",
+                dependencies = dependencies,
+            }
+            ```
+
+            Read it, change it and write it back. Only the values you changed are rewritten and comments stay where
+            they are:
+
+            ```luwu
+            const manifest = luwon.decode<<Manifest>>(fs.readfile("./chimera.luwon"))
+            manifest.dependencies.http = "2.0.0"
+            fs.writefile("./chimera.luwon", luwon.encode(manifest))
+            ```
+
+            `require("./chimera")` reads a data file too.
+        ]]),
+        keys = {
+            decode = Function {
+                documentation = un(5, [[
+                    Reads a data file's text and returns its value.
+
+                    ```luwu
+                    const manifest = luwon.decode<<Manifest>>(text)
+                    ```
+
+                    The type argument says what you expect back. The file isn't checked against it.
+
+                    A class call like `Point(1, 2)` comes back as a `luwon.tagged`. Use a `luwon.reader` to get
+                    real objects.
+
+                    Raises an error with the line number when the text isn't a valid data file.
+                ]]),
+                params = {
+                    Parameter {
+                        name = "text",
+                        documentation = "The data file's text.",
+                    },
+                },
+                returns = {
+                    Return {
+                        documentation = "The file's value.",
+                    },
+                },
+            },
+            reader = Function {
+                documentation = un(5, [[
+                    Makes a reader that builds the classes you give it.
+
+                    ```luwu
+                    const reader = luwon.reader({ Color, Point })
+                    const theme = reader:decode<<Theme>>(text)
+                    print(class.isinstance(theme.accent, Color)) -- true
+                    ```
+
+                    A reader can't hold two classes with the same name because a data file names classes by name. A
+                    call to a class the reader doesn't have comes back as a `luwon.tagged`.
+
+                    A class with methods or its own `__init` has to implement `luwon.data` to go in a reader.
+                ]]),
+                params = {
+                    Parameter {
+                        name = "classes",
+                        documentation = "The classes data files may build.",
+                    },
+                },
+                returns = {
+                    Return {
+                        documentation = "A reader. `reader:decode(text)` works like `luwon.decode`.",
+                    },
+                },
+            },
+            encode = Function {
+                documentation = un(5, [[
+                    Writes a value as a data file's text.
+
+                    A value that came from a data file is written back into that file. Only what changed is rewritten,
+                    and comments, consts and layout stay as they were. A new dependency goes into `const dependencies`
+                    and the `return` keeps saying `dependencies`.
+
+                    Anything else is written fresh.
+
+                    An object is written as its class call, like `Point(1, 2)`. A class that implements
+                    `luwon.data` can choose what goes in the call with `__todata`.
+
+                    Raises an error for what a data file can't hold, like a function or a table that contains itself.
+                ]]),
+                params = {
+                    Parameter {
+                        name = "value",
+                        documentation = "The value to write.",
+                    },
+                },
+                returns = {
+                    Return {
+                        documentation = "The data file's text.",
+                    },
+                },
+            },
+            comments = Function {
+                documentation = un(5, [[
+                    Returns the comments and location of `t[key]`, or `nil` if there are none.
+
+                    ```luwu
+                    const info = luwon.comments(manifest, "dependencies") or return
+                    print(info.above[1].text) -- the comment line above `dependencies = ...`
+                    print(info.after)         -- the comment at the end of its line
+                    print(info.binding)       -- the const it's written with, and that const's comments
+                    ```
+
+                    Without `key`, returns every comment in the file.
+
+                    Changing the result changes nothing. Use `luwon.setcomments` for that.
+                ]]),
+                params = {
+                    Parameter {
+                        name = "t",
+                        documentation = "A table from a data file.",
+                    },
+                    Parameter {
+                        name = "key",
+                        documentation = "The key whose comments you want.",
+                    },
+                },
+                returns = {
+                    Return {
+                        documentation = "`{ above, after?, location?, keylocation?, binding? }`, or `nil`.",
+                    },
+                },
+            },
+            setcomments = Function {
+                documentation = un(5, [[
+                    Sets the comments of `t[key]`. `luwon.encode` writes them.
+
+                    ```luwu
+                    luwon.setcomments(manifest, "name", {
+                        above = { "the registry's name" },
+                        after = "lowercase",
+                    })
+                    ```
+
+                    `--` is added for you. It also works on a table you built yourself, unless it has a metatable of
+                    its own.
+                ]]),
+                params = {
+                    Parameter {
+                        name = "t",
+                        documentation = "The table holding the value.",
+                    },
+                    Parameter {
+                        name = "key",
+                        documentation = "The value's key.",
+                    },
+                    Parameter {
+                        name = "comments",
+                        documentation = "`{ above = { string }?, after = string? }`. What you leave out is removed.",
+                    },
+                },
+            },
+            tagged = Table {
+                documentation = un(5, [[
+                    A class call from a data file, kept as its name and arguments.
+
+                    ```luwu
+                    const theme = luwon.decode("return { origin = Point(1, 2) }")
+                    print(theme.origin.name) -- "Point"
+                    print(theme.origin.args) -- { 1, 2 }
+                    ```
+
+                    `args` is what the call holds: `Point(1, 2)` gives `{ 1, 2 }` and `Size { width = 3 }` gives
+                    `{ { width = 3 } }`.
+
+                    `luwon.encode` writes it back as the call it holds now. A `luwon.reader` with the class gives you a
+                    real object instead.
+                ]]),
+                keys = {},
+            },
+            data = Table {
+                documentation = un(5, [[
+                    Lets a `luwon.reader` build a class that has methods or its own `__init`.
+
+                    By default the reader passes the call to the constructor and `luwon.encode` writes the object's
+                    fields back. `__todata` and `__fromdata` let the file hold a different shape than the object:
+
+                    ```luwu
+                    class Rect(public min: vector, public max: vector) implements luwon.data
+                        -- luwon.encode calls this and writes the values it returns between the parentheses, one per slot
+                        public function __todata(self)
+                            const size = self.max - self.min
+                            return self.min.x, self.min.y, size.x, size.y
+                        end
+
+                        -- reader:decode calls this with the values between the parentheses and uses the object it returns
+                        public function __fromdata(x: number, y: number, width: number, height: number): Rect
+                            return Rect(vector.create(x, y, 0), vector.create(x + width, y + height, 0))
+                        end
+                    end
+
+                    type Layout = { window: Rect }
+
+                    const layout = luwon.reader({ Rect }):decode<<Layout>>("return { window = Rect(10, 20, 640, 480) }")
+                    print(layout.window.max) -- 650, 500, 0
+
+                    layout.window = Rect(vector.create(0, 0, 0), vector.create(800, 600, 0))
+                    print(luwon.encode(layout)) -- return { window = Rect(0, 0, 800, 600) }
+                    ```
+
+                    When `__todata` returns a single table, the file holds the braces form and `__fromdata` gets that table back:
+
+                    ```luwu
+                    class Duration implements luwon.data
+                        public seconds: number
+
+                        -- luwon.encode writes the table this returns as `Duration { minutes = 2, seconds = 30 }`
+                        public function __todata(self)
+                            return {
+                                minutes = self.seconds // 60,
+                                seconds = self.seconds % 60,
+                            }
+                        end
+
+                        -- reader:decode calls this with the table between the braces and uses the object it returns
+                        public function __fromdata(parts: { minutes: number, seconds: number }): Duration
+                            return Duration { seconds = parts.minutes * 60 + parts.seconds }
+                        end
+                    end
+                    ```
+
+                    Both are optional.
+                ]]),
+                keys = {},
+            },
+            source = Function {
+                documentation = un(5, [[
+                    Returns the text of the file `t` came from, when `t` is the table the file returned. It doesn't
+                    change when you edit `t`.
+                ]]),
+                params = {
+                    Parameter {
+                        name = "t",
+                        documentation = "The table a data file returned.",
+                    },
+                },
+                returns = {
+                    Return {
+                        documentation = "The file's text, or `nil`.",
+                    },
+                },
+            },
+        },
+    },
 }
 
 -- dont need to worry abt globaltype yet
@@ -294,29 +558,31 @@ const function parse(object: object, current_path: string)
         end
         out[current_path] = res
     elseif class.isinstance(object, Function) then
-        const res = {
-            documentation = object.documentation,
-            params = {},
-            returns = {}
-        }
+        const params: { { name: string, documentation: string } } = {}
         if object.params then
             for index, param in object.params do
                 const param_path = current_path .. "/params/" .. (index - 1)
-                table.insert(res.params, {
+                table.insert(params, {
                     name = param.name,
                     documentation = param_path,
                 })
                 parse(param, param_path)
             end
         end
+        const returns: { string } = {}
         if object.returns then
             for index, ret in object.returns do
                 const ret_path = current_path .. "/returns/" .. (index - 1)
-                table.insert(res.returns, ret_path)
+                table.insert(returns, ret_path)
                 parse(ret, ret_path)
             end
         end
-        out[current_path] = res
+        out[current_path] = {
+            documentation = object.documentation,
+            params = params,
+            -- An empty table would be written as `{}`, a JSON object, where the docs parser wants an array of returns
+            returns = if #returns > 0 then returns else nil,
+        }
     elseif class.isinstance(object, Parameter) then
         const res = {
             documentation = object.documentation

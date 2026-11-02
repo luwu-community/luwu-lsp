@@ -10,6 +10,8 @@ LUAU_FASTFLAG(LuwuTableComprehensions)
 LUAU_FASTFLAG(LuwuDoExpr)
 LUAU_FASTFLAG(LuwuInLuwuDocs)
 LUAU_FASTFLAG(LuwuDestructuring)
+LUAU_FASTFLAG(LuwuDeclareStatements)
+LUAU_FASTFLAG(DebugLuwuMatchExpressions)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -222,6 +224,34 @@ export class File(public name: string) implements Entry end
     REQUIRE(klass);
     CHECK_EQ(klass->tokenType, lsp::SemanticTokenTypes::Class);
     CHECK_EQ(klass->tokenModifiers, lsp::SemanticTokenModifiers::Declaration);
+}
+
+TEST_CASE_FIXTURE(Fixture, "declared_class_colours_its_name_once_and_not_its_keyword")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDeclareStatements{FFlag::LuwuDeclareStatements, true};
+    ENABLE_NEW_SOLVER();
+
+    check(R"(
+declare class Semver(public const major: number)
+end
+)");
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+
+    // the global the parser adds for the class, `declare Semver: class<Semver>`, is located on the header
+    CHECK_FALSE(getSemanticToken(tokens, Luau::Position{1, 8}));
+
+    size_t nameTokens = 0;
+    for (const auto& token : tokens)
+        if (token.start == Luau::Position{1, 14})
+            ++nameTokens;
+    CHECK_EQ(nameTokens, 1);
+
+    auto name = getSemanticToken(tokens, Luau::Position{1, 14});
+    REQUIRE(name);
+    CHECK_EQ(name->tokenType, lsp::SemanticTokenTypes::Class);
+    CHECK_EQ(name->tokenModifiers, lsp::SemanticTokenModifiers::Declaration);
 }
 
 TEST_CASE_FIXTURE(Fixture, "object_typed_as_a_trait_is_not_coloured_as_the_trait")
@@ -463,6 +493,32 @@ TEST_CASE_FIXTURE(Fixture, "variables_named_give_and_when_are_not_keywords")
     checkNotKeywordToken(tokens, wordPosition(source, 0, "give"));
     checkNotKeywordToken(tokens, wordPosition(source, 1, "when"));
     checkNotKeywordToken(tokens, wordPosition(source, 1, "give"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "type_test_is_not_coloured_as_the_call_it_parses_to")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    // `p is Point` is parsed as `class.isinstance(p, Point)` and `p is string` as `type(p) == "string"`. Their callees
+    // are located on the whole test.
+    std::string source = "class Point(public x: number) end\n"
+                         "local p: unknown = Point(1)\n"
+                         "local a = p is Point\n"
+                         "local b = p is string\n";
+    auto uri = newDocument("main.luwu", source);
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+    workspace.frontend.check(moduleName);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getModule(moduleName), workspace.frontend.getSourceModule(moduleName));
+
+    CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 2, "p")));
+    CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 3, "p")));
+
+    auto point = getSemanticToken(tokens, wordPosition(source, 2, "Point"));
+    REQUIRE(point);
+    CHECK_EQ(point->tokenType, lsp::SemanticTokenTypes::Class);
 }
 
 TEST_CASE_FIXTURE(Fixture, "moonwave_tags_at_the_start_of_doc_lines")

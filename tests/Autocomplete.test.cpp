@@ -3038,7 +3038,7 @@ TEST_CASE_FIXTURE(RobloxFragmentAutocompleteFixture, "fragment_autocomplete_is_n
 
 static std::vector<lsp::CompletionItem> completeDestructuring(Fixture& fixture, const std::string& text)
 {
-    // A fresh file each call: reopening an open document keeps its old text
+    // A fresh file each call: reopening an open document doesn't replace its old text
     static size_t count = 0;
     auto [source, marker] = sourceWithMarker(text);
     auto uri = fixture.newDocument("destructure" + std::to_string(count++) + ".luau", source);
@@ -3156,6 +3156,64 @@ TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "destructuring_snippet_with_fragm
     CHECK_EQ(item.textEdit->newText, ".{$2} = $1");
 
     CHECK_FALSE(getItem(fragmentAutocomplete("local cat = {}\n", "local cat = {}\n-- const .", lsp::Position{1, 10}), ".{}"));
+}
+
+TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "class_function_name_completion_while_typing")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ENABLE_NEW_SOLVER();
+    enableSnippetSupport(client->capabilities);
+    client->capabilities.textDocument->diagnostic = lsp::DiagnosticClientCapabilities{};
+    client->globalConfig.completion.imports.enabled = true;
+
+    std::string before = "trait Path\n"
+                         "    expect private function __init(self, components: { string })\n"
+                         "    public components: { string } = {}\n"
+                         "    public function join(self, first: string, ...: string): Self\n"
+                         "        table.insert(self.components, first)\n"
+                         "        return self\n"
+                         "    end\n"
+                         "end\n"
+                         "\n"
+                         "class BasePath implements Path\n";
+    std::string after = "\n"
+                        "end\n"
+                        "class FilePath implements Path\n"
+                        "end\n"
+                        "type Pathlike = Path | string\n"
+                        "return {}\n";
+
+    std::string typed = "    private function __init(self)";
+    auto uri = newDocument("main.luwu", before + "    " + after);
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+
+    for (size_t length = 5; length <= typed.size(); ++length)
+    {
+        std::string line = typed.substr(0, length);
+        INFO(line);
+        lsp::CompletionParams params;
+        params.textDocument = lsp::TextDocumentIdentifier{uri};
+        params.position = lsp::Position{10, static_cast<unsigned int>(line.size())};
+
+        // completion straight after the edit (fragment autocomplete), then after a full check. Every prefix is
+        // completed because the editor asks after each keystroke.
+        workspace.checkStrict(moduleName, nullptr, false);
+        updateDocument(uri, before + line + after);
+        auto fragmentItems = workspace.completion(params, nullptr);
+        workspace.checkStrict(moduleName, nullptr, false);
+        auto items = workspace.completion(params, nullptr);
+
+        // the metamethods have no property behind them, which used to crash the server's documentation lookup
+        if (line == "    private function __")
+        {
+            for (const char* name : {"__init", "__tostring"})
+            {
+                CHECK(getItem(fragmentItems, name));
+                CHECK(getItem(items, name));
+            }
+        }
+    }
 }
 
 TEST_SUITE_END();

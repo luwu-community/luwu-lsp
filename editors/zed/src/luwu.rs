@@ -180,6 +180,24 @@ fn is_path_absolute(path: &str) -> bool {
     }
 }
 
+/// `path` with a leading `~` replaced by the user's home directory. Zed starts the server from the path as written,
+/// and nothing between the settings file and the process expands it.
+fn expand_home(path: &str, worktree: &zed::Worktree) -> String {
+    let rest = match path.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') => rest,
+        _ => return path.to_string(),
+    };
+    let env = worktree.shell_env();
+    let home = ["HOME", "USERPROFILE"]
+        .iter()
+        .find_map(|name| env.iter().find(|(key, _)| key == name))
+        .map(|(_, value)| value.trim_end_matches(['/', '\\']));
+    match home {
+        Some(home) if !home.is_empty() => format!("{home}{rest}"),
+        _ => path.to_string(),
+    }
+}
+
 fn resolve_against(root: &str, path: &str) -> String {
     if is_path_absolute(path) {
         path.to_string()
@@ -360,7 +378,7 @@ impl LuwuExtension {
         settings: &Settings,
     ) -> Result<String> {
         if let Some(path) = &settings.binary.path {
-            return Ok(path.clone());
+            return Ok(expand_home(path, worktree));
         }
         if !settings.binary.ignore_system_version
             && let Some(path) = worktree.which("luwu-lsp")

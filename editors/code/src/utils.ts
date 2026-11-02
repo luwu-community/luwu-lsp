@@ -2,14 +2,17 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as os from "os";
 
-/// Every language ID we serve: Luwu's own `.luwu`, our `.luau`, and VSCode's
-/// built-in `lua`. Note this is what the extension *understands* -- whether the
+/// Every language ID we serve: Luwu's own `.luwu`, our `.luau`, VSCode's
+/// built-in `lua`, and `.luwon` data files (Luwu configuration files are
+/// `luwon-config`). Note this is what the extension *understands* -- whether the
 /// language server actually attaches to a given one is
 /// `luwu.fileExtensions`.
 export const SOURCE_LANGUAGE_IDS: ReadonlySet<string> = new Set([
   "luwu",
   "luau",
   "lua",
+  "luwon",
+  "luwon-config",
 ]);
 
 export const isSourceDocument = (document: vscode.TextDocument): boolean => {

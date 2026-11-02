@@ -1,6 +1,6 @@
 name = "Luwu"
 grammar = "luau"
-path_suffixes = ["luwu"]
+path_suffixes = ["luwu", "luwon"]
 line_comments = ["-- ", "--- "]
 block_comment = ["--[[", "]]"]
 autoclose_before = ";:.,=}])>"

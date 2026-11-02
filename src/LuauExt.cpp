@@ -6,6 +6,7 @@
 #include "Platform/LSPPlatform.hpp"
 #include "Luau/BuiltinDefinitions.h"
 #include "Luau/ToString.h"
+#include "Luau/VisitType.h"
 #include "Luau/PrettyPrinter.h"
 #include "Luau/TypeInfer.h"
 #include "LSP/LuauExt.hpp"
@@ -422,6 +423,145 @@ std::string formatLongFunctionTypeLines(const std::string& typeString)
     return result;
 }
 
+// The `collections` library's classes are declared by Luwu's builtin definitions, whose module is `@luau`
+static bool isCollectionsClassNamed(const Luau::ExternType* et, const char* name)
+{
+    return et && et->name == name && et->definitionModuleName == "@luau";
+}
+
+bool isCollectionsClass(Luau::TypeId ty)
+{
+    const auto* et = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    if (!et || et->definitionModuleName != "@luau")
+        return false;
+
+    static constexpr const char* kClasses[] = {"ok", "err", "some", "pair", "triple", "quad", "orderedmap", "vec", "vecdeque"};
+    return std::any_of(std::begin(kClasses), std::end(kClasses), [&](const char* name) { return et->name == name; });
+}
+
+static std::optional<Luau::TypeId> firstTypeArgument(const Luau::ExternType* et)
+{
+    if (et->instantiatedTypeParams.empty())
+        return std::nullopt;
+    return et->instantiatedTypeParams[0];
+}
+
+namespace
+{
+// The `ok<T> | err<E>` and `some<T> | none` unions in a type, outermost first
+struct CollectionsUnionFinder : Luau::TypeOnceVisitor
+{
+    struct Found
+    {
+        Luau::TypeId union_;
+        const char* name;
+        std::vector<Luau::TypeId> typeArguments;
+        std::vector<Luau::TypeId> classes;
+        bool optional;
+    };
+    std::vector<Found> found;
+
+    CollectionsUnionFinder()
+        : TypeOnceVisitor("CollectionsUnionFinder", /* skipBoundTypes */ true)
+    {
+    }
+
+    bool visit(Luau::TypeId ty, const Luau::ExternType& et) override
+    {
+        // A class's members aren't printed, only its type arguments (`some<result<T, E>>`)
+        for (Luau::TypeId argument : et.instantiatedTypeParams)
+            traverse(argument);
+        return false;
+    }
+
+    bool visit(Luau::TypeId ty, const Luau::UnionType& uv) override
+    {
+        const Luau::ExternType* ok = nullptr;
+        const Luau::ExternType* err = nullptr;
+        const Luau::ExternType* some = nullptr;
+        Luau::TypeId okTy = nullptr, errTy = nullptr, someTy = nullptr;
+        bool none = false;
+        bool optional = false;
+        size_t others = 0;
+        for (Luau::TypeId option : uv.options)
+        {
+            option = Luau::follow(option);
+            const auto* et = Luau::get<Luau::ExternType>(option);
+            if (isCollectionsClassNamed(et, "ok") && !ok)
+                ok = et, okTy = option;
+            else if (isCollectionsClassNamed(et, "err") && !err)
+                err = et, errTy = option;
+            else if (isCollectionsClassNamed(et, "some") && !some)
+                some = et, someTy = option;
+            else if (Luau::isNone(option))
+                none = true;
+            else if (Luau::isNil(option))
+                optional = true;
+            else
+                others++;
+        }
+
+        if (others == 0 && ok && err && !some && !none)
+        {
+            auto value = firstTypeArgument(ok);
+            auto error = firstTypeArgument(err);
+            if (value && error)
+                found.push_back(Found{ty, "result", {*value, *error}, {okTy, errTy}, optional});
+        }
+        else if (others == 0 && some && none && !ok && !err)
+        {
+            if (auto value = firstTypeArgument(some))
+                found.push_back(Found{ty, "option", {*value}, {someTy}, optional});
+        }
+
+        return true;
+    }
+};
+} // namespace
+
+static void nameFoundCollectionsTypes(CollectionsUnionFinder& finder, CollectionsTypeNames& names, const Luau::ToStringOptions& opts)
+{
+    // An argument prints on one line, by the names of the unions inside it. The innermost ones are found last, so
+    // naming from the back names them before the unions holding them.
+    Luau::ToStringOptions argumentOpts = opts;
+    argumentOpts.useLineBreaks = false;
+    argumentOpts.includeWhereClauses = false;
+    argumentOpts.alwaysExpandRootAlias = false;
+    argumentOpts.repeatedTypeNames = &names.names;
+
+    for (auto it = finder.found.rbegin(); it != finder.found.rend(); ++it)
+    {
+        if (names.names.contains(it->union_))
+            continue;
+
+        std::string name = std::string(it->name) + "<";
+        for (size_t i = 0; i < it->typeArguments.size(); ++i)
+            name += (i == 0 ? "" : ", ") + Luau::toString(it->typeArguments[i], argumentOpts);
+        name += it->optional ? ">?" : ">";
+        names.names[it->union_] = std::move(name);
+    }
+
+    for (const auto& found : finder.found)
+    {
+        names.typeArguments.insert(names.typeArguments.end(), found.typeArguments.begin(), found.typeArguments.end());
+        names.unions.push_back(CollectionsTypeNames::Union{*names.names.find(found.union_), found.classes});
+    }
+}
+
+void nameCollectionsTypes(Luau::TypeId ty, CollectionsTypeNames& names, const Luau::ToStringOptions& opts)
+{
+    CollectionsUnionFinder finder;
+    finder.traverse(ty);
+    nameFoundCollectionsTypes(finder, names, opts);
+}
+
+void nameCollectionsTypes(Luau::TypePackId tp, CollectionsTypeNames& names, const Luau::ToStringOptions& opts)
+{
+    CollectionsUnionFinder finder;
+    finder.traverse(tp);
+    nameFoundCollectionsTypes(finder, names, opts);
+}
+
 // Converts an FTV and function call to a nice string
 // In the format "function NAME(args): ret"
 std::string toStringNamedFunction(const Luau::ModulePtr& module, const Luau::FunctionType* ftv, const NameOrExpr nameOrFuncExpr,
@@ -436,6 +576,11 @@ std::string toStringNamedFunction(const Luau::ModulePtr& module, const Luau::Fun
     opts.hideFunctionSelfArgumentType = stringOpts.hideFirstParameterType;
     if (scope)
         opts.scope = *scope;
+    CollectionsTypeNames collectionsNames;
+    nameCollectionsTypes(ftv->argTypes, collectionsNames, opts);
+    nameCollectionsTypes(ftv->retTypes, collectionsNames, opts);
+    if (!collectionsNames.unions.empty())
+        opts.repeatedTypeNames = &collectionsNames.names;
     auto functionString = Luau::toStringNamedFunction("", *ftv, opts);
 
     // HACK: remove all instances of "_: " from the function string
@@ -692,6 +837,39 @@ std::optional<Luau::Location> lookupTypeLocation(const Luau::Scope& deepScope, c
         else
             return std::nullopt;
     }
+}
+
+namespace
+{
+std::optional<Luau::Location> externTypeDefinitionLocation(Luau::TypeId ty);
+} // namespace
+
+// Luwu: a type alias of this module has its location in the scope. A type that comes from elsewhere (destructured from
+// a module, or forwarded) and a class's type don't: the type's own binding says where it's declared.
+std::optional<TypeDefinition> lookupTypeDefinition(const Luau::Scope& scope, const Luau::Name& name, const Luau::ModuleName& moduleName)
+{
+    if (std::optional<Luau::Location> location = lookupTypeLocation(scope, name))
+        return TypeDefinition{moduleName, *location};
+
+    std::optional<Luau::TypeFun> typeFun = scope.lookupType(name);
+    if (!typeFun)
+        return std::nullopt;
+
+    if (typeFun->definitionLocation && typeFun->definitionModuleName)
+        return TypeDefinition{*typeFun->definitionModuleName, *typeFun->definitionLocation};
+
+    return classDefinition(typeFun->type);
+}
+
+std::optional<TypeDefinition> classDefinition(Luau::TypeId ty)
+{
+    const auto* externType = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    if (!externType || externType->definitionModuleName.empty())
+        return std::nullopt;
+
+    if (std::optional<Luau::Location> location = externTypeDefinitionLocation(ty))
+        return TypeDefinition{externType->definitionModuleName, *location};
+    return std::nullopt;
 }
 
 std::optional<AttributeAtPosition> findAttributeAtPosition(const Luau::SourceModule& source, Luau::Position pos)

@@ -187,6 +187,13 @@ static lsp::FileEvent fileEvent(const Uri& uri, lsp::FileChangeType type)
     return event;
 }
 
+/// Whether `moduleName` was checked again since `before`, or is waiting to be. A change on disk rechecks the open files
+/// right away, so a dependent isn't left dirty.
+static bool checkedAgain(Fixture& fixture, const Luau::ModuleName& moduleName, const Luau::ModulePtr& before)
+{
+    return fixture.workspace.frontend.isDirty(moduleName) || fixture.workspace.frontend.moduleResolver.getModule(moduleName) != before;
+}
+
 TEST_CASE_FIXTURE(Fixture, "deleting_a_file_removes_its_module_from_the_frontend")
 {
     // A module used to stay in the frontend for the rest of the session once its file was gone,
@@ -207,7 +214,7 @@ TEST_CASE_FIXTURE(Fixture, "deleting_a_file_removes_its_module_from_the_frontend
 
 TEST_CASE_FIXTURE(Fixture, "deleting_a_file_makes_the_files_that_required_it_check_again")
 {
-    // The dependents have to be dirtied, or a module that required the deleted file keeps its
+    // The dependents have to be dirtied, or a module that required the deleted file still uses its
     // cached result and never reports the require that is now broken.
     tempDir.write_child("dependency.luau", "return {}");
     tempDir.write_child("dependent.luau", R"(local dependency = require("./dependency"))");
@@ -217,12 +224,13 @@ TEST_CASE_FIXTURE(Fixture, "deleting_a_file_makes_the_files_that_required_it_che
     auto dependentModule = workspace.fileResolver.getModuleName(dependent);
     workspace.frontend.check(dependentModule);
     REQUIRE(workspace.frontend.isDirty(dependentModule) == false);
+    Luau::ModulePtr before = workspace.frontend.moduleResolver.getModule(dependentModule);
 
     std::filesystem::remove(std::filesystem::path(dependency.fsPath()));
     workspace.closeTextDocument(dependency);
     workspace.onDidChangeWatchedFiles({fileEvent(dependency, lsp::FileChangeType::Deleted)});
 
-    CHECK(workspace.frontend.isDirty(dependentModule));
+    CHECK(checkedAgain(*this, dependentModule, before));
 }
 
 TEST_CASE_FIXTURE(Fixture, "a_deleted_file_stops_showing_up_in_workspace_symbols")
@@ -263,6 +271,66 @@ TEST_CASE_FIXTURE(Fixture, "a_file_deleted_and_written_again_in_one_batch_keeps_
     });
 
     CHECK(workspace.frontend.sourceNodes.count(moduleName) == 1);
+}
+
+TEST_CASE_FIXTURE(Fixture, "deleting_a_directory_removes_the_modules_in_it")
+{
+    // Deleting a directory gets one event for the directory and none for the files in it. Their modules (and the
+    // diagnostics the client shows for them) stayed for the rest of the session.
+    tempDir.write_child("stdlib/globals.luau", "return {}");
+    tempDir.write_child("main.luau", R"(local globals = require("./stdlib/globals"))");
+    auto globals = newDocument("stdlib/globals.luau", "return {}");
+    auto main = newDocument("main.luau", R"(local globals = require("./stdlib/globals"))");
+    workspace.closeTextDocument(globals);
+
+    auto globalsModule = workspace.fileResolver.getModuleName(globals);
+    auto mainModule = workspace.fileResolver.getModuleName(main);
+    workspace.frontend.check(mainModule);
+    REQUIRE(workspace.frontend.sourceNodes.count(globalsModule) == 1);
+    Luau::ModulePtr before = workspace.frontend.moduleResolver.getModule(mainModule);
+
+    Uri directory = Uri::file(tempDir.path()).resolvePath("stdlib");
+    std::filesystem::remove_all(std::filesystem::path(directory.fsPath()));
+    workspace.onDidChangeWatchedFiles({fileEvent(directory, lsp::FileChangeType::Deleted)});
+
+    CHECK(workspace.frontend.sourceNodes.count(globalsModule) == 0);
+    CHECK(checkedAgain(*this, mainModule, before));
+}
+
+TEST_CASE_FIXTURE(Fixture, "a_module_required_from_outside_the_workspace_is_watched")
+{
+    // The workspace's watchers only see files in its folder, so a library required from another directory kept its
+    // first check until the server restarted
+    lsp::DidChangeWatchedFilesClientCapabilities watchedFiles;
+    watchedFiles.dynamicRegistration = true;
+    watchedFiles.relativePatternSupport = true;
+    client->capabilities.workspace = lsp::ClientWorkspaceCapabilities{};
+    client->capabilities.workspace->didChangeWatchedFiles = watchedFiles;
+
+    TempDir external(std::filesystem::path(tempDir.path()).filename().string() + "_external");
+    external.write_child("lib.luau", "return { value = 1 }");
+    std::string requirePath = "../" + std::filesystem::path(external.path()).filename().string() + "/lib";
+    std::string source = "local lib = require(\"" + requirePath + "\")";
+    tempDir.write_child("main.luau", source);
+    auto main = newDocument("main.luau", source);
+
+    auto mainModule = workspace.fileResolver.getModuleName(main);
+    workspace.checkSimple(mainModule, nullptr);
+
+    std::string externalUri = Uri::file(external.path()).toString();
+    bool watched = false;
+    for (const auto& [method, params] : client->requestQueue)
+    {
+        if (method == "client/registerCapability" && params && params->dump().find(externalUri) != std::string::npos)
+            watched = true;
+    }
+    CHECK(watched);
+
+    // A change to it reaches the module that requires it
+    Luau::ModulePtr before = workspace.frontend.moduleResolver.getModule(mainModule);
+    lsp::FileEvent change = fileEvent(Uri::file(external.path()).resolvePath("lib.luau"), lsp::FileChangeType::Changed);
+    workspace.onDidChangeWatchedFiles({change});
+    CHECK(checkedAgain(*this, mainModule, before));
 }
 
 TEST_SUITE_END();

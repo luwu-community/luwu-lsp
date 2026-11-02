@@ -18,7 +18,7 @@
 
 // Luwu Destructuring (rfcs/destructuring.md): reading and rewriting `.{...}` patterns, shared by the code actions that
 // lay them out, import fields into them and qualify fields back out, and by completion's auto-imports through them.
-// Also the comma-separated list helpers those build on.
+// Also the comma-separated list helpers they use.
 namespace Luau::LanguageServer::Destructure
 {
 
@@ -73,7 +73,8 @@ struct DestructureFacts : Luau::AstVisitor
 
     void addPattern(const Luau::AstDestructurePattern& pattern, Luau::AstNode* holder)
     {
-        if (pattern.location)
+        // A positional pattern's elements have no keys to import or qualify by
+        if (pattern.location && !pattern.positional)
             patterns.emplace_back(&pattern, holder);
         for (const auto& field : pattern.fields)
             addPattern(field.target, holder);

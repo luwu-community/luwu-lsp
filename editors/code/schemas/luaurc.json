@@ -151,7 +151,8 @@
                 "LuaStringHelper": { "type": "boolean" },
                 "StringOperations": { "type": "boolean" },
                 "AmbiguousContinuation": { "type": "boolean" },
-                "UnflippedGuard": { "type": "boolean" }
+                "UnflippedGuard": { "type": "boolean" },
+                "UncaughtErrors": { "type": "boolean" }
             }
         }
     }

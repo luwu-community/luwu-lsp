@@ -45,6 +45,31 @@ struct ToStringNamedFunctionOpts
 // signature gets -- so a hover doesn't run off the side of the screen.
 std::string formatLongFunctionTypeLines(const std::string& typeString);
 
+// Luwu collections: `ok<T> | err<E>` and `some<T> | none` are what `collections.result<T, E>` and
+// `collections.option<T>` expand to, and ToString prints the union's members. These name each such union in a type
+// for ToStringOptions::repeatedTypeNames (`result<string, error>`), in place of its members.
+struct CollectionsTypeNames
+{
+    Luau::DenseHashMap<Luau::TypeId, std::string> names{nullptr};
+    // The type arguments of every union named, in the order they were found. They print inside the name, where
+    // ToString records no span for them.
+    std::vector<Luau::TypeId> typeArguments;
+    struct Union
+    {
+        std::string name;
+        // The `ok` and `err` (or `some`) classes it holds
+        std::vector<Luau::TypeId> classes;
+    };
+    // Every union named, outermost first
+    std::vector<Union> unions;
+};
+
+void nameCollectionsTypes(Luau::TypeId ty, CollectionsTypeNames& names, const Luau::ToStringOptions& opts);
+void nameCollectionsTypes(Luau::TypePackId tp, CollectionsTypeNames& names, const Luau::ToStringOptions& opts);
+
+// Whether `ty` is one of the `collections` library's classes (`ok`, `err`, `some`, `vec`, ...)
+bool isCollectionsClass(Luau::TypeId ty);
+
 std::string toStringNamedFunction(const Luau::ModulePtr& module, const Luau::FunctionType* ftv, const NameOrExpr nameOrFuncExpr,
     std::optional<Luau::ScopePtr> scope = std::nullopt, const ToStringNamedFunctionOpts& opts = {});
 
@@ -115,6 +140,18 @@ std::vector<Luau::Location> findTypeFunctionReferences(const Luau::SourceModule&
 std::optional<Luau::Location> getLocation(Luau::TypeId type);
 
 std::optional<Luau::Location> lookupTypeLocation(const Luau::Scope& deepScope, const Luau::Name& name);
+
+struct TypeDefinition
+{
+    Luau::ModuleName moduleName;
+    Luau::Location location;
+};
+
+// The class statement a class, trait or object type comes from
+std::optional<TypeDefinition> classDefinition(Luau::TypeId ty);
+
+// Where the type `name` seen from `scope` in `moduleName` is declared, which can be another module
+std::optional<TypeDefinition> lookupTypeDefinition(const Luau::Scope& scope, const Luau::Name& name, const Luau::ModuleName& moduleName);
 
 // An attribute under the cursor, e.g. `@[deprecated { use = "dog" }]`.
 struct AttributeAtPosition

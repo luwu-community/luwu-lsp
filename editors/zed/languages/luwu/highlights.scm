@@ -360,7 +360,7 @@
 ((identifier) @keyword
   (#any-of? @keyword
     "class" "trait" "public" "private" "final" "const" "export" "implements" "needs"
-    "when" "give" "match" "case" "expect" "declare" "extern" "with" "is" "as"))
+    "when" "give" "match" "case" "expect" "declare" "extern" "with" "is" "as" "try"))
 
 ((identifier) @constant.builtin
   (#eq? @constant.builtin "none"))

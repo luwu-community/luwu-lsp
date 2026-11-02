@@ -7,17 +7,25 @@ options). Uninstall zed-luau when you install this one, or Zed starts both serve
 
 ## Installing
 
-The extension isn't published yet. The [installer](../../README.md#getting-started) downloads its source
-(`luwu-zed-extension.zip` from the `luwu-latest` release), points `binary.path` at the server it installs and names the
-folder it unpacked the extension into. Install that folder as a dev extension: run `zed: install dev extension` from
-the command palette and pick it, or pick this directory (`editors/zed`) in a clone. Zed compiles the Rust part and
-the grammar itself; it needs `cargo` on your PATH, adds the `wasm32-wasip2` target to your toolchain and downloads its
-own wasi-sdk for the grammar.
-After changing anything in here, `zed: rebuild dev extension` picks it up.
+Until the extension is on Zed's registry, Zed builds it from source on your machine.
+
+1. If `cargo` isn't on your PATH, install Rust from [rustup.rs](https://rustup.rs). Zed needs it to build the extension.
+2. If you have zed-luau, uninstall it (`zed: extensions`, then Luau).
+3. Run the [installer](../../README.md#getting-started) and pick Zed. At the end it prints the folder it put the
+   extension in.
+4. In Zed, open the command palette (Ctrl+Shift+P, or Cmd+Shift+P on macOS), run `zed: install dev extension` and pick
+   that folder.
+
+The first build takes a minute or two while Zed sets up Rust's `wasm32-wasip2` target and downloads wasi-sdk.
+
+To update, run the installer again and then `zed: rebuild dev extension` in Zed.
+
+To work on the extension, pick `editors/zed` from a clone in step 4 and run `zed: rebuild dev extension` after each
+change.
 
 The extension finds the server in this order:
 
-1. `binary.path` from the settings below;
+1. `binary.path` from the settings below, where a leading `~` is your home directory (`~/Repositories/luwu-lsp/build/luwu-lsp`);
 2. `luwu-lsp` on your PATH, unless `binary.ignore_system_version` is true;
 3. the current build of the `luwu` branch, from the
    [`luwu-latest`](https://github.com/luwu-community/luwu-lsp/releases/tag/luwu-latest) release. It's downloaded into
@@ -25,7 +33,7 @@ The extension finds the server in this order:
 
 ## Settings
 
-Everything lives under `lsp.luwu-lsp.settings`. The `luau-lsp` object is the server's own configuration, the same keys
+Everything goes under `lsp.luwu-lsp.settings`. The `luau-lsp` object is the server's own configuration, the same keys
 the VS Code extension exposes as `luwu.*`, sent to the server as workspace configuration. The other keys are the
 extension's:
 

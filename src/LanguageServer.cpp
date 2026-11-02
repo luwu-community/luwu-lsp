@@ -162,7 +162,7 @@ lsp::ServerCapabilities LanguageServer::getServerCapabilities()
     // Workspaces
     lsp::WorkspaceFoldersServerCapabilities workspaceFolderCapabilities{true, false};
     // File Operations: we fix up relative requires when a source file is renamed or moved
-    lsp::FileOperationRegistrationOptions willRenameFiles{{lsp::FileOperationFilter{"file", {"**/*.{luau,luwu,lua}", "file"}}}};
+    lsp::FileOperationRegistrationOptions willRenameFiles{{lsp::FileOperationFilter{"file", {"**/*.{luau,luwu,lua,luwon}", "file"}}}};
     capabilities.workspace = lsp::WorkspaceCapabilities{workspaceFolderCapabilities, lsp::FileOperationOptions{willRenameFiles}};
     return capabilities;
 }
@@ -829,7 +829,9 @@ void LanguageServer::onInitialized([[maybe_unused]] const lsp::InitializedParams
         watchers.push_back(lsp::FileSystemWatcher{"**/.luaurc"});
         watchers.push_back(lsp::FileSystemWatcher{"**/.robloxrc"});
         watchers.push_back(lsp::FileSystemWatcher{"**/.config.luau"});
-        watchers.push_back(lsp::FileSystemWatcher{"**/*.{lua,luau,luwu}"});
+        watchers.push_back(lsp::FileSystemWatcher{"**/*.{lua,luau,luwu,luwon}"});
+        // A deleted directory is reported once, with no event for each file in it
+        watchers.push_back(lsp::FileSystemWatcher{"**/*", lsp::WatchKind::Delete});
         client->registerCapability(
             "didChangedWatchedFilesCapability", "workspace/didChangeWatchedFiles", lsp::DidChangeWatchedFilesRegistrationOptions{watchers});
     }
@@ -944,15 +946,26 @@ void LanguageServer::onDidChangeWatchedFiles(const lsp::DidChangeWatchedFilesPar
 {
     Luau::DenseHashMap<WorkspaceFolderPtr, std::vector<lsp::FileEvent>> workspaceChanges{nullptr};
 
-    for (const auto& change : params.changes)
+    auto addChange = [&](const WorkspaceFolderPtr& workspace, const lsp::FileEvent& change)
     {
-        auto workspace = findWorkspace(change.uri, /* shouldInitialize= */ false);
-        if (!workspace->isReady)
-            continue;
-
         if (!workspaceChanges.find(workspace))
             workspaceChanges[workspace] = {};
         workspaceChanges[workspace].push_back(change);
+    };
+
+    for (const auto& change : params.changes)
+    {
+        auto workspace = findWorkspace(change.uri, /* shouldInitialize= */ false);
+        if (workspace->isReady)
+            addChange(workspace, change);
+
+        // A workspace may require a module from outside its folder (watchExternalModules), or from another workspace
+        // folder. The change belongs to it too.
+        for (const auto& other : workspaceFolders)
+        {
+            if (other != workspace && other->isReady && other->hasModule(other->fileResolver.getModuleName(change.uri)))
+                addChange(other, change);
+        }
     }
 
     for (const auto& [workspace, changes] : workspaceChanges)

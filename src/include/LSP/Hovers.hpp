@@ -44,6 +44,11 @@ struct KeywordHoverMatch
 /// members' and primary constructor's keyword locations explicitly.
 std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<Luau::AstNode*>& ancestry, Luau::Position position);
 
+/// If `position` lands on the `read` or `write` of a table type's field or indexer (`{ read name: string }`,
+/// `{ read Markup }`), returns its doc key and the keyword's span. `node` is the innermost node or type at `position`
+/// (from `findNodeOrTypeAtPosition`). The ancestry findKeywordDocKeyAtPosition takes has no types in it.
+std::optional<KeywordHoverMatch> findTableAccessKeywordAtPosition(Luau::AstNode* node, Luau::Position position);
+
 /// The hovers.json key documenting a comment directive (`--!strict`, `--!optimize 2`,
 /// `--!trust`, ...), or nullopt when it is not one we recognise.
 ///

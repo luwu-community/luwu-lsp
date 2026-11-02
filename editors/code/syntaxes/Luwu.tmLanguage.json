@@ -102,6 +102,9 @@
       "include": "#parentheses"
     },
     {
+      "include": "#dot-table"
+    },
+    {
       "include": "#table"
     },
     {
@@ -569,8 +572,8 @@
       }
     },
     "class-declaration": {
-      "comment": "A class declaration. `declare class type` marks a class that exists but has no body here -- an embedder's or a definition file's class -- and may be exported: `export declare class type Name`.",
-      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(?:(declare)\\s+(class)\\s+(?:(type)\\s+)?|(class)\\s+)(?:([\\w]+))\\b",
+      "comment": "A class declaration. Luwu Declare Statements: `declare class Name` declares a class that exists at runtime without its implementation (an embedder's class, say), and `class type Name` declares its type alone. Either may be exported.",
+      "begin": "(?<![^.]\\.|:)\\b(?:(export)\\s+)?(?:(declare)\\s+)?(class)\\s+(?:(type)\\s+)?(?:([\\w]+))\\b",
       "beginCaptures": {
         "1": {
           "name": "storage.modifier.visibility.luwu"
@@ -585,9 +588,6 @@
           "name": "keyword.control.luwu"
         },
         "5": {
-          "name": "keyword.control.luwu"
-        },
-        "6": {
           "name": "entity.name.type.luwu"
         }
       },
@@ -1407,14 +1407,6 @@
         {
           "name": "support.constant.luwu",
           "match": "(?<![^.]\\.|:)\\b(bit32|buffer|coroutine|debug|integer(\\.(maxsigned|minsigned))?|math(\\.(huge|pi|nan|e|phi|sqrt2|tau))?|os|string|table|task|utf8(\\.charpattern)?|vector(\\.(one|zero))?)\\b(?!\\s*=(?!=))"
-        },
-        {
-          "name": "support.function.luwu",
-          "match": "(?<![^.]\\.|:)\\b(delay|DebuggerManager|elapsedTime|PluginManager|printidentity|settings|spawn|stats|tick|time|UserSettings|version|wait|warn)\\b(?!\\s*=(?!=))"
-        },
-        {
-          "name": "constant.language.luwu",
-          "match": "(?<![^.]\\.|:)\\b(game|plugin|shared|script|workspace|Enum(?:\\.\\w+){0,2})\\b(?!\\s*=(?!=))"
         }
       ]
     },
@@ -1430,9 +1422,14 @@
           "name": "keyword.control.luwu"
         },
         {
-          "comment": "Luwu match expressions: the `is` and `implements` type tests (`x is string`, `p is not Point`, `o implements Named`). A name, `not`, `nil` or `function` follows them; anything else is a variable named `is`.",
-          "match": "(?<![.:])\\b(?:is|implements)\\b(?=\\s+(?:not\\b|nil\\b|function\\b|[a-zA-Z_]))",
-          "name": "keyword.operator.wordlike.luwu"
+          "comment": "Luwu match expressions: the `is` and `implements` type tests (`x is string`, `p is not Point`, `n is 1 | 2`, `o implements Named`). A name, `not`, `nil`, `function` or a literal follows them; anything else is a variable named `is`.",
+          "match": "(?<![.:])\\b(?:is|implements)\\b(?=\\s+(?:not\\b|nil\\b|function\\b|[a-zA-Z_]|-?\\d|[\"'`]))",
+          "name": "keyword.control.luwu"
+        },
+        {
+          "comment": "Luwu try expressions: `try` is a contextual keyword (Parser::tryExpressionFollows). It starts an expression only before a name, a number, `#`, `...` or an interpolated string. `try(x)`, `try.x`, `try \"x\"` and `try {}` stay calls and uses of a function named `try`.",
+          "match": "(?<![.:])\\btry\\b(?=\\s+(?:(?!(?:and|or|then|else|elseif|end|until|in)\\b)[a-zA-Z_]|\\.?\\d|#|\\.\\.\\.|`))",
+          "name": "keyword.control.exception.luwu"
         },
         {
           "match": "\\b(local)\\b",
@@ -1531,6 +1528,38 @@
         {
           "match": ",",
           "name": "punctuation.separator.arguments.luwu"
+        },
+        {
+          "include": "source.luwu"
+        }
+      ]
+    },
+    "dot-table": {
+      "comment": "A `.{...}` that builds a table (`.{name, email}`, `Color.{r, g, b}`, rfcs/destructuring.md). A name on its own is a field, short for `name = name`, so it colors as one rather than as the value (a library function like `type` would otherwise color as a call). `.{` is one token so that it colors as one bracket.",
+      "begin": "(\\.\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.table.begin.luwu"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.table.end.luwu"
+        }
+      },
+      "patterns": [
+        {
+          "match": "[,;]",
+          "name": "punctuation.separator.fields.luwu"
+        },
+        {
+          "match": "(?:^|(?<=[{,;]))\\s*\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b(?=\\s*(?:[,;}]|--|$))",
+          "captures": {
+            "1": {
+              "name": "variable.other.property.luwu"
+            }
+          }
         },
         {
           "include": "source.luwu"
@@ -2091,6 +2120,11 @@
           }
         },
         {
+          "comment": "Luwu try expressions: the error hint after a return type (`: string ! error`, or `: ! error` to infer the return type). It takes nil's color so that it stands out from a `|`.",
+          "match": "!",
+          "name": "constant.language.nil.error-hint.luwu"
+        },
+        {
           "match": "\\?|\\&|\\|",
           "name": "keyword.operator.type.luwu"
         },
@@ -2164,8 +2198,8 @@
           "end": "\\}",
           "patterns": [
             {
-              "comment": "The `read`/`write` variance modifier on an indexer -- `{ read [string]: number }`. Named properties pick theirs up in the rule below, but an indexer has no name, so it needs its own match ahead of the `[` rule.",
-              "match": "\\b(read|write)\\b(?=\\s*\\[)",
+              "comment": "The `read`/`write` variance modifier on an indexer -- `{ read [string]: number }` or the array form `{ read Markup }`. Named properties pick theirs up in the rule below, but an indexer has no name, so it needs its own match ahead of the `[` rule. A property named `read` (`{ read: number }`) is followed by `:` and isn't matched.",
+              "match": "\\b(read|write)\\b(?=\\s*\\[|\\s+[a-zA-Z_({\"'])",
               "name": "storage.modifier.access.luwu"
             },
             {

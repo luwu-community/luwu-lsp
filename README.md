@@ -26,7 +26,7 @@ Run it again to update.
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1 | iex
+irm 'https://raw.githubusercontent.com/luwu-community/luwu-lsp/luwu/scripts/install/install.ps1' | iex
 ```
 
 macOS, Linux and Android (Termux):
@@ -48,7 +48,7 @@ the [`luwu-latest` prerelease](https://github.com/luwu-community/luwu-lsp/releas
 
 #### Settings
 
-The extension's settings live under `luwu.*` (`luwu.server.path`, `luwu.types.definitionFiles`, ...). It also reads
+The extension's settings go under `luwu.*` (`luwu.server.path`, `luwu.types.definitionFiles`, ...). It also reads
 any `luau-lsp.*` settings you already have, so an existing Luau LSP configuration carries over. A `luwu.*` setting
 always wins over its `luau-lsp.*` counterpart. Set `"luwu.inheritLuauLspSettings": false` to ignore `luau-lsp.*`
 entirely, for example when you keep upstream's extension installed and configure the two separately.
@@ -59,8 +59,9 @@ and it's easy to change the `luau-lsp.*` copy that a `luwu.*` value then overrid
 
 ```json
 {
-    "luwu.platform.type": "standard",
-    "luwu.types.definitionFiles": ["./globals.d.luau"]
+    "luwu.types.definitionFiles": {
+        "@seal": "./.seal/typedefs/globals.d.luau"
+    }
 }
 ```
 

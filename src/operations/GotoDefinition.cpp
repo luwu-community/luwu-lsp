@@ -2,6 +2,7 @@
 
 #include "Luau/AstQuery.h"
 #include "LSP/LuauExt.hpp"
+#include "LSP/Destructure.hpp"
 
 #include <algorithm>
 
@@ -21,6 +22,30 @@ static std::optional<LocationInformation> findLocationForSymbol(
         return std::nullopt;
     ty = Luau::follow(*ty);
     return LocationInformation{Luau::getDefinitionModuleName(*ty), getLocation(*ty), *ty};
+}
+
+// Luwu: where a property's value is declared, when that's where going to the property should lead. A class or trait value
+// goes to its class statement, rather than to where a module's table lists it (`return .{ Player }`, or a destructured
+// `const .{ Player } = require(...)`). A function goes to its own declaration when the property has no location of its
+// own: the table an `export function` builds has none.
+static std::optional<LocationInformation> valueDefinition(Luau::TypeId value, const std::optional<Luau::Location>& propertyLocation)
+{
+    value = Luau::follow(value);
+
+    const auto* externType = Luau::get<Luau::ExternType>(value);
+    bool isClassValue = externType && externType->relation && externType->relation->get_if<Luau::Obj>();
+    if (isClassValue)
+    {
+        if (std::optional<TypeDefinition> definition = classDefinition(value))
+            return LocationInformation{definition->moduleName, definition->location, value};
+    }
+
+    bool hasOwnLocation = propertyLocation && propertyLocation->begin != Luau::Position{0, 0};
+    const auto* ftv = Luau::get<Luau::FunctionType>(value);
+    if (!hasOwnLocation && ftv && ftv->definition && ftv->definition->definitionModuleName)
+        return LocationInformation{ftv->definition->definitionModuleName, ftv->definition->originalNameLocation, value};
+
+    return std::nullopt;
 }
 
 static std::vector<LocationInformation> findLocationsForIndex(const Luau::ModulePtr& module, const Luau::AstExpr* base, const Luau::Name& name)
@@ -44,7 +69,12 @@ static std::vector<LocationInformation> findLocationsForIndex(const Luau::Module
             {
                 return existing.location == location;
             });
-        if (!isDuplicate)
+        if (isDuplicate)
+            continue;
+
+        if (std::optional<LocationInformation> definition = valueDefinition(*prop.readTy, location))
+            results.push_back(*definition);
+        else
             results.push_back(LocationInformation{Luau::getDefinitionModuleName(realBaseTy), location, *prop.readTy});
     }
 
@@ -72,6 +102,24 @@ static std::vector<LocationInformation> findLocationsForExpr(const Luau::ModuleP
     }
 
     return {};
+}
+
+// Luwu Destructuring (rfcs/destructuring.md): a pattern field (`Heading` in `const .{ Heading } = require(...)`) reads
+// that field of a hidden local holding the value. The field read is what to go to, not the hidden local's value.
+static const Luau::AstExpr* destructuredFieldRead(const Luau::SourceModule& source, const Luau::AstExpr* expr, const Luau::Position& position)
+{
+    const auto* local = expr->as<Luau::AstExprLocal>();
+    if (!local || !Luau::LanguageServer::Destructure::isHiddenDestructureLocal(local->local))
+        return expr;
+
+    std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(source, position);
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+    {
+        const auto* index = (*it)->as<Luau::AstExprIndexName>();
+        if (index && index->expr == expr)
+            return index;
+    }
+    return expr;
 }
 
 lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParams& params, const LSPCancellationToken& cancellationToken)
@@ -149,8 +197,9 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
     if (!node)
         return result;
 
-    if (auto expr = node->asExpr())
+    if (auto nodeExpr = node->asExpr())
     {
+        const Luau::AstExpr* expr = destructuredFieldRead(*sourceModule, nodeExpr, position);
         for (const auto& [definitionModuleName, location, _] : findLocationsForExpr(module, expr, position))
         {
             if (location)
@@ -196,15 +245,18 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
                 if (it == importedModule->exportedTypeBindings.end() || !it->second.definitionLocation)
                     return result;
 
-                referenceTextDocument = fileResolver.getOrCreateTextDocumentFromModuleName(*importedName);
+                // Luwu forwarded module types: a forwarded type's location is in the module that declares it
+                referenceTextDocument =
+                    fileResolver.getOrCreateTextDocumentFromModuleName(it->second.definitionModuleName.value_or(*importedName));
                 location = *it->second.definitionLocation;
             }
             else
                 return result;
         }
-        else
+        else if (auto definition = lookupTypeDefinition(*scope, reference->name.value, moduleName))
         {
-            location = lookupTypeLocation(*scope, reference->name.value);
+            referenceTextDocument = fileResolver.getOrCreateTextDocumentFromModuleName(definition->moduleName);
+            location = definition->location;
         }
 
         if (!referenceTextDocument || !location)
@@ -295,15 +347,18 @@ std::optional<lsp::Location> WorkspaceFolder::gotoTypeDefinition(
                     if (it == importedModule->exportedTypeBindings.end() || !it->second.definitionLocation)
                         return std::nullopt;
 
-                    referenceTextDocument = fileResolver.getOrCreateTextDocumentFromModuleName(*importedName);
+                    // Luwu forwarded module types: a forwarded type's location is in the module that declares it
+                    referenceTextDocument =
+                        fileResolver.getOrCreateTextDocumentFromModuleName(it->second.definitionModuleName.value_or(*importedName));
                     location = *it->second.definitionLocation;
                 }
                 else
                     return std::nullopt;
             }
-            else
+            else if (auto definition = lookupTypeDefinition(*scope, reference->name.value, module->name))
             {
-                location = lookupTypeLocation(*scope, reference->name.value);
+                referenceTextDocument = fileResolver.getOrCreateTextDocumentFromModuleName(definition->moduleName);
+                location = definition->location;
             }
 
             if (!referenceTextDocument || !location)

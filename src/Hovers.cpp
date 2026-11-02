@@ -38,6 +38,27 @@ std::optional<std::string> getKeywordHoverDocs(const std::string& keyword)
     return std::nullopt;
 }
 
+std::optional<KeywordHoverMatch> findTableAccessKeywordAtPosition(Luau::AstNode* node, Luau::Position position)
+{
+    auto table = node ? node->as<Luau::AstTypeTable>() : nullptr;
+    if (!table)
+        return std::nullopt;
+
+    auto access = [&](Luau::AstTableAccess access, const std::optional<Luau::Location>& location) -> std::optional<KeywordHoverMatch>
+    {
+        if (!location || !location->containsClosed(position) || access == Luau::AstTableAccess::ReadWrite)
+            return std::nullopt;
+        return KeywordHoverMatch{access == Luau::AstTableAccess::Read ? "read" : "write", *location};
+    };
+
+    for (const auto& prop : table->props)
+        if (auto found = access(prop.access, prop.accessLocation))
+            return found;
+    if (table->indexer)
+        return access(table->indexer->access, table->indexer->accessLocation);
+    return std::nullopt;
+}
+
 std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<Luau::AstNode*>& ancestry, Luau::Position position)
 {
     if (ancestry.empty())
@@ -57,13 +78,13 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
     // body's own location spans the *entire* `function ... end` (matching or nearly matching its
     // wrapping AstStatFunction/AstStatLocalFunction's location), so findNodeOrTypeAtPosition always
     // prefers that inner, narrower-or-equal AstExprFunction over the wrapping statement -- and class
-    // member qualifiers live on plain AstClassProperty/AstClassMethod structs that the AstVisitor
+    // member qualifiers are on plain AstClassProperty/AstClassMethod structs that the AstVisitor
     // traversal never selects directly at all. So check both explicitly against `ancestry` (which,
     // unlike `node`, includes every enclosing node, not just the innermost match) before falling
     // back to the generic node-based checks below.
     for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
     {
-        // Luwu Declare Statements: a declared class's members and constructor live on its shape
+        // Luwu Declare Statements: a declared class's members and constructor are on its shape
         Luau::AstStatClass* classStat = (*it)->as<Luau::AstStatClass>();
         if (auto declaredClass = (*it)->as<Luau::AstStatDeclareClass>())
             classStat = declaredClass->shape;
@@ -314,8 +335,9 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
     }
     else if (auto stat = node->as<Luau::AstStatDeclareClass>())
     {
-        if (contains(stat->declareLocation))
-            return match("declare", stat->declareLocation);
+        // `class type Name` has no `declare`
+        if (stat->declareLocation && contains(*stat->declareLocation))
+            return match("declare", *stat->declareLocation);
         if (contains(stat->shape->keywordLocation))
             return match(stat->shape->isTrait ? "trait" : "class", stat->shape->keywordLocation);
     }

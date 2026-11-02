@@ -17,18 +17,18 @@ upstream [`JohnnyMorganz/luau-lsp`](https://github.com/JohnnyMorganz/luau-lsp) (
   messages refer to; don't use it for the extension, since the whole point of the short name is not colliding with
   upstream's "Luau Language Server".
 - Settings are `luwu.*`, with the old `luau-lsp.*` names read as a permanent fallback -- external tooling (seal)
-  generates them, and using this extension purely for Luau/Roblox work is supported. Resolution lives in
+  generates them, and using this extension purely for Luau/Roblox work is supported. Resolution is in
   `editors/code/src/settings.ts`; **new config reads must go through `getSetting`/`getSettingOr` and change listeners
   through `settingChanged`**, or they will ignore `luau-lsp.*`. The server still requests the `luau-lsp` config section
   over the wire (every client sends that, the nvim and zed ones included), so don't rename it in `Client.cpp`.
 - `../luwu` refers to `../luwu` or `$LUWU_TEST_PATH`.
 - Luwu-specific work is mostly editor support for Luwu language features
   (classes, none, destructuring, integers, ? operators), and improving DX.
-- The language spec lives in `$LUWU_TEST_PATH/rfcs` and ask before doing anything that implies a semantics change.
+- The language spec is in `$LUWU_TEST_PATH/rfcs` and ask before doing anything that implies a semantics change.
 
 ## The `luwu/` submodule
 
-**Never read or edit the `luwu/` submodule in this repo -- it can be stale.** The Luwu being developed lives at
+**Never read or edit the `luwu/` submodule in this repo -- it can be stale.** The Luwu being developed is at
 `LUWU_TEST_PATH` (usually `../luwu`). Read Luwu sources there.
 
 Analysis/Ast changes the LSP needs are made in `../luwu` first, then the LSP side is

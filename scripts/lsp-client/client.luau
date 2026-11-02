@@ -326,7 +326,8 @@ end
 --- The text of the hover at a position, or nil when there is none
 function Client.hover(self: Client, file: string, position: Position): string?
     const hover = self:request("textDocument/hover", text_document_position(self:uri(file), position)) :: Hover?
-    if not hover then
+    -- JSON null decodes to a sentinel, not nil
+    if type(hover) ~= "table" then
         return nil
     end
     return if type(hover.contents) == "string" then hover.contents else hover.contents.value

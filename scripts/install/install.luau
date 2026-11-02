@@ -115,7 +115,7 @@ const function var(name: string): string?
     return if value and value ~= "" then value else nil
 end
 
--- Where editors keep their config: %APPDATA%, ~/Library/Application Support or ~/.config
+-- Where editors store their config: %APPDATA%, ~/Library/Application Support or ~/.config
 const function config_root(): string
     if env.os == "Windows" then
         return var("APPDATA") or fs.path.join(home, "AppData", "Roaming")
@@ -678,7 +678,7 @@ const function find_editors(): { Editor }
         table.insert(editors, vscode_like("vscodium", "VSCodium", { "codium" }, "VSCodium"))
     end
 
-    -- Zed keeps its config in ~/.config/zed on macOS too
+    -- Zed stores its config in ~/.config/zed on macOS too
     const zed_dir = if env.os == "Windows"
         then fs.path.join(config_root(), "Zed")
         else fs.path.join(var("XDG_CONFIG_HOME") or fs.path.join(home, ".config"), "zed")
@@ -754,7 +754,7 @@ const function setup_vscode(editor: Editor, roblox: boolean)
     end
 end
 
--- Where Zed keeps its extensions, each installed one in a folder of `installed/` named for its id
+-- Where Zed stores its extensions, each installed one in a folder of `installed/` named for its id
 const function zed_extensions_dir(): string
     if env.os == "Windows" then
         return fs.path.join(var("LOCALAPPDATA") or fs.path.join(home, "AppData", "Local"), "Zed", "extensions")
