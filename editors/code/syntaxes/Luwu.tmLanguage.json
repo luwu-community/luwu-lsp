@@ -102,6 +102,9 @@
       "include": "#parentheses"
     },
     {
+      "include": "#dot-tuple"
+    },
+    {
       "include": "#dot-table"
     },
     {
@@ -234,6 +237,9 @@
           "include": "#destructure-pattern"
         },
         {
+          "include": "#positional-pattern"
+        },
+        {
           "begin": "(:)",
           "beginCaptures": {
             "1": {
@@ -283,6 +289,9 @@
           "include": "#destructure-pattern"
         },
         {
+          "include": "#positional-pattern"
+        },
+        {
           "begin": "(:)",
           "beginCaptures": {
             "1": {
@@ -295,6 +304,58 @@
               "include": "#type_literal"
             }
           ]
+        },
+        {
+          "name": "variable.other.constant.luwu",
+          "match": "\\b([A-Z_][A-Z0-9_]*)\\b"
+        },
+        {
+          "name": "variable.other.readwrite.luwu",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b"
+        }
+      ]
+    },
+    "positional-pattern": {
+      "comment": "A Luwu positional pattern, `.(a, b: T, .(x, y), entry.{kind})` (rfcs/destructuring.md), which binds by position. Every element is a binding, so there's no `as`. The `.(` is one token so that it colors as one bracket.",
+      "begin": "\\.\\s*\\(",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.destructure.begin.luwu"
+        }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.destructure.end.luwu"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#positional-pattern"
+        },
+        {
+          "include": "#destructure-pattern"
+        },
+        {
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.type.luwu"
+            }
+          },
+          "end": "(?=\\s*[,)])",
+          "patterns": [
+            {
+              "include": "#type_literal"
+            }
+          ]
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.luwu"
         },
         {
           "name": "variable.other.constant.luwu",
@@ -337,6 +398,9 @@
         },
         {
           "include": "#destructure-pattern"
+        },
+        {
+          "include": "#positional-pattern"
         },
         {
           "begin": "(:)",
@@ -1259,6 +1323,12 @@
       },
       "patterns": [
         {
+          "include": "#destructure-pattern"
+        },
+        {
+          "include": "#positional-pattern"
+        },
+        {
           "begin": "(:)",
           "beginCaptures": {
             "1": {
@@ -1413,7 +1483,7 @@
     "keyword": {
       "patterns": [
         {
-          "match": "\\b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\\b|\\b(?:when|give)\\b(?=\\s*(?:local\\b|const\\b|[^\\s=.,:;)\\]}]))",
+          "match": "\\b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\\b|\\b(?:when|give)\\b(?=\\s*(?:local\\b|const\\b|\\.\\s*[({]|[^\\s=.,:;)\\]}]))",
           "name": "keyword.control.luwu"
         },
         {
@@ -1522,6 +1592,30 @@
       "endCaptures": {
         "1": {
           "name": "punctuation.arguments.end.luwu"
+        }
+      },
+      "patterns": [
+        {
+          "match": ",",
+          "name": "punctuation.separator.arguments.luwu"
+        },
+        {
+          "include": "source.luwu"
+        }
+      ]
+    },
+    "dot-tuple": {
+      "comment": "A `.(...)` where a value goes, which builds a collections pair, triple or quad (`give .(name, age)`), or the pattern of a type test (`x is ok.(content)`). `.(` is one token so that it colors as one bracket.",
+      "begin": "(\\.\\()",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tuple.begin.luwu"
+        }
+      },
+      "end": "(\\))",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tuple.end.luwu"
         }
       },
       "patterns": [

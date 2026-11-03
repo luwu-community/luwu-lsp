@@ -45,6 +45,7 @@ contexts:
     - include: generics-instantiation
     - include: identifier
     - include: operator
+    - include: dot-tuple
     - include: parentheses
     - include: table
     - include: type_cast
@@ -270,6 +271,8 @@ contexts:
             1: keyword.control.luwu
             2: keyword.operator.assignment.luwu
           pop: true
+        - include: destructure-pattern
+        - include: positional-pattern
         - match: (:)
           captures:
             1: keyword.operator.type.luwu
@@ -702,7 +705,7 @@ contexts:
         - include: scope:source.luwu
 
   keyword:
-    - match: '\b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\b|\b(?:when|give)\b(?=\s*(?:local\b|const\b|[^\s=.,:;)\]}]))'
+    - match: '\b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\b|\b(?:when|give)\b(?=\s*(?:local\b|const\b|\.\s*[({]|[^\s=.,:;)\]}]))'
       scope: keyword.control.luwu
     # Luwu match expressions: `match` before the value it tests (`match x`,
     # `match const v = x`), and `case` starting an arm. Only in those shapes, so a
@@ -714,6 +717,12 @@ contexts:
     # follows them; anything else is a variable named `is`.
     - match: '(?<![.:])\b(?:is|implements)\b(?=\s+(?:not\b|nil\b|function\b|[a-zA-Z_]))'
       scope: keyword.operator.wordlike.luwu
+    # Luwu try expressions: `try` is a contextual keyword (Parser::tryExpressionFollows).
+    # It starts an expression only before a name, a number, `#`, `...` or an
+    # interpolated string. `try(x)`, `try.x`, `try "x"` and `try {}` stay calls and
+    # uses of a function named `try`.
+    - match: '(?<![.:])\btry\b(?=\s+(?:(?!(?:and|or|then|else|elseif|end|until|in)\b)[a-zA-Z_]|\.?\d|#|\.\.\.|`))'
+      scope: keyword.control.exception.luwu
     - match: \b(local)\b
       scope: storage.modifier.local.luwu
     - match: \b(const)\b
@@ -750,6 +759,7 @@ contexts:
         - include: comment
         - include: attribute
         - include: destructure-pattern
+        - include: positional-pattern
         - match: (:)
           captures:
             1: keyword.operator.type.luwu
@@ -778,6 +788,7 @@ contexts:
         - include: comment
         - include: attribute
         - include: destructure-pattern
+        - include: positional-pattern
         - match: (:)
           captures:
             1: keyword.operator.type.luwu
@@ -861,6 +872,35 @@ contexts:
         - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
           scope: variable.other.readwrite.luwu
 
+  # A Luwu positional pattern, `.(a, b: T, .(x, y), entry.{kind})`
+  # (rfcs/destructuring.md), which binds by position. Every element is a binding,
+  # so there's no `as`.
+  positional-pattern:
+    - match: '(\.)\s*(\()'
+      captures:
+        1: punctuation.accessor.luwu
+        2: punctuation.definition.destructure.begin.luwu
+      push:
+        - match: '\)'
+          scope: punctuation.definition.destructure.end.luwu
+          pop: true
+        - include: comment
+        - include: positional-pattern
+        - include: destructure-pattern
+        - match: (:)
+          captures:
+            1: keyword.operator.type.luwu
+          push:
+            - match: '(?=\s*[,)])'
+              pop: true
+            - include: type_literal
+        - match: ','
+          scope: punctuation.separator.comma.luwu
+        - match: '\b([A-Z_][A-Z0-9_]*)\b'
+          scope: variable.other.constant.luwu
+        - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+          scope: variable.other.readwrite.luwu
+
   # A Luwu destructuring pattern, `.{key, key as name, key.{inner}, key: T}`
   # (rfcs/destructuring.md), after `local`/`const` and an optional name. A key
   # followed by `as` is only the field being read, so it is scoped as a property;
@@ -881,6 +921,7 @@ contexts:
             1: variable.other.property.luwu
             2: keyword.control.as.luwu
         - include: destructure-pattern
+        - include: positional-pattern
         - match: (:)
           captures:
             1: keyword.operator.type.luwu
@@ -1031,6 +1072,22 @@ contexts:
     - match: \\$
       scope: constant.character.escape.luwu
 
+  # A `.(...)` where a value goes, which builds a collections pair, triple or quad
+  # (`give .(name, age)`), or the pattern of a type test (`x is ok.(content)`).
+  dot-tuple:
+    - match: '(\.)(\()'
+      captures:
+        1: punctuation.accessor.luwu
+        2: punctuation.definition.tuple.begin.luwu
+      push:
+        - match: '(\))'
+          captures:
+            1: punctuation.definition.tuple.end.luwu
+          pop: true
+        - match: ','
+          scope: punctuation.separator.arguments.luwu
+        - include: scope:source.luwu
+
   table:
     - match: '(\{)'
       captures:
@@ -1093,6 +1150,11 @@ contexts:
     - include: comment
     - include: attribute
     - include: string
+    # Luwu try expressions: the error hint after a return type (`: string ! error`,
+    # or `: ! error` to infer the return type). It takes nil's color so that it
+    # stands out from a `|`.
+    - match: '!'
+      scope: constant.language.nil.error-hint.luwu
     - match: \?|\&|\|
       scope: keyword.operator.type.luwu
     - match: '->'
