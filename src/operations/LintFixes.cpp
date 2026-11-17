@@ -84,6 +84,21 @@ struct ClauseVisitor : Luau::AstVisitor
         onClauses(node->clauses);
         return true;
     }
+
+    // Luwu Pattern Matching: each arm's `when` chain
+    bool visit(Luau::AstExprMatch* node) override
+    {
+        for (const Luau::AstMatchArm& arm : node->arms)
+            onClauses(arm.clauses);
+        return true;
+    }
+
+    bool visit(Luau::AstStatMatch* node) override
+    {
+        for (const Luau::AstMatchArm& arm : node->arms)
+            onClauses(arm.clauses);
+        return true;
+    }
 };
 
 struct FixContext
@@ -959,42 +974,74 @@ std::optional<LintFix> fixOneLineStatement(const Luau::LintWarning& lint, const 
     return singleEdit("Split over several lines", context.replace(stat->location, result));
 }
 
-// LuaGuard: `if not x then return end` as `x or return;` and `if x then return end` as `x and return;`, one guard per
-// condition of an `or` chain (guardConditions)
+// LuaGuard: `if not x then return end` as `return if not x`, and as three lines when it returns several values
 std::optional<LintFix> fixLuaGuard(const Luau::LintWarning& lint, const FixContext& context)
 {
     auto guard = context.find<Luau::AstStatIf>(lint.location);
     if (!guard || guard->elsebody || guard->clauses.size != 0 || guard->thenbody->body.size != 1)
         return std::nullopt;
 
-    std::vector<GuardCondition> conditions = guardConditions(guard->condition, context.textDocument);
-    if (conditions.empty())
-        return std::nullopt;
+    // `return a, b if c` could read as `return a, (if c then b else nil)`
+    if (auto ret = guard->thenbody->body.data[0]->as<Luau::AstStatReturn>(); ret && ret->list.size > 1)
+        return fixOneLineStatement(lint, context);
 
-    Luau::AstStat* leave = guard->thenbody->body.data[0];
-    std::string leaveText;
-    if (auto ret = leave->as<Luau::AstStatReturn>())
+    std::string replacement = leaveGuardText(guard, context.textDocument);
+    return singleEdit("Replace with '" + replacement + "'", context.replace(guard->location, replacement));
+}
+
+// ConfusingGuard's condition for an `if`: `x` for `x and <leave>`, and `x` negated for `x or <leave>`. Equality flips, a `not`
+// comes off, and anything that binds looser than `not` gets parentheses.
+std::string confusingGuardIfCondition(Luau::AstExprBinary* guard, const FixContext& context)
+{
+    Luau::AstExpr* tested = unwrapGroup(guard->left);
+    if (guard->op == Luau::AstExprBinary::And)
+        return context.text(guard->left);
+
+    if (auto negation = tested->as<Luau::AstExprUnary>(); negation && negation->op == Luau::AstExprUnary::Op::Not)
+        return context.text(unwrapGroup(negation->expr));
+
+    auto binary = tested->as<Luau::AstExprBinary>();
+    if (binary && (binary->op == Luau::AstExprBinary::CompareEq || binary->op == Luau::AstExprBinary::CompareNe))
     {
-        // A bare `return` needs the `;` so the next line isn't read as its value
-        if (ret->list.size == 0)
-            leaveText = "return;";
-        else if (ret->list.size == 1)
-            leaveText = context.text(ret);
-        else
-            leaveText = "(" + context.text(ret) + ")";
+        const char* flipped = binary->op == Luau::AstExprBinary::CompareEq ? " ~= " : " == ";
+        return context.text(binary->left) + flipped + context.text(binary->right);
     }
-    else if (leave->is<Luau::AstStatBreak>() || leave->is<Luau::AstStatContinue>())
-        leaveText = context.text(leave);
-    else
+
+    bool needsParentheses = binary || tested->is<Luau::AstExprIfElse>() || tested->is<Luau::AstExprTypeAssertion>();
+    return needsParentheses ? "not (" + context.text(tested) + ")" : "not " + context.text(tested);
+}
+
+// ConfusingGuard: `x and break` as `break if x`, and a long guard or one returning several values as an `if` statement. A
+// chained guard, or one that leaves either way, has no single rewrite.
+std::optional<LintFix> fixConfusingGuard(const Luau::LintWarning& lint, const FixContext& context)
+{
+    std::string indent = Destructure::getLineIndentation(context.textDocument, lint.location.begin.line);
+    auto ifStatement = [&](const std::string& condition, Luau::AstStat* leave)
+    {
+        return "if " + condition + " then\n" + indent + "    " + context.text(leave) + "\n" + indent + "end";
+    };
+
+    if (auto guard = context.find<Luau::AstStatIf>(lint.location); guard && guard->isLeaveGuard)
+    {
+        std::string replacement = ifStatement(context.text(guard->condition), guard->thenbody->body.data[0]);
+        return singleEdit("Write as an 'if' statement", context.replace(guard->location, replacement));
+    }
+
+    auto statement = context.find<Luau::AstStatExpr>(lint.location);
+    Luau::AstExprBinary* guard = statement ? Luau::asLeaveGuard(statement->expr) : nullptr;
+    Luau::AstExprDo* leave = guard ? Luau::asLeave(guard->right) : nullptr;
+    if (!leave || !leave->shorthand || leave->body->body.size != 1 || Luau::asLeaveEitherWay(statement->expr))
         return std::nullopt;
 
-    std::string indent = Destructure::getLineIndentation(context.textDocument, guard->location.begin.line);
-    std::string replacement;
-    for (const GuardCondition& condition : conditions)
-        replacement += (replacement.empty() ? "" : "\n" + indent) + condition.tested + " " + condition.joiner + " " + leaveText;
+    Luau::AstStat* leaveStat = leave->body->body.data[0];
+    if (lint.text.rfind("Write this guard leave-first", 0) == 0)
+    {
+        std::string replacement = context.text(leaveStat) + " if " + context.text(guard->left);
+        return singleEdit("Replace with '" + replacement + "'", context.replace(statement->location, replacement));
+    }
 
-    std::string title = conditions.size() == 1 ? "Replace with '" + replacement + "'" : "Split into one guard per condition";
-    return singleEdit(title, context.replace(guard->location, replacement));
+    std::string replacement = ifStatement(confusingGuardIfCondition(guard, context), leaveStat);
+    return singleEdit("Write as an 'if' statement", context.replace(statement->location, replacement));
 }
 
 // AmbiguousContinuation: a line starting with `-` or a string that continues the expression above it. Ending the line
@@ -1504,6 +1551,16 @@ std::optional<LintFix> fixLuaStringHelper(const Luau::LintWarning& lint, const F
     return singleEdit("Use 'string." + rewritten->builtin + "'", context.replace(range, replacement), rewritten->preferred);
 }
 
+// Luwu: ExtraArguments suggests passing the arguments as one array by writing `f({ ... })`, and then spans exactly the
+// arguments. A call to a function taking no arguments spans them all too, so the message is what tells the two apart.
+std::optional<LintFix> fixExtraArguments(const Luau::LintWarning& lint, const FixContext& context)
+{
+    if (lint.text.find("({ ... })") == std::string::npos)
+        return std::nullopt;
+
+    return singleEdit("Pass the arguments as one array", context.replace(lint.location, "{ " + context.text(lint.location) + " }"));
+}
+
 std::vector<LintFix> computeFixes(const Luau::LintWarning& lint, const FixContext& context)
 {
     auto one = [](std::optional<LintFix> fix)
@@ -1562,8 +1619,12 @@ std::vector<LintFix> computeFixes(const Luau::LintWarning& lint, const FixContex
         return one(fixLoopConcat(lint, context));
     case Luau::LintWarning::Code_UnflippedGuard:
         return one(fixUnflippedGuard(lint, context));
+    case Luau::LintWarning::Code_ConfusingGuard:
+        return one(fixConfusingGuard(lint, context));
     case Luau::LintWarning::Code_LuaStringHelper:
         return one(fixLuaStringHelper(lint, context));
+    case Luau::LintWarning::Code_ExtraArguments:
+        return one(fixExtraArguments(lint, context));
     default:
         return {};
     }
@@ -1580,81 +1641,13 @@ bool overlaps(const lsp::Range& a, const lsp::Range& b)
     return samePoint || (before(a.start, b.end) && before(b.start, a.end));
 }
 
-// Would a statement starting with `expr` continue the line above it? A `-`, a string or a `(` at the start of a line does.
-bool continuesLineAbove(Luau::AstExpr* expr)
-{
-    while (true)
-    {
-        if (auto binary = expr->as<Luau::AstExprBinary>())
-            expr = binary->left;
-        else if (auto call = expr->as<Luau::AstExprCall>())
-            expr = call->func;
-        else if (auto index = expr->as<Luau::AstExprIndexName>())
-            expr = index->expr;
-        else if (auto index = expr->as<Luau::AstExprIndexExpr>())
-            expr = index->expr;
-        else if (auto cast = expr->as<Luau::AstExprTypeAssertion>())
-            expr = cast->expr;
-        else if (auto instantiate = expr->as<Luau::AstExprInstantiate>())
-            expr = instantiate->expr;
-        else
-            break;
-    }
-
-    auto unary = expr->as<Luau::AstExprUnary>();
-    bool minus = unary && unary->op == Luau::AstExprUnary::Op::Minus;
-    return minus || expr->is<Luau::AstExprConstantString>() || expr->is<Luau::AstExprInterpString>() || expr->is<Luau::AstExprGroup>();
-}
-
-// An if-else expression at the end would take the `or return` into its `else` branch
-bool endsWithIfElse(Luau::AstExpr* expr)
-{
-    while (true)
-    {
-        if (auto binary = expr->as<Luau::AstExprBinary>())
-            expr = binary->right;
-        else if (auto unary = expr->as<Luau::AstExprUnary>())
-            expr = unary->expr;
-        else
-            return expr->is<Luau::AstExprIfElse>();
-    }
-}
-
 } // namespace
 
-// The conditions of an `or` chain, in order: `a`, `b` and `c` in `a or (b or c)`
-static void collectDisjuncts(Luau::AstExpr* condition, std::vector<Luau::AstExpr*>& disjuncts)
+std::string leaveGuardText(Luau::AstStatIf* node, const TextDocument& textDocument)
 {
-    condition = unwrapGroup(condition);
-    auto binary = condition->as<Luau::AstExprBinary>();
-    if (!binary || binary->op != Luau::AstExprBinary::Or)
-    {
-        disjuncts.push_back(condition);
-        return;
-    }
-
-    collectDisjuncts(binary->left, disjuncts);
-    collectDisjuncts(binary->right, disjuncts);
-}
-
-std::vector<GuardCondition> guardConditions(Luau::AstExpr* condition, const TextDocument& textDocument)
-{
-    std::vector<Luau::AstExpr*> disjuncts;
-    collectDisjuncts(condition, disjuncts);
-
     FixContext context{nullptr, textDocument};
-    std::vector<GuardCondition> guards;
-    for (Luau::AstExpr* disjunct : disjuncts)
-    {
-        auto unary = disjunct->as<Luau::AstExprUnary>();
-        bool negated = unary && unary->op == Luau::AstExprUnary::Op::Not;
-        Luau::AstExpr* tested = negated ? unwrapGroup(unary->expr) : disjunct;
-        if (continuesLineAbove(tested) || endsWithIfElse(tested))
-            return {};
-
-        guards.push_back({context.text(tested), negated ? "or" : "and"});
-    }
-    return guards;
+    Luau::AstStat* leave = node->thenbody->body.data[0];
+    return context.text(leave) + " if " + context.text(node->condition);
 }
 
 std::vector<LintFix> computeLintFixes(const Luau::LintWarning& lint, Luau::AstStatBlock* root, const TextDocument& textDocument)
@@ -1691,7 +1684,9 @@ std::optional<std::string> fixAllTitle(Luau::LintWarning::Code code)
         Luau::LintWarning::Code_LuaStringHelper,
         Luau::LintWarning::Code_AmbiguousContinuation,
         Luau::LintWarning::Code_UnflippedGuard,
+        Luau::LintWarning::Code_ConfusingGuard,
         Luau::LintWarning::Code_LoopConcat,
+        Luau::LintWarning::Code_ExtraArguments,
     };
 
     if (std::find(std::begin(kFixable), std::end(kFixable), code) == std::end(kFixable))

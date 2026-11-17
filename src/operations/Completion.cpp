@@ -98,6 +98,10 @@ static size_t firstNodeNeedingEnd(const std::vector<Luau::AstNode*>& ancestry)
         if (auto* exprDo = ancestry[i]->as<Luau::AstExprDo>())
             return i + 1 < ancestry.size() && ancestry[i + 1] == exprDo->body ? i + 2 : i + 1;
 
+        // Luwu Pattern Matching: a `match` expression's arms are values, which take no `end`
+        if (ancestry[i]->is<Luau::AstExprMatch>())
+            return i + 1;
+
         if (ancestry[i]->is<Luau::AstExprTableComprehension>())
         {
             for (size_t j = i + 1; j < ancestry.size(); ++j)

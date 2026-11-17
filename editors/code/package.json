@@ -155,8 +155,13 @@
       {
         "id": "punctuation",
         "description": "Punctuation in code: the brackets around Luwu code in a doc comment, and the dots, colons and parentheses in it"
+      },
+      {
+        "id": "selfKeyword",
+        "description": "`self`, and `Self` in a class or trait. Themes that color rust-analyzer's `selfKeyword` color these too"
       }
     ],
+
     "semanticTokenScopes": [
       {
         "language": "luwu",
@@ -168,6 +173,10 @@
           "property.defaultLibrary": [
             "variable.language.luwu",
             "variable.language.luau"
+          ],
+          "selfKeyword": [
+            "variable.language.self.luwu",
+            "variable.language.self.luau"
           ],
           "enum.defaultLibrary": [
             "constant.language.enum.luwu",
@@ -183,6 +192,9 @@
           ],
           "property.defaultLibrary": [
             "variable.language.luau"
+          ],
+          "selfKeyword": [
+            "variable.language.self.luau"
           ],
           "enum.defaultLibrary": [
             "constant.language.enum.luau"
@@ -471,6 +483,12 @@
             "default": true,
             "scope": "resource"
           },
+          "luwu.format.insertMissingComma": {
+            "markdownDescription": "Whether to insert a comma after a table element when typing `(`, `{` or a quote at the end of its line and the editor closes the bracket or quote: typing `(` after `Paragraph` gives `Paragraph(),`. Call arguments don't get a comma. Needs `editor.formatOnType`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
           "luwu.fflags.enableByDefault": {
             "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
             "type": "boolean",
@@ -548,6 +566,14 @@
             "type": "boolean",
             "default": true,
             "scope": "resource"
+          },
+          "luwu.diagnostics.externalPort": {
+            "markdownDescription": "A port on 127.0.0.1 where other programs (a seal script, a build tool) can post diagnostics as JSON to `/diagnostics`, or 0 to take none. They show up next to Luwu's own, with badges. The format is in the Luwu Language Server's `docs/external-diagnostics.md`.",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 65535,
+            "scope": "window"
           },
           "luwu.diagnostics.pullOnChange": {
             "markdownDescription": "Whether to update document diagnostics whenever the text file changes",
@@ -1258,6 +1284,12 @@
             "default": true,
             "scope": "resource"
           },
+          "luau-lsp.format.insertMissingComma": {
+            "markdownDescription": "Whether to insert a comma after a table element when typing `(`, `{` or a quote at the end of its line and the editor closes the bracket or quote: typing `(` after `Paragraph` gives `Paragraph(),`. Call arguments don't get a comma. Needs `editor.formatOnType`.",
+            "type": "boolean",
+            "default": true,
+            "scope": "resource"
+          },
           "luau-lsp.fflags.enableByDefault": {
             "markdownDescription": "Enable all (boolean) Luau FFlags by default. These flags can later be overriden by `#luwu.fflags.override#` and `#luwu.fflags.sync#`",
             "type": "boolean",
@@ -1335,6 +1367,14 @@
             "type": "boolean",
             "default": true,
             "scope": "resource"
+          },
+          "luau-lsp.diagnostics.externalPort": {
+            "markdownDescription": "A port on 127.0.0.1 where other programs (a seal script, a build tool) can post diagnostics as JSON to `/diagnostics`, or 0 to take none. They show up next to Luwu's own, with badges. The format is in the Luwu Language Server's `docs/external-diagnostics.md`.",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 65535,
+            "scope": "window"
           },
           "luau-lsp.diagnostics.pullOnChange": {
             "markdownDescription": "Whether to update document diagnostics whenever the text file changes",
@@ -2005,6 +2045,16 @@
             "italic": false
           }
         }
+      },
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "punctuation.definition.bundle.luwu",
+            "settings": {
+              "fontStyle": "bold"
+            }
+          }
+        ]
       }
     },
     "walkthroughs": [

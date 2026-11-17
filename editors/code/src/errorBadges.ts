@@ -69,10 +69,61 @@ const KINDS: BadgeKind[] = [
 const LINT_KIND = KINDS.findIndex((kind) => kind.labels === undefined);
 
 /// Which entry of KINDS a diagnostic's badge is, and the label its message
-/// starts with (`TypeError: ...`, `LocalUnused: ...`).
+/// starts with (`TypeError: ...`, `LocalUnused: ...`). A diagnostic another
+/// program sent can give the badge other text and colours.
 export interface Badge {
   kind: number;
   label: string;
+  text?: string;
+  background?: string;
+  foreground?: string;
+}
+
+/// What the server puts in `data.luwu` of a diagnostic another program posted
+/// to `luwu.diagnostics.externalPort`.
+interface ExternalBadgeData {
+  kind: string;
+  label: string;
+  badge?:
+    | string
+    | false
+    | { text?: string; background?: string; foreground?: string };
+}
+
+function externalBadgeData(
+  diagnostic: vscode.Diagnostic,
+): ExternalBadgeData | undefined {
+  // vscode-languageclient keeps the LSP `data` field on the diagnostics it
+  // makes, though vscode.Diagnostic doesn't declare it
+  const data: unknown = (diagnostic as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null || !("luwu" in data)) {
+    return undefined;
+  }
+  return (data as { luwu: ExternalBadgeData }).luwu;
+}
+
+/// The badge of a diagnostic another program sent, or undefined when it asked
+/// for none. Its kind is one of KINDS' labels, or `Lint`.
+function externalBadgeFor(diagnostic: vscode.Diagnostic): Badge | undefined {
+  const data = externalBadgeData(diagnostic);
+  if (data === undefined || data.badge === false) {
+    return undefined;
+  }
+  const kind =
+    data.kind === "Lint"
+      ? LINT_KIND
+      : KINDS.findIndex((k) => k.labels?.includes(data.kind));
+  if (kind === -1) {
+    return undefined;
+  }
+  const custom = typeof data.badge === "object" ? data.badge : undefined;
+  return {
+    kind,
+    label: data.label,
+    text: typeof data.badge === "string" ? data.badge : custom?.text,
+    background: custom?.background,
+    foreground: custom?.foreground,
+  };
 }
 
 /// Lints have codes below this one and type errors have codes from it up
@@ -83,7 +134,7 @@ const FIRST_TYPE_ERROR_CODE = 1000;
 /// can be any lint's name, so a lint is told apart by its code.
 export function badgeFor(diagnostic: vscode.Diagnostic): Badge | undefined {
   if (diagnostic.source !== "Luwu") {
-    return undefined;
+    return externalBadgeFor(diagnostic);
   }
   const colon = diagnostic.message.indexOf(": ");
   if (colon === -1) {
@@ -273,18 +324,24 @@ function decorate(
     }
     badges.diagnostics.sort((a, b) => a.range.start.compareTo(b.range.start));
     const first = badges.diagnostics[0];
-    const label = badges.notes ? NOTE_LABEL : (badgeFor(first)?.label ?? "");
+    const firstBadge = badges.notes ? undefined : badgeFor(first);
+    const label = badges.notes ? NOTE_LABEL : (firstBadge?.label ?? "");
     const labels = badges.notes
       ? badges.diagnostics.map(() => NOTE_LABEL)
-      : badges.diagnostics.map(
-          (diagnostic) => badgeFor(diagnostic)?.label ?? "",
-        );
+      : badges.diagnostics.map((diagnostic) => {
+          const badge = badgeFor(diagnostic);
+          return badge?.text ?? badge?.label ?? "";
+        });
     const end = document.lineAt(line).range.end;
     const range = new vscode.Range(end, end);
     (badges.notes ? noteBadgeOptions : badgeOptions)[badges.kind].push({
       range,
       renderOptions: {
-        after: { contentText: badgeText(labels) },
+        after: {
+          contentText: badgeText(labels),
+          backgroundColor: firstBadge?.background,
+          color: firstBadge?.foreground,
+        },
       },
     });
     if (preview && (badges.notes || KINDS[badges.kind].preview)) {

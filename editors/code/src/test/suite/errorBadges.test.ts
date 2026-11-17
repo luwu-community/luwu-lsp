@@ -67,6 +67,33 @@ suite("Error Badges Test Suite", () => {
     assert.strictEqual(badgeFor(other), undefined);
   });
 
+  test("another program's diagnostic gets the badge its data asks for", () => {
+    const external = (data: unknown) => {
+      const result = diagnostic("ZSpacing: add a space before \\z", "ZSpacing");
+      result.source = "luwu-website";
+      (result as { data?: unknown }).data = { luwu: data };
+      return result;
+    };
+
+    const lint = badgeFor(external({ kind: "Lint", label: "ZSpacing" }));
+    assert.strictEqual(lint?.kind, 3);
+    assert.strictEqual(lint?.label, "ZSpacing");
+
+    const custom = badgeFor(
+      external({
+        kind: "TypeError",
+        label: "TypeError",
+        badge: { text: "\\z", background: "#2E0A40" },
+      }),
+    );
+    assert.strictEqual(custom?.kind, 1);
+    assert.strictEqual(custom?.text, "\\z");
+    assert.strictEqual(custom?.background, "#2E0A40");
+
+    const none = external({ kind: "Lint", label: "ZSpacing", badge: false });
+    assert.strictEqual(badgeFor(none), undefined);
+  });
+
   test("the preview is the message's first paragraph on one line", () => {
     assert.strictEqual(
       messagePreview(

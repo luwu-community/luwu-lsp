@@ -45,9 +45,9 @@ struct ToStringNamedFunctionOpts
 // signature gets -- so a hover doesn't run off the side of the screen.
 std::string formatLongFunctionTypeLines(const std::string& typeString);
 
-// Luwu collections: `ok<T> | err<E>` and `some<T> | none` are what `collections.result<T, E>` and
-// `collections.option<T>` expand to, and ToString prints the union's members. These name each such union in a type
-// for ToStringOptions::repeatedTypeNames (`result<string, error>`), in place of its members.
+// Luwu: `Ok<T> | Err<E>` and `Some<T> | none` are what `Result<T, E>` and `Option<T>` expand to, and ToString prints the
+// union's members. These name each such union in a type for ToStringOptions::repeatedTypeNames
+// (`Result<string, error>`), in place of its members.
 struct CollectionsTypeNames
 {
     Luau::DenseHashMap<Luau::TypeId, std::string> names{nullptr};
@@ -57,7 +57,7 @@ struct CollectionsTypeNames
     struct Union
     {
         std::string name;
-        // The `ok` and `err` (or `some`) classes it holds
+        // The `Ok` and `Err` (or `Some`) classes it holds
         std::vector<Luau::TypeId> classes;
     };
     // Every union named, outermost first
@@ -67,7 +67,7 @@ struct CollectionsTypeNames
 void nameCollectionsTypes(Luau::TypeId ty, CollectionsTypeNames& names, const Luau::ToStringOptions& opts);
 void nameCollectionsTypes(Luau::TypePackId tp, CollectionsTypeNames& names, const Luau::ToStringOptions& opts);
 
-// Whether `ty` is one of the `collections` library's classes (`ok`, `err`, `some`, `vec`, ...)
+// Whether `ty` is one of Luwu's builtin classes: `Ok`, `Err`, `Some`, or one of the `collections` library's (`Vec`, ...)
 bool isCollectionsClass(Luau::TypeId ty);
 
 std::string toStringNamedFunction(const Luau::ModulePtr& module, const Luau::FunctionType* ftv, const NameOrExpr nameOrFuncExpr,

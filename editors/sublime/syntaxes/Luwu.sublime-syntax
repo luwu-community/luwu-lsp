@@ -39,6 +39,7 @@ contexts:
     - include: for-loop
     - include: type-function
     - include: type-alias-declaration
+    - include: type-test
     - include: keyword
     - include: language_constant
     - include: standard_library
@@ -321,6 +322,9 @@ contexts:
         - include: attribute
         - match: \.\.\.
           scope: variable.parameter.function.varargs.luwu
+        # `self`, and `Self` for the class a class function is called on
+        - match: '\b(?:self|Self)\b'
+          scope: variable.language.self.luwu
         - match: '[a-zA-Z_][a-zA-Z0-9_]*'
           scope: variable.parameter.function.luwu
         - match: ','
@@ -516,6 +520,9 @@ contexts:
             - match: '(?=[,)])'
               pop: true
             - include: scope:source.luwu
+        # `self`, and `Self` for the class a class function is called on
+        - match: '\b(?:self|Self)\b'
+          scope: variable.language.self.luwu
         - match: '[a-zA-Z_][a-zA-Z0-9_]*'
           scope: variable.parameter.function.luwu
         - match: ','
@@ -704,18 +711,113 @@ contexts:
           pop: true
         - include: scope:source.luwu
 
+  # Luwu match expressions: a type test's pattern. `is string`, `is not bundle`
+  # and the other tags color as one keyword with the `is`, and so does the `not`
+  # of `is not`. In `is Cat(name, age)` and `is Pod {x, y}` the class is a type
+  # and the names inside are bindings, never a call or a table.
+  type-test:
+    - match: '(?<![.:])\b(is)\s+(?:(not)\s+)?(vector)\s*(\{)'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+        3: keyword.operator.wordlike.luwu
+        4: punctuation.definition.pattern.begin.luwu
+      push: pattern-braces
+    - match: '(?<![.:])\b(is)\s+(?:(not)\s+)?(string|number|integer|boolean|buffer|vector|table|function|thread|userdata|object|class|trait|bundle|vec|vecdeque|orderedmap)\b'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+        3: keyword.operator.wordlike.luwu
+    - match: '(?<![.:])\b(is|implements)\s+(?:(not)\s+)?((?:[a-zA-Z_][a-zA-Z0-9_]*\s*\.\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\s*(\()'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+        3: entity.name.type.luwu
+        4: punctuation.definition.pattern.begin.luwu
+      push: pattern-parens
+    - match: '(?<![.:])\b(is|implements)\s+(?:(not)\s+)?((?:[a-zA-Z_][a-zA-Z0-9_]*\s*\.\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\s*(\{)'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+        3: entity.name.type.luwu
+        4: punctuation.definition.pattern.begin.luwu
+      push: pattern-braces
+    - match: '(?<![.:])\b(is|implements)\s+(?:(not)\s+)?(?!(?:not|nil|none|true|false|function)\b)((?:[a-zA-Z_][a-zA-Z0-9_]*\s*\.\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*[.:\[])'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+        3: entity.name.type.luwu
+    - match: '(?<![.:])\b(is)\s+(?:(not)\s+)?(?=\.\()'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+    - match: '(?<![.:])\b(is)\s+(not)\b'
+      captures:
+        1: keyword.operator.wordlike.luwu
+        2: keyword.operator.wordlike.luwu
+    # An alternative after a pattern's `|` (`x is nil | string`, `x is A | geo.B`).
+    # Outside a type annotation a single `|` only joins pattern alternatives.
+    - match: '(?<!\|)(\|)(?!\|)\s*(string|number|integer|boolean|buffer|vector|table|function|thread|userdata|object|class|trait|bundle|vec|vecdeque|orderedmap)\b'
+      captures:
+        1: keyword.operator.pattern.luwu
+        2: keyword.operator.wordlike.luwu
+    - match: '(?<!\|)(\|)(?!\|)\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\s*\.\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\s*(\()'
+      captures:
+        1: keyword.operator.pattern.luwu
+        2: entity.name.type.luwu
+        3: punctuation.definition.pattern.begin.luwu
+      push: pattern-parens
+    - match: '(?<!\|)(\|)(?!\|)\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\s*\.\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\s*(\{)'
+      captures:
+        1: keyword.operator.pattern.luwu
+        2: entity.name.type.luwu
+        3: punctuation.definition.pattern.begin.luwu
+      push: pattern-braces
+    - match: '(?<!\|)(\|)(?!\|)\s*(?!(?:nil|none|true|false|function|not)\b)((?:[a-zA-Z_][a-zA-Z0-9_]*\s*\.\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*[.:\[])'
+      captures:
+        1: keyword.operator.pattern.luwu
+        2: entity.name.type.luwu
+    - match: '(?<!\|)\|(?!\|)'
+      scope: keyword.operator.pattern.luwu
+
+  pattern-parens:
+    - meta_scope: meta.pattern.luwu
+    - match: '\)'
+      scope: punctuation.definition.pattern.end.luwu
+      pop: true
+    - include: pattern-contents
+
+  pattern-braces:
+    - meta_scope: meta.pattern.luwu
+    - match: '\}'
+      scope: punctuation.definition.pattern.end.luwu
+      pop: true
+    - include: pattern-contents
+
+  # Inside a type test's pattern: bindings, `as` renames, `..` and nested type
+  # tests (`Box { inner as _ is Some(inner is string) }`).
+  pattern-contents:
+    - include: type-test
+    - match: '\b(as)\b'
+      scope: keyword.control.luwu
+    - match: '\.\.(?!\.)'
+      scope: keyword.operator.rest.luwu
+    - match: '\b(?!(?:nil|none|true|false|not|and|or)\b)([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*(?:\.\s*[({])?\s*(?:[,)}]|\bis\b|\bas\b|\bimplements\b|$))'
+      scope: variable.other.readwrite.luwu
+    - include: main
+
   keyword:
     - match: '\b(break|do|else|for|if|elseif|return|then|repeat|while|until|end|in|continue)\b|\b(?:when|give)\b(?=\s*(?:local\b|const\b|\.\s*[({]|[^\s=.,:;)\]}]))'
       scope: keyword.control.luwu
     # Luwu match expressions: `match` before the value it tests (`match x`,
     # `match const v = x`), and `case` starting an arm. Only in those shapes, so a
     # variable named `match` or `case` stays a name.
-    - match: '(?<![.:])\bmatch\b(?=\s+(?:local\b|const\b|not\b|[^\s=.,:;)\]}+*/%^<>~-]))|^\s*\bcase\b(?=\s+(?:is\b|implements\b|nil\b|none\b|true\b|false\b|-?\d|["''`]))'
+    - match: '(?<![.:])\bmatch\b(?=\s+(?:local\b|const\b|not\b|[^\s=.,:;)\]}+*/%^<>~-]))|^\s*\bcase\b(?=\s+(?:is\b|implements\b|nil\b|none\b|true\b|false\b|-?\d|["''`]|[a-zA-Z_][a-zA-Z0-9_]*\s+(?:is|implements|when|then)\b))'
       scope: keyword.control.luwu
     # Luwu match expressions: the `is` and `implements` type tests (`x is string`,
-    # `p is not Point`, `o implements Named`). A name, `not`, `nil` or `function`
-    # follows them; anything else is a variable named `is`.
-    - match: '(?<![.:])\b(?:is|implements)\b(?=\s+(?:not\b|nil\b|function\b|[a-zA-Z_]))'
+    # `p is not Point`, `n is 1 | 2`, `o implements Named`). A name, `not`, `nil`,
+    # `function` or a literal follows them; anything else is a variable named `is`.
+    - match: '(?<![.:])\b(?:is|implements)\b(?=\s+(?:not\b|nil\b|function\b|[a-zA-Z_]|-?\d|["''`]))'
       scope: keyword.operator.wordlike.luwu
     # Luwu try expressions: `try` is a contextual keyword (Parser::tryExpressionFollows).
     # It starts an expression only before a name, a number, `#`, `...` or an
@@ -729,7 +831,8 @@ contexts:
       scope: storage.modifier.const.luwu
     - match: '\b(function)\b(?![,:])'
       scope: keyword.control.luwu
-    - match: '(?<![^.]\.|:)\b(self)\b'
+    # Luwu Classes and Traits: `Self` is the class or trait the code is in.
+    - match: '(?<![^.]\.|:)\b(self|Self)\b'
       scope: variable.language.self.luwu
     - match: \b(and|or|not)\b
       scope: keyword.operator.logical.luwu keyword.operator.wordlike.luwu
@@ -975,6 +1078,13 @@ contexts:
           scope: entity.name.type.luwu
 
   number:
+    # A Luwu bundle position, `b.1`: a `.` right after a name, `)` or `]` and
+    # followed by digits reads a position, like a field. Positions chain, so
+    # `b.1.2` is two reads and never the number 1.2.
+    - match: '(?<=[a-zA-Z0-9_)\]])(\.)(\d+)'
+      captures:
+        1: punctuation.accessor.luwu
+        2: variable.other.property.luwu
     - match: '\b0_*[xX]_*[\da-fA-F_]*(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
       scope: constant.numeric.hex.luwu
     - match: '\b0_*[bB][01_]+(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
@@ -1073,7 +1183,7 @@ contexts:
       scope: constant.character.escape.luwu
 
   # A `.(...)` where a value goes, which builds a collections pair, triple or quad
-  # (`give .(name, age)`), or the pattern of a type test (`x is ok.(content)`).
+  # (`give .(name, age)`), or a bundle pattern (`x is .(name, age)`).
   dot-tuple:
     - match: '(\.)(\()'
       captures:
@@ -1086,6 +1196,12 @@ contexts:
           pop: true
         - match: ','
           scope: punctuation.separator.arguments.luwu
+        # Luwu match expressions: `.. as rest` ends a bundle pattern
+        # (`x is .(a, .. as rest)`)
+        - match: '(\.\.)\s*(as)\b'
+          captures:
+            1: keyword.operator.rest.luwu
+            2: keyword.control.luwu
         - include: scope:source.luwu
 
   table:
@@ -1148,6 +1264,9 @@ contexts:
 
   type_literal:
     - include: comment
+    # Luwu Classes and Traits: `Self` is the class or trait the type is in.
+    - match: '(?<![^.]\.)\bSelf\b(?!\s*\.)'
+      scope: variable.language.self.luwu
     - include: attribute
     - include: string
     # Luwu try expressions: the error hint after a return type (`: string ! error`,
@@ -1211,6 +1330,19 @@ contexts:
         - include: type_literal
         - match: '[,;]'
           scope: punctuation.separator.fields.type.luwu
+    # A Luwu bundle type, `.(string, number)`.
+    - match: '(\.)(\()'
+      captures:
+        1: punctuation.accessor.luwu
+        2: punctuation.definition.tuple.begin.luwu
+      push:
+        - match: '(\))'
+          captures:
+            1: punctuation.definition.tuple.end.luwu
+          pop: true
+        - match: ','
+          scope: punctuation.separator.fields.type.luwu
+        - include: type_literal
     - match: \(
       push:
         - match: \)

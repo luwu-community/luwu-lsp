@@ -13,8 +13,11 @@ struct ClientDiagnosticsConfiguration
     bool strictDatamodelTypes = false;
     /// Luwu: whether diagnostics carry help: the `Help (...)` paragraphs, and the diagnostics that are only help
     bool showHelp = true;
+    /// Luwu: the port on 127.0.0.1 where other programs can post diagnostics, or 0 to take none
+    int externalPort = 0;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientDiagnosticsConfiguration, includeDependents, workspace, strictDatamodelTypes, showHelp)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+    ClientDiagnosticsConfiguration, includeDependents, workspace, strictDatamodelTypes, showHelp, externalPort)
 
 struct ClientRobloxSourcemapConfiguration
 {
@@ -298,8 +301,10 @@ struct ClientFormatConfiguration
     /// Whether to rewrite a bare attribute to its bracketed form when typing `{` after it, since only the
     /// bracketed form takes arguments: `@deprecated {` becomes `@[deprecated {}]`
     bool bracketAttributeArguments = true;
+    /// Whether to insert a comma after a table element when typing `(`, `{` or a quote at the end of its line
+    bool insertMissingComma = true;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFormatConfiguration, convertQuotes, bracketAttributeArguments);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFormatConfiguration, convertQuotes, bracketAttributeArguments, insertMissingComma);
 
 struct ClientPluginFileSystemConfiguration
 {

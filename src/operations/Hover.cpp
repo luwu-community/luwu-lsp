@@ -157,6 +157,25 @@ static std::optional<Luau::TypeId> classNamedBy(Luau::TypeId ty, const char* nam
     return Luau::follow(klass->ty);
 }
 
+// Luwu bundles: how many values the bundle type `ty` holds ("3", or "7 or more" for a BigBundle of unknown length), or
+// nullopt when `ty` isn't a bundle
+static std::optional<std::string> bundleLength(Luau::TypeId ty)
+{
+    const auto* bundle = Luau::get<Luau::ExternType>(Luau::follow(ty));
+    if (!bundle)
+        return std::nullopt;
+    const auto* declared = bundle->genericTemplate ? Luau::get<Luau::ExternType>(Luau::follow(*bundle->genericTemplate)) : bundle;
+    if (!declared || !declared->printsAsBundle)
+        return std::nullopt;
+
+    if (bundle->instantiatedTypePackParams.empty())
+        return std::to_string(bundle->instantiatedTypeParams.size());
+    auto [head, tail] = Luau::flatten(bundle->instantiatedTypePackParams[0]);
+    if (tail)
+        return std::to_string(head.size()) + " or more";
+    return std::to_string(head.size());
+}
+
 // Visitor to find a class statement by name (used to build a hover summary for class values)
 struct FindClassStatByName : Luau::AstVisitor
 {
@@ -1370,7 +1389,7 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
 
     // Luwu match expressions: `x is Point` is parsed as `class.isinstance(x, Point)`, whose made-up callee is located
     // on the whole test. Between the operands is the `is`, which shouldn't show the `class` library's hover. The
-    // pattern after the type (`x is Point.(px)`) declares its bindings, which hover as locals.
+    // pattern after the type (`x is Point(px)`) declares its bindings, which hover as locals.
     for (auto ancestor : ancestry)
     {
         auto call = ancestor->as<Luau::AstExprCall>();
@@ -1394,6 +1413,19 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             for (const auto& member : parentClass->members)
                 if (const auto* method = member.get_if<Luau::AstClassMethod>(); method && method->nameLocation.containsClosed(position))
                     node = parentClass;
+
+    // Luwu bundles: `.(a, b)` is parsed as `bundle.pack(a, b)`, whose made-up callee is located on the `.`. The dot hovers
+    // as the bundle the call builds, not as the `bundle` library.
+    for (auto ancestor : ancestry)
+    {
+        auto call = ancestor->as<Luau::AstExprCall>();
+        if (call && call->fromDotPositional && call->func->location.containsClosed(position))
+        {
+            node = call;
+            exprOrLocal.setExpr(call);
+        }
+    }
+
     auto keywordMatch = findKeywordDocKeyAtPosition(ancestry, position);
     if (!keywordMatch)
         keywordMatch = findTableAccessKeywordAtPosition(node, position);
@@ -2459,9 +2491,9 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
             if (!note.empty())
                 note += "\n\n";
             if (classNames.size() == 1)
-                note += "-- " + named.name + " is none or the builtin collections class " + classNames[0];
+                note += "-- " + named.name + " is none or the builtin class " + classNames[0];
             else
-                note += "-- " + named.name + " is one of the builtin collections classes " + classNames[0] + " and " + classNames[1];
+                note += "-- " + named.name + " is one of the builtin classes " + classNames[0] + " and " + classNames[1];
             note += bodies;
         }
 
@@ -2595,7 +2627,12 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
     }
 
     std::string objectOfLine;
-    if (objectOfType)
+    // Luwu bundles: a bundle's class is an implementation detail, so its hover says the bundle's length instead
+    if (std::optional<std::string> length = objectOfType ? bundleLength(*objectOfType) : std::nullopt)
+    {
+        objectOfLine = "\n*Bundle of length " + *length + "*";
+    }
+    else if (objectOfType)
     {
         // Luwu Traits (rfcs/classes/traits.md): a value typed as a trait is an object of some class implementing it --
         // spelled out, since the type alone reads the same as the trait itself, and doesn't say it's a trait

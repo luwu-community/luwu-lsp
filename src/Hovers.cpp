@@ -189,6 +189,42 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
         return std::nullopt;
     };
 
+    // Luwu Pattern Matching: `match` (absent in `try e case ...`, whose subject starts where the `match` does) and its arms'
+    // `case`, `when`, `then` and `else`
+    auto matchKeyword = [&](const Luau::Location& location,
+                            const Luau::AstMatchSubject& subject,
+                            const Luau::AstArray<Luau::AstMatchArm>& arms,
+                            const char* doc) -> std::optional<KeywordHoverMatch>
+    {
+        constexpr unsigned matchKeywordLength = 5;
+        Luau::Location keyword{location.begin, Luau::Position{location.begin.line, location.begin.column + matchKeywordLength}};
+        bool hasKeyword = subject.value && subject.value->location.begin != location.begin;
+        if (hasKeyword && contains(keyword))
+            return match(doc, keyword);
+
+        for (const Luau::AstMatchArm& arm : arms)
+        {
+            if (contains(arm.keywordLocation))
+            {
+                switch (arm.kind)
+                {
+                case Luau::AstMatchArm::Case:
+                    return match("case", arm.keywordLocation);
+                case Luau::AstMatchArm::When:
+                    return match("match_when", arm.keywordLocation);
+                case Luau::AstMatchArm::Else:
+                    return match("match_else", arm.keywordLocation);
+                }
+            }
+            if (arm.thenLocation && contains(*arm.thenLocation))
+                return match("match_then", *arm.thenLocation);
+            if (auto when = whenIn(arm.clauses))
+                return match("when", *when);
+        }
+
+        return std::nullopt;
+    };
+
     if (auto stat = node->as<Luau::AstStatIf>(); stat && whenIn(stat->clauses))
         return match("when", *whenIn(stat->clauses));
     if (auto expr = node->as<Luau::AstExprIfElse>(); expr && whenIn(expr->clauses))
@@ -243,6 +279,16 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
             return match("then", *expr->thenLocation);
         if (expr->elseLocation && contains(*expr->elseLocation))
             return match("else", *expr->elseLocation);
+    }
+    else if (auto expr = node->as<Luau::AstExprMatch>())
+    {
+        if (auto found = matchKeyword(expr->location, expr->subject, expr->arms, "match"))
+            return found;
+    }
+    else if (auto stat = node->as<Luau::AstStatMatch>())
+    {
+        if (auto found = matchKeyword(stat->location, stat->subject, stat->arms, "match_stat"))
+            return found;
     }
     else if (auto stat = node->as<Luau::AstStatWhile>())
     {

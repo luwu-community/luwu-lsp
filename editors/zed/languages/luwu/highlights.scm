@@ -395,3 +395,64 @@
   "extern"
   "with"
 ] @keyword
+
+; Luwu bundles: a position reads like a field, and the `.` of `.(` belongs to its bracket.
+
+(position) @property
+
+(bundle
+  "." @punctuation.bracket)
+
+(bundle_type
+  "." @punctuation.bracket)
+
+; Luwu type tests: `is`, `is not` and `implements` are keywords, and so is the type a test names (`x is string`). In
+; `is Cat(name, age)` and `is Pod { x, y }` the class is a type and the names are bindings, never a call or a table.
+
+(type_test
+  [
+    "is"
+    "not"
+    "implements"
+  ] @keyword)
+
+(pattern_binding
+  [
+    "is"
+    "not"
+    "implements"
+  ] @keyword)
+
+(pattern_field
+  [
+    "is"
+    "not"
+    "implements"
+    "as"
+  ] @keyword)
+
+(pattern_rest
+  ".." @operator)
+
+(pattern_rest
+  "as" @keyword)
+
+(pattern_class
+  (identifier) @type)
+
+(pattern_class
+  .
+  (identifier) @keyword
+  .
+  (#any-of? @keyword
+    "string" "number" "integer" "boolean" "buffer" "vector" "table" "function" "thread" "userdata" "object" "class" "trait"
+    "bundle" "vec" "vecdeque" "orderedmap"))
+
+(pattern_binding
+  name: (identifier) @variable)
+
+(pattern_field
+  name: (identifier) @variable)
+
+(bundle_pattern
+  "." @punctuation.bracket)

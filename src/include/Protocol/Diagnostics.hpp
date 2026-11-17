@@ -47,9 +47,11 @@ struct Diagnostic
     std::string message;
     std::vector<DiagnosticTag> tags{};
     std::vector<DiagnosticRelatedInformation> relatedInformation{};
-    // data?
+    /// Kept by the client and sent back with code action requests. Luwu's VS Code extension reads the badge of an
+    /// external diagnostic from it.
+    std::optional<json> data = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(Diagnostic, range, severity, code, codeDescription, source, message, tags, relatedInformation)
+NLOHMANN_DEFINE_OPTIONAL(Diagnostic, range, severity, code, codeDescription, source, message, tags, relatedInformation, data)
 
 struct PublishDiagnosticsParams
 {

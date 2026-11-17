@@ -201,6 +201,7 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
         report.items.emplace_back(createLintDiagnostic(error, *textDocument));
 
     reportLuwuOnlyDirectives(*sourceModule, *textDocument, report.items);
+    appendExternalDiagnostics(params.textDocument.uri, *textDocument, report.items);
 
     return report;
 }
@@ -307,6 +308,7 @@ lsp::WorkspaceDiagnosticReport WorkspaceFolder::workspaceDiagnostics(const lsp::
             documentReport.items.emplace_back(createLintDiagnostic(error, document));
 
         reportLuwuOnlyDirectives(*sourceModule, document, documentReport.items);
+        appendExternalDiagnostics(uri, document, documentReport.items);
 
         workspaceReport.items.emplace_back(documentReport);
     }
@@ -337,6 +339,122 @@ void WorkspaceFolder::pushDiagnostics(const lsp::DocumentUri& uri, const size_t 
     catch (const JsonRpcException&)
     {
         // Server is not yet configured to send diagnostic messages
+    }
+}
+
+void WorkspaceFolder::appendExternalDiagnostics(const Uri& uri, const TextDocument* textDocument, std::vector<lsp::Diagnostic>& items) const
+{
+    auto file = externalDiagnostics.find(uri);
+    if (file == externalDiagnostics.end())
+        return;
+
+    for (const auto& [source, diagnostics] : file->second)
+    {
+        for (const ExternalDiagnostic& diagnostic : diagnostics)
+            items.push_back(toLspDiagnostic(diagnostic, source, textDocument));
+    }
+}
+
+/// The edits of `fix` in the editor's positions
+static std::vector<lsp::TextEdit> lspEdits(const ExternalFix& fix, const TextDocument& textDocument)
+{
+    std::vector<lsp::TextEdit> edits;
+    for (const ExternalEdit& edit : fix.edits)
+        edits.push_back({{textDocument.convertPosition(edit.location.begin), textDocument.convertPosition(edit.location.end)}, edit.newText});
+    return edits;
+}
+
+/// Whether `range` touches `location`
+static bool touches(const Luau::Location& range, const Luau::Location& location)
+{
+    return !(range.end < location.begin || location.end < range.begin);
+}
+
+void WorkspaceFolder::appendExternalFixes(
+    const Uri& uri, const TextDocument& textDocument, const Luau::Location& range, std::vector<lsp::CodeAction>& actions) const
+{
+    auto file = externalDiagnostics.find(uri);
+    if (file == externalDiagnostics.end())
+        return;
+
+    for (const auto& [source, diagnostics] : file->second)
+    {
+        // The codes under the cursor that get a fix-all, because more of their diagnostics in the file have fixes
+        std::vector<std::string> fixAllCodes;
+        for (const ExternalDiagnostic& diagnostic : diagnostics)
+        {
+            if (!touches(range, diagnostic.location))
+                continue;
+
+            for (size_t index = 0; index < diagnostic.fixes.size(); ++index)
+            {
+                lsp::CodeAction action;
+                action.title = diagnostic.fixes[index].title;
+                action.kind = lsp::CodeActionKind::QuickFix;
+                action.isPreferred = index == 0;
+                action.diagnostics.push_back(toLspDiagnostic(diagnostic, source, &textDocument));
+                action.edit = lsp::WorkspaceEdit{{{uri, lspEdits(diagnostic.fixes[index], textDocument)}}};
+                actions.push_back(std::move(action));
+            }
+
+            if (!diagnostic.fixes.empty() && diagnostic.code &&
+                std::find(fixAllCodes.begin(), fixAllCodes.end(), *diagnostic.code) == fixAllCodes.end())
+                fixAllCodes.push_back(*diagnostic.code);
+        }
+
+        // Each diagnostic of the code takes its first fix
+        for (const std::string& code : fixAllCodes)
+        {
+            lsp::CodeAction action;
+            action.title = "Fix all '" + code + "' warnings in this file";
+            action.kind = lsp::CodeActionKind::QuickFix;
+            std::vector<lsp::TextEdit> edits;
+            for (const ExternalDiagnostic& diagnostic : diagnostics)
+            {
+                if (diagnostic.code != code || diagnostic.fixes.empty())
+                    continue;
+                std::vector<lsp::TextEdit> fixEdits = lspEdits(diagnostic.fixes.front(), textDocument);
+                edits.insert(edits.end(), fixEdits.begin(), fixEdits.end());
+                action.diagnostics.push_back(toLspDiagnostic(diagnostic, source, &textDocument));
+            }
+            if (action.diagnostics.size() < 2)
+                continue;
+            action.edit = lsp::WorkspaceEdit{{{uri, std::move(edits)}}};
+            actions.push_back(std::move(action));
+        }
+    }
+}
+
+std::vector<Uri> WorkspaceFolder::clearExternalDiagnostics(const std::string& source, const std::unordered_set<Uri, UriHash>& keep)
+{
+    std::vector<Uri> cleared;
+    for (auto file = externalDiagnostics.begin(); file != externalDiagnostics.end();)
+    {
+        if (keep.count(file->first) == 0 && file->second.erase(source) > 0)
+            cleared.push_back(file->first);
+
+        if (file->second.empty())
+            file = externalDiagnostics.erase(file);
+        else
+            ++file;
+    }
+    return cleared;
+}
+
+void WorkspaceFolder::pushExternalDiagnostics(const std::vector<Uri>& uris)
+{
+    for (const Uri& uri : uris)
+    {
+        if (const TextDocument* document = fileResolver.getTextDocument(uri))
+        {
+            pushDiagnostics(uri, document->version());
+            continue;
+        }
+
+        // A file that isn't open has no type errors to show, only what other programs said about it
+        std::vector<lsp::Diagnostic> items;
+        appendExternalDiagnostics(uri, nullptr, items);
+        client->publishDiagnostics(lsp::PublishDiagnosticsParams{uri, std::nullopt, items});
     }
 }
 

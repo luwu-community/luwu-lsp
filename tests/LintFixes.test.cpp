@@ -449,14 +449,14 @@ return f
 )";
     auto fix = applyFixAll(*this, source, "LuaGuard");
     REQUIRE(fix);
-    CHECK(fix->text.find("    x or return;\n") != std::string::npos);
-    // a condition without `not` is kept as written, with `and`
-    CHECK(fix->text.find("    x == y and return 1\n") != std::string::npos);
-    CHECK(fix->text.find("    x > 1 and return;\n") != std::string::npos);
-    CHECK(fix->text.find("    v.ok or (return x, y)\n") != std::string::npos);
+    CHECK(fix->text.find("    return if not x\n") != std::string::npos);
+    CHECK(fix->text.find("    return 1 if x == y\n") != std::string::npos);
+    CHECK(fix->text.find("    return if x > 1\n") != std::string::npos);
+    // several values stay an `if`, on three lines
+    CHECK(fix->text.find("    if not v.ok then\n        return x, y\n    end\n") != std::string::npos);
 }
 
-TEST_CASE_FIXTURE(Fixture, "lua_guard_splits_several_conditions_into_one_guard_each")
+TEST_CASE_FIXTURE(Fixture, "lua_guard_keeps_the_condition_whole")
 {
     ScopedLuwuFlags luwu;
     ENABLE_NEW_SOLVER();
@@ -474,12 +474,11 @@ return f
 )";
     auto fix = applyFixAll(*this, source, "LuaGuard");
     REQUIRE(fix);
-    // each condition is kept as written: `not x` becomes `x or`, anything else `x and`
-    CHECK(fix->text.find("    r.ok or return nil\n    r.out == \"\" and return nil\n") != std::string::npos);
-    CHECK(fix->text.find("        v.skip and continue\n        v.ready or continue\n") != std::string::npos);
+    CHECK(fix->text.find("    return nil if not r.ok or r.out == \"\"\n") != std::string::npos);
+    CHECK(fix->text.find("        continue if v.skip or not v.ready\n") != std::string::npos);
 }
 
-TEST_CASE_FIXTURE(Fixture, "lua_guard_leaves_conditions_that_would_continue_the_line_above")
+TEST_CASE_FIXTURE(Fixture, "lua_guard_fixes_conditions_starting_with_a_value")
 {
     ScopedLuwuFlags luwu;
     ENABLE_NEW_SOLVER();
@@ -495,10 +494,10 @@ return f
 )";
     auto fix = applyFixAll(*this, source, "LuaGuard");
     REQUIRE(fix);
-    // `-x > 1 and return` and `"a" == s and return` would join the statement above them
-    CHECK(fix->text.find("    if -x > 1 then return end\n") != std::string::npos);
-    CHECK(fix->text.find("    if \"a\" == s then return end\n") != std::string::npos);
-    CHECK(fix->text.find("    x + 1 and return;\n") != std::string::npos);
+    // the guard starts with its leave, so a condition starting with `-` or a string can't join the line above
+    CHECK(fix->text.find("    return if -x > 1\n") != std::string::npos);
+    CHECK(fix->text.find("    return if \"a\" == s\n") != std::string::npos);
+    CHECK(fix->text.find("    return if x + 1\n") != std::string::npos);
 }
 
 TEST_CASE_FIXTURE(Fixture, "ambiguous_continuation")
@@ -549,6 +548,56 @@ return f
     CHECK(fix->text.find("    n or return 1\n") != std::string::npos);
     CHECK(fix->text.find("    m ~= nil or return 2\n") != std::string::npos);
     CHECK(fix->text.find("    if not k then\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "unflipped_leave_first_guard")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+local function f(xs: { string }, n: number?)
+    for _, name in xs do
+        continue if name ~= ""
+        print(name)
+    end
+    return 1 if n
+    print(n)
+    return 0
+end
+return f
+)";
+    auto fix = applyFixAll(*this, source, "UnflippedGuard");
+    REQUIRE(fix);
+    CHECK(fix->text.find("        continue if name == \"\"\n") != std::string::npos);
+    CHECK(fix->text.find("    return 1 if not n\n") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "confusing_guard")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+local function f(x: number?, t: { value: string? }, xs: { boolean })
+    for _, v in xs do
+        v and break
+    end
+    x == 2 and return 1
+    not t or (return 1, 2)
+    t.value or return error("a message long enough to push this guard well past eighty columns")
+    return 3, 4 if x
+    return 0
+end
+return f
+)";
+    auto fix = applyFixAll(*this, source, "ConfusingGuard");
+    REQUIRE(fix);
+    CHECK(fix->text.find("        break if v\n") != std::string::npos);
+    CHECK(fix->text.find("    return 1 if x == 2\n") != std::string::npos);
+    CHECK(fix->text.find("    if t then\n        return 1, 2\n    end\n") != std::string::npos);
+    CHECK(fix->text.find("    if not t.value then\n        return error(") != std::string::npos);
+    CHECK(fix->text.find("    if x then\n        return 3, 4\n    end\n") != std::string::npos);
 }
 
 TEST_CASE_FIXTURE(Fixture, "loop_concat")
@@ -826,6 +875,44 @@ return f
     REQUIRE(fix);
     CHECK(fix->text.find("if s:startswith(p) then") != std::string::npos);
     CHECK(fix->text.find("if not s:contains(\"x\") then") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(Fixture, "extra_arguments_become_one_array")
+{
+    ScopedLuwuFlags luwu;
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+--!strict
+local function words(text: string | { string })
+    print(text)
+end
+local function reset()
+    print("reset")
+end
+words("a", tostring(1),
+    "b")
+reset(1, 2)
+)";
+    auto fix = applyQuickFix(*this, source, "Pass the arguments as one array");
+    REQUIRE(fix);
+    CHECK_EQ(fix->text, R"(
+--!strict
+local function words(text: string | { string })
+    print(text)
+end
+local function reset()
+    print("reset")
+end
+words({ "a", tostring(1),
+    "b" })
+reset(1, 2)
+)");
+
+    // `reset` takes no arguments: its warning spans every argument too, but they were never meant as an array
+    auto all = applyFixAll(*this, source, "ExtraArguments");
+    REQUIRE(all);
+    CHECK_EQ(all->text, fix->text);
 }
 
 TEST_CASE_FIXTURE(Fixture, "fix_all_is_a_quick_fix_when_the_module_has_more_than_one_warning")

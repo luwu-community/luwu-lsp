@@ -10,6 +10,7 @@
 
 #include "LSP/Client.hpp"
 #include "LSP/Workspace.hpp"
+#include "LSP/ExternalDiagnostics.hpp"
 
 #include "Thread.hpp"
 
@@ -66,6 +67,12 @@ public:
     // Visible for testing only
     void shutdown();
 
+    /// Queues a notification for the message thread as if the client had sent it
+    void postNotification(const std::string& method, const json& params);
+
+    // Visible for testing only
+    void onExternalDiagnostics(const json& params);
+
     // Dispatch handlers
 private:
     bool allWorkspacesReceivedConfiguration() const;
@@ -82,6 +89,12 @@ private:
     void onDidChangeConfiguration(const lsp::DidChangeConfigurationParams& params);
     void onDidChangeWorkspaceFolders(const lsp::DidChangeWorkspaceFoldersParams& params);
     void onDidChangeWatchedFiles(const lsp::DidChangeWatchedFilesParams& params);
+
+    /// Starts, moves or stops the external diagnostics server to match the workspaces' `diagnostics.externalPort`
+    void updateExternalDiagnosticsServer();
+    /// The file an external diagnostics report names: a `file:` URI, an absolute path, or a path relative to the first
+    /// workspace folder that has it
+    Uri resolveExternalFile(const std::string& file) const;
 
     std::vector<lsp::DocumentLink> documentLink(const lsp::DocumentLinkParams& params);
     std::optional<lsp::WorkspaceEdit> willRenameFiles(const lsp::RenameFilesParams& params);
@@ -100,4 +113,7 @@ private:
     std::queue<json_rpc::JsonRpcMessage> messages;
     Thread messageProcessorThread;
     std::unordered_map<id_type, LSPCancellationToken> cancellationTokens;
+
+    // Declared last so it's destroyed first: its thread posts to the message queue above
+    std::unique_ptr<ExternalDiagnosticsServer> externalDiagnosticsServer;
 };

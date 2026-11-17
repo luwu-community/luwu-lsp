@@ -93,6 +93,7 @@ target_sources(Luwu.LanguageServer PRIVATE
         ${LSP_EMBEDDED_RESOURCES_SOURCE}
         src/LuauExt.cpp
         src/Destructure.cpp
+        src/ExternalDiagnostics.cpp
         src/LuauFileUtils.cpp
         src/IostreamHelpers.cpp
         src/Utils.cpp
@@ -177,6 +178,7 @@ target_sources(Luwu.LanguageServer.Test PRIVATE
         tests/CliConfigurationParser.test.cpp
         tests/Hover.test.cpp
         tests/LanguageServer.test.cpp
+        tests/ExternalDiagnostics.test.cpp
         tests/InlayHints.test.cpp
         tests/JsonTomlSyntaxParser.test.cpp
         tests/Definitions.test.cpp
@@ -266,6 +268,10 @@ target_link_libraries(Luwu.LanguageServer PUBLIC ${LUWU_TARGET_PREFIX}.VM)
 # glibc before 2.34 keeps pthread_create in libpthread
 find_package(Threads REQUIRED)
 target_link_libraries(Luwu.LanguageServer PUBLIC Threads::Threads)
+# The external diagnostics server (luwu.diagnostics.externalPort) uses sockets
+if (WIN32)
+    target_link_libraries(Luwu.LanguageServer PUBLIC ws2_32)
+endif()
 
 set_target_properties(Luwu.LanguageServer.CLI PROPERTIES OUTPUT_NAME luwu-lsp)
 target_compile_options(Luwu.LanguageServer.CLI PRIVATE ${LUAU_LSP_OPTIONS})

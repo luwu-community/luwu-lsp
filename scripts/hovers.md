@@ -54,6 +54,54 @@ On a table, it works like `table.remove`. A value whose metatable has `__pop` re
 Separates the clauses of an `if` condition; the branch runs only when every clause passes.
 <!-- /keyword -->
 
+<!-- keyword: match -->
+A `match` expression tests a value against its arms in order and evaluates to the value of the first arm that matches.
+
+```luwu
+const label = match const n = count()
+    case is 0 then "none"
+    when n < 10 then "a few"
+    else "many"
+```
+
+The last arm has to match every value: it's an `else`, or a `case` with a name and no `when`.
+<!-- /keyword -->
+
+<!-- keyword: match_stat -->
+A `match` statement tests a value against its arms in order and runs the block of the first arm that matches.
+
+```luwu
+match const event = next_event()
+    case is Click {x, y} then
+        press(x, y)
+    when event == nil then
+        print("no events")
+    else
+        log(event)
+end
+```
+
+With no `else`, a value that no arm matches runs nothing.
+<!-- /keyword -->
+
+<!-- keyword: case -->
+Starts a `match` arm. `case is <pattern>` tests the value, and a name after `case` binds the value for the arm, so
+`case n is number when n > 10` names the value `n`.
+<!-- /keyword -->
+
+<!-- keyword: match_when -->
+Starts a `match` arm that tests conditions without a pattern, such as `when n > 10 then` in a `match` whose header names
+the value `n`.
+<!-- /keyword -->
+
+<!-- keyword: match_then -->
+Separates a `match` arm's pattern and conditions from its value or block.
+<!-- /keyword -->
+
+<!-- keyword: match_else -->
+Starts a `match`'s last arm, which runs when no arm before it matched.
+<!-- /keyword -->
+
 <!-- keyword: if -->
 Branch on a conditional expression.
 Most values are considered `truthy`, including all strings, numbers, complex types, etc.

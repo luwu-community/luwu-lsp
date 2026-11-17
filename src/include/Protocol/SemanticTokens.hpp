@@ -34,8 +34,10 @@ enum struct SemanticTokenTypes
     RegExp,
     Operator,
     Decorator,
-    // not a standard type: the extension declares it (`semanticTokenTypes`)
+    // not standard types: the extension declares them (`semanticTokenTypes`)
     Punctuation,
+    // `self` and `Self`, named like rust-analyzer's type so themes that color Rust's `self` color these too
+    SelfKeyword,
 };
 const SemanticTokenTypes SemanticTokenTypesList[] = {
     SemanticTokenTypes::Namespace,
@@ -62,6 +64,7 @@ const SemanticTokenTypes SemanticTokenTypesList[] = {
     SemanticTokenTypes::Operator,
     SemanticTokenTypes::Decorator,
     SemanticTokenTypes::Punctuation,
+    SemanticTokenTypes::SelfKeyword,
 };
 NLOHMANN_JSON_SERIALIZE_ENUM(SemanticTokenTypes, {
                                                      {SemanticTokenTypes::Namespace, "namespace"},
@@ -88,6 +91,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(SemanticTokenTypes, {
                                                      {SemanticTokenTypes::Operator, "operator"},
                                                      {SemanticTokenTypes::Decorator, "decorator"},
                                                      {SemanticTokenTypes::Punctuation, "punctuation"},
+                                                     {SemanticTokenTypes::SelfKeyword, "selfKeyword"},
                                                  })
 
 enum struct SemanticTokenModifiers : uint16_t

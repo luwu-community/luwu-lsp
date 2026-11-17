@@ -81,6 +81,9 @@
       "include": "#type-alias-declaration"
     },
     {
+      "include": "#type-test"
+    },
+    {
       "include": "#keyword"
     },
     {
@@ -121,6 +124,250 @@
     }
   ],
   "repository": {
+    "type-test": {
+      "comment": "Luwu match expressions: a type test's pattern. `is string`, `is not bundle` and the other tags color as one keyword with the `is`, and so does the `not` of `is not`. In `is Cat(name, age)` and `is Pod {x, y}` the class is a type and the names inside are bindings, never a call or a table.",
+      "patterns": [
+        {
+          "begin": "(?<![.:])\\b(is)\\s+(?:(not)\\s+)?(vector)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            },
+            "3": {
+              "name": "keyword.control.luwu"
+            },
+            "4": {
+              "name": "punctuation.definition.pattern.begin.luwu"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.pattern.end.luwu"
+            }
+          },
+          "name": "meta.pattern.luwu",
+          "patterns": [
+            {
+              "include": "#pattern-contents"
+            }
+          ]
+        },
+        {
+          "match": "(?<![.:])\\b(is)\\s+(?:(not)\\s+)?(string|number|integer|boolean|buffer|vector|table|function|thread|userdata|object|class|trait|bundle|vec|vecdeque|orderedmap)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            },
+            "3": {
+              "name": "keyword.control.luwu"
+            }
+          }
+        },
+        {
+          "begin": "(?<![.:])\\b(is|implements)\\s+(?:(not)\\s+)?((?:[a-zA-Z_][a-zA-Z0-9_]*\\s*\\.\\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            },
+            "3": {
+              "name": "entity.name.type.luwu"
+            },
+            "4": {
+              "name": "punctuation.definition.pattern.begin.luwu"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.pattern.end.luwu"
+            }
+          },
+          "name": "meta.pattern.luwu",
+          "patterns": [
+            {
+              "include": "#pattern-contents"
+            }
+          ]
+        },
+        {
+          "begin": "(?<![.:])\\b(is|implements)\\s+(?:(not)\\s+)?((?:[a-zA-Z_][a-zA-Z0-9_]*\\s*\\.\\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            },
+            "3": {
+              "name": "entity.name.type.luwu"
+            },
+            "4": {
+              "name": "punctuation.definition.pattern.begin.luwu"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.pattern.end.luwu"
+            }
+          },
+          "name": "meta.pattern.luwu",
+          "patterns": [
+            {
+              "include": "#pattern-contents"
+            }
+          ]
+        },
+        {
+          "match": "(?<![.:])\\b(is|implements)\\s+(?:(not)\\s+)?(?!(?:not|nil|none|true|false|function)\\b)((?:[a-zA-Z_][a-zA-Z0-9_]*\\s*\\.\\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\\b(?!\\s*[.:\\[])",
+          "captures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            },
+            "3": {
+              "name": "entity.name.type.luwu"
+            }
+          }
+        },
+        {
+          "match": "(?<![.:])\\b(is)\\s+(?:(not)\\s+)?(?=\\.\\()",
+          "captures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            }
+          }
+        },
+        {
+          "match": "(?<![.:])\\b(is)\\s+(not)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            }
+          }
+        },
+        {
+          "comment": "Luwu match expressions: an alternative after a pattern's `|` (`x is nil | string`, `x is A | geo.B`). Outside a type annotation a single `|` only joins pattern alternatives.",
+          "match": "(?<!\\|)(\\|)(?!\\|)\\s*(string|number|integer|boolean|buffer|vector|table|function|thread|userdata|object|class|trait|bundle|vec|vecdeque|orderedmap)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.pattern.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            }
+          }
+        },
+        {
+          "begin": "(?<!\\|)(\\|)(?!\\|)\\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\\s*\\.\\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.pattern.luwu"
+            },
+            "2": {
+              "name": "entity.name.type.luwu"
+            },
+            "3": {
+              "name": "punctuation.definition.pattern.begin.luwu"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.pattern.end.luwu"
+            }
+          },
+          "name": "meta.pattern.luwu",
+          "patterns": [
+            {
+              "include": "#pattern-contents"
+            }
+          ]
+        },
+        {
+          "begin": "(?<!\\|)(\\|)(?!\\|)\\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\\s*\\.\\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.pattern.luwu"
+            },
+            "2": {
+              "name": "entity.name.type.luwu"
+            },
+            "3": {
+              "name": "punctuation.definition.pattern.begin.luwu"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.pattern.end.luwu"
+            }
+          },
+          "name": "meta.pattern.luwu",
+          "patterns": [
+            {
+              "include": "#pattern-contents"
+            }
+          ]
+        },
+        {
+          "match": "(?<!\\|)(\\|)(?!\\|)\\s*(?!(?:nil|none|true|false|function|not)\\b)((?:[a-zA-Z_][a-zA-Z0-9_]*\\s*\\.\\s*)*[a-zA-Z_][a-zA-Z0-9_]*)\\b(?!\\s*[.:\\[])",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.pattern.luwu"
+            },
+            "2": {
+              "name": "entity.name.type.luwu"
+            }
+          }
+        },
+        {
+          "match": "(?<!\\|)\\|(?!\\|)",
+          "name": "keyword.operator.pattern.luwu"
+        }
+      ]
+    },
+    "pattern-contents": {
+      "comment": "Inside a type test's pattern: bindings, `as` renames, `..` and nested type tests (`Box { inner as _ is Some(inner is string) }`).",
+      "patterns": [
+        {
+          "include": "#type-test"
+        },
+        {
+          "match": "\\b(as)\\b",
+          "name": "keyword.control.luwu"
+        },
+        {
+          "match": "\\.\\.(?!\\.)",
+          "name": "keyword.operator.rest.luwu"
+        },
+        {
+          "match": "\\b(?!(?:nil|none|true|false|not|and|or)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b(?=\\s*(?:\\.\\s*[({])?\\s*(?:[,)}]|\\bis\\b|\\bas\\b|\\bimplements\\b|$))",
+          "name": "variable.other.readwrite.luwu"
+        },
+        {
+          "include": "$self"
+        }
+      ]
+    },
     "function-definition": {
       "comment": "A function definition. Luwu Traits: a trait's function may be `final` after its access specifier -- `public final function on_event(self)`.",
       "begin": "\\b(?:(export)\\s+)?(?:(public)\\s+|(private)\\s+)?(?:(final)\\s+)?(?:(local)\\s+|(const)\\s+)?(function)\\b(?![,:])",
@@ -180,6 +427,11 @@
             {
               "match": "\\.\\.\\.",
               "name": "variable.parameter.function.varargs.luwu"
+            },
+            {
+              "comment": "Luwu: `self`, and `Self` for the class a class function is called on",
+              "match": "\\b(?:self|Self)\\b",
+              "name": "variable.language.self.luwu"
             },
             {
               "match": "[a-zA-Z_][a-zA-Z0-9_]*",
@@ -320,13 +572,13 @@
       "begin": "\\.\\s*\\(",
       "beginCaptures": {
         "0": {
-          "name": "punctuation.definition.destructure.begin.luwu"
+          "name": "punctuation.definition.destructure.begin.luwu punctuation.definition.bundle.luwu"
         }
       },
       "end": "\\)",
       "endCaptures": {
         "0": {
-          "name": "punctuation.definition.destructure.end.luwu"
+          "name": "punctuation.definition.destructure.end.luwu punctuation.definition.bundle.luwu"
         }
       },
       "patterns": [
@@ -526,6 +778,11 @@
               "name": "variable.parameter.function.varargs.luwu"
             },
             {
+              "comment": "Luwu: `self`, and `Self` for the class a class function is called on",
+              "match": "\\b(?:self|Self)\\b",
+              "name": "variable.language.self.luwu"
+            },
+            {
               "match": "[a-zA-Z_][a-zA-Z0-9_]*",
               "name": "variable.parameter.function.luwu"
             },
@@ -721,6 +978,11 @@
                   "include": "source.luwu"
                 }
               ]
+            },
+            {
+              "comment": "Luwu: `self`, and `Self` for the class a class function is called on",
+              "match": "\\b(?:self|Self)\\b",
+              "name": "variable.language.self.luwu"
             },
             {
               "match": "[a-zA-Z_][a-zA-Z0-9_]*",
@@ -940,6 +1202,11 @@
                   "include": "source.luwu"
                 }
               ]
+            },
+            {
+              "comment": "Luwu: `self`, and `Self` for the class a class function is called on",
+              "match": "\\b(?:self|Self)\\b",
+              "name": "variable.language.self.luwu"
             },
             {
               "match": "[a-zA-Z_][a-zA-Z0-9_]*",
@@ -1384,6 +1651,15 @@
     "number": {
       "patterns": [
         {
+          "comment": "A Luwu bundle position, `b.1`: a `.` right after a name, `)` or `]` and followed by digits reads a position, like a field. Positions chain, so `b.1.2` is two reads and never the number 1.2.",
+          "match": "(?<=[a-zA-Z0-9_)\\]])(\\.)(\\d+)",
+          "captures": {
+            "2": {
+              "name": "variable.other.property.luwu"
+            }
+          }
+        },
+        {
           "name": "constant.numeric.hex.luwu",
           "match": "\\b0_*[xX]_*[\\da-fA-F_]*(?:i|[eE][\\+\\-]?_*\\d[\\d_]*(?:\\.[\\d_]*)?)?"
         },
@@ -1488,7 +1764,7 @@
         },
         {
           "comment": "Luwu match expressions: `match` before the value it tests (`match x`, `match const v = x`), and `case` starting an arm. Only in those shapes, so a variable named `match` or `case` stays a name.",
-          "match": "(?<![.:])\\bmatch\\b(?=\\s+(?:local\\b|const\\b|not\\b|[^\\s=.,:;)\\]}+*/%^<>~-]))|^\\s*\\bcase\\b(?=\\s+(?:is\\b|implements\\b|nil\\b|none\\b|true\\b|false\\b|-?\\d|[\"'`]))",
+          "match": "(?<![.:])\\bmatch\\b(?=\\s+(?:local\\b|const\\b|not\\b|[^\\s=.,:;)\\]}+*/%^<>~-]))|^\\s*\\bcase\\b(?=\\s+(?:is\\b|implements\\b|nil\\b|none\\b|true\\b|false\\b|-?\\d|[\"'`]|[a-zA-Z_][a-zA-Z0-9_]*\\s+(?:is|implements|when|then)\\b))",
           "name": "keyword.control.luwu"
         },
         {
@@ -1514,7 +1790,8 @@
           "name": "keyword.control.luwu"
         },
         {
-          "match": "(?<![^.]\\.|:)\\b(self)\\b",
+          "comment": "Luwu Classes and Traits: `Self` is the class or trait the code is in",
+          "match": "(?<![^.]\\.|:)\\b(self|Self)\\b",
           "name": "variable.language.self.luwu"
         },
         {
@@ -1605,23 +1882,35 @@
       ]
     },
     "dot-tuple": {
-      "comment": "A `.(...)` where a value goes, which builds a collections pair, triple or quad (`give .(name, age)`), or the pattern of a type test (`x is ok.(content)`). `.(` is one token so that it colors as one bracket.",
+      "comment": "A `.(...)` where a value goes, which builds a bundle (`give .(name, age)`), or a bundle pattern (`x is .(name, age)`). `.(` is one token so that it colors as one bracket.",
       "begin": "(\\.\\()",
       "beginCaptures": {
         "1": {
-          "name": "punctuation.definition.tuple.begin.luwu"
+          "name": "punctuation.definition.tuple.begin.luwu punctuation.definition.bundle.luwu"
         }
       },
       "end": "(\\))",
       "endCaptures": {
         "1": {
-          "name": "punctuation.definition.tuple.end.luwu"
+          "name": "punctuation.definition.tuple.end.luwu punctuation.definition.bundle.luwu"
         }
       },
       "patterns": [
         {
           "match": ",",
           "name": "punctuation.separator.arguments.luwu"
+        },
+        {
+          "comment": "Luwu match expressions: `.. as rest` ends a bundle pattern (`x is .(a, .. as rest)`)",
+          "match": "(\\.\\.)\\s*(as)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.rest.luwu"
+            },
+            "2": {
+              "name": "keyword.control.luwu"
+            }
+          }
         },
         {
           "include": "source.luwu"
@@ -2040,6 +2329,11 @@
               "name": "variable.parameter.function.varargs.luwu"
             },
             {
+              "comment": "Luwu: `self`, and `Self` for the class a class function is called on",
+              "match": "\\b(?:self|Self)\\b",
+              "name": "variable.language.self.luwu"
+            },
+            {
               "match": "[a-zA-Z_][a-zA-Z0-9_]*",
               "name": "variable.parameter.function.luwu"
             },
@@ -2186,6 +2480,11 @@
           "include": "#comment"
         },
         {
+          "comment": "Luwu Classes and Traits: `Self` is the class or trait the type is in",
+          "match": "(?<![^.]\\.)\\bSelf\\b(?!\\s*\\.)",
+          "name": "variable.language.self.luwu"
+        },
+        {
           "include": "#attribute"
         },
         {
@@ -2325,6 +2624,30 @@
             {
               "match": "[,;]",
               "name": "punctuation.separator.fields.type.luwu"
+            }
+          ]
+        },
+        {
+          "comment": "A Luwu bundle type, `.(string, number)`. `.(` is one token so that it colors as one bracket, like a bundle value's.",
+          "begin": "(\\.\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.tuple.begin.luwu punctuation.definition.bundle.luwu"
+            }
+          },
+          "end": "(\\))",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.tuple.end.luwu punctuation.definition.bundle.luwu"
+            }
+          },
+          "patterns": [
+            {
+              "match": ",",
+              "name": "punctuation.separator.fields.type.luwu"
+            },
+            {
+              "include": "#type_literal"
             }
           ]
         },

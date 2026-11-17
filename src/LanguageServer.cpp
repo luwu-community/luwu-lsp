@@ -21,6 +21,9 @@
 #include <sentry.h>
 #endif
 
+/// The notification the external diagnostics server queues for each report it accepts
+static const char* const EXTERNAL_DIAGNOSTICS_METHOD = "$/luwu/externalDiagnostics";
+
 #define ASSERT_PARAMS(params, method) \
     if (!params) \
         throw json_rpc::JsonRpcException(lsp::ErrorCode::InvalidParams, "params not provided for " method);
@@ -158,7 +161,7 @@ lsp::ServerCapabilities LanguageServer::getServerCapabilities()
         /* full: */ true,
     };
     // Document On Type Formatting Provider
-    capabilities.documentOnTypeFormattingProvider = lsp::DocumentOnTypeFormattingOptions{"{", std::nullopt};
+    capabilities.documentOnTypeFormattingProvider = lsp::DocumentOnTypeFormattingOptions{"{", std::vector<std::string>{"(", "\"", "'", "`"}};
     // Workspaces
     lsp::WorkspaceFoldersServerCapabilities workspaceFolderCapabilities{true, false};
     // File Operations: we fix up relative requires when a source file is renamed or moved
@@ -493,6 +496,10 @@ void LanguageServer::onNotification(const std::string& method, std::optional<jso
     {
         onDidChangeWatchedFiles(JSON_REQUIRED_PARAMS(params, "workspace/didChangeWatchedFiles"));
     }
+    else if (method == EXTERNAL_DIAGNOSTICS_METHOD)
+    {
+        onExternalDiagnostics(JSON_REQUIRED_PARAMS(params, "$/luwu/externalDiagnostics"));
+    }
     else
     {
         bool handled = false;
@@ -782,6 +789,7 @@ void LanguageServer::onInitialized([[maybe_unused]] const lsp::InitializedParams
         auto workspace = findWorkspace(workspaceUri, /* shouldInitialize = */ false);
 
         workspace->hasConfiguration = true;
+        updateExternalDiagnosticsServer();
         if (!workspace->isReady)
             return;
 
@@ -983,4 +991,131 @@ void LanguageServer::shutdown()
 
     messagesCv.notify_all();
     messageProcessorThread.join();
+}
+
+void LanguageServer::postNotification(const std::string& method, const json& params)
+{
+    {
+        std::unique_lock guard(messagesMutex);
+        if (shutdownRequested)
+            return;
+
+        json_rpc::JsonRpcMessage message;
+        message.method = method;
+        message.params = params;
+        messages.push(std::move(message));
+    }
+
+    messagesCv.notify_one();
+}
+
+void LanguageServer::updateExternalDiagnosticsServer()
+{
+    int port = 0;
+    for (const auto& workspace : workspaceFolders)
+    {
+        port = client->getConfiguration(workspace->rootUri).diagnostics.externalPort;
+        if (port != 0)
+            break;
+    }
+
+    if (externalDiagnosticsServer && externalDiagnosticsServer->port() == port)
+        return;
+    externalDiagnosticsServer.reset();
+    if (port == 0)
+        return;
+    if (port < 0 || port > 65535)
+    {
+        client->sendLogMessage(lsp::MessageType::Warning, "luwu.diagnostics.externalPort must be a port from 1 to 65535, not " + std::to_string(port));
+        return;
+    }
+
+    try
+    {
+        externalDiagnosticsServer = std::make_unique<ExternalDiagnosticsServer>(static_cast<uint16_t>(port),
+            [this](const json& body)
+            {
+                postNotification(EXTERNAL_DIAGNOSTICS_METHOD, body);
+            });
+        client->sendLogMessage(lsp::MessageType::Info, "taking external diagnostics at http://127.0.0.1:" + std::to_string(port) + "/diagnostics");
+    }
+    catch (const std::exception& e)
+    {
+        client->sendLogMessage(lsp::MessageType::Warning, std::string("can't take external diagnostics: ") + e.what());
+    }
+}
+
+Uri LanguageServer::resolveExternalFile(const std::string& file) const
+{
+    if (file.rfind("file:", 0) == 0)
+        return Uri::parse(file);
+
+    for (const auto& workspace : workspaceFolders)
+    {
+        Uri candidate = workspace->rootUri.resolvePath(file);
+        if (candidate.exists())
+            return candidate;
+    }
+    return workspaceFolders.empty() ? Uri::file(file) : workspaceFolders.front()->rootUri.resolvePath(file);
+}
+
+void LanguageServer::onExternalDiagnostics(const json& params)
+{
+    ExternalDiagnosticsReport report;
+    try
+    {
+        report = parseExternalDiagnosticsReport(params);
+    }
+    catch (const std::invalid_argument& e)
+    {
+        client->sendLogMessage(lsp::MessageType::Warning, std::string("ignored external diagnostics: ") + e.what());
+        return;
+    }
+
+    std::unordered_map<WorkspaceFolderPtr, std::vector<Uri>> changed;
+    std::unordered_set<Uri, UriHash> listed;
+    for (ExternalDiagnosticsFile& file : report.files)
+    {
+        Uri uri = resolveExternalFile(file.file);
+        listed.insert(uri);
+
+        WorkspaceFolderPtr workspace = findWorkspace(uri, /* shouldInitialize= */ false);
+        auto& sources = workspace->externalDiagnostics[uri];
+        auto previous = sources.find(report.source);
+        bool same = previous == sources.end() ? file.diagnostics.empty() : previous->second == file.diagnostics;
+        if (file.diagnostics.empty())
+            sources.erase(report.source);
+        else
+            sources[report.source] = std::move(file.diagnostics);
+        if (sources.empty())
+            workspace->externalDiagnostics.erase(uri);
+
+        // Programs resend their diagnostics in case luwu-lsp restarted, so an unchanged file isn't shown again
+        if (!same)
+            changed[workspace].push_back(uri);
+    }
+
+    if (report.replaceAll)
+    {
+        std::vector<WorkspaceFolderPtr> workspaces = workspaceFolders;
+        workspaces.push_back(nullWorkspace);
+        for (const WorkspaceFolderPtr& workspace : workspaces)
+        {
+            std::vector<Uri> cleared = workspace->clearExternalDiagnostics(report.source, listed);
+            if (!cleared.empty())
+                changed[workspace].insert(changed[workspace].end(), cleared.begin(), cleared.end());
+        }
+    }
+
+    if (changed.empty())
+        return;
+
+    if (usingPullDiagnostics(client->capabilities))
+    {
+        client->terminateWorkspaceDiagnostics();
+        client->refreshWorkspaceDiagnostics();
+        return;
+    }
+    for (const auto& [workspace, uris] : changed)
+        workspace->pushExternalDiagnostics(uris);
 }

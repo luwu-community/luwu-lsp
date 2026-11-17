@@ -15,6 +15,10 @@
 #include "LSP/WorkspaceFileResolver.hpp"
 #include "LSP/LuauExt.hpp"
 #include "LSP/Destructure.hpp"
+#include "LSP/ExternalDiagnostics.hpp"
+
+#include <map>
+#include <unordered_set>
 
 using LSPCancellationToken = std::shared_ptr<Luau::FrontendCancellationToken>;
 
@@ -129,6 +133,18 @@ public:
     lsp::WorkspaceDiagnosticReport workspaceDiagnostics(const lsp::WorkspaceDiagnosticParams& params);
     void recomputeDiagnostics(const ClientConfiguration& config);
     void pushDiagnostics(const lsp::DocumentUri& uri, const size_t version);
+
+    /// Luwu: diagnostics other programs sent over `luwu.diagnostics.externalPort`, by file and then by the program
+    /// that sent them
+    std::unordered_map<Uri, std::map<std::string, std::vector<ExternalDiagnostic>>, UriHash> externalDiagnostics;
+    void appendExternalDiagnostics(const Uri& uri, const TextDocument* textDocument, std::vector<lsp::Diagnostic>& items) const;
+    /// Removes the diagnostics `source` sent for every file but those in `keep`, and returns the files that had some
+    std::vector<Uri> clearExternalDiagnostics(const std::string& source, const std::unordered_set<Uri, UriHash>& keep);
+    /// Adds the quick fixes of the external diagnostics in `uri` that `range` touches
+    void appendExternalFixes(const Uri& uri, const TextDocument& textDocument, const Luau::Location& range,
+        std::vector<lsp::CodeAction>& actions) const;
+    /// Publishes the diagnostics of `uris` again, for a client that doesn't pull them
+    void pushExternalDiagnostics(const std::vector<Uri>& uris);
 
     void clearDiagnosticsForFiles(const std::vector<lsp::DocumentUri>& uri) const;
     void clearDiagnosticsForFile(const lsp::DocumentUri& uri);

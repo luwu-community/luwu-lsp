@@ -925,7 +925,7 @@ void generateImportFieldAction(const lsp::DocumentUri& uri, const lsp::CodeActio
             continue;
 
         for (const auto& field : pattern->fields)
-            if (name == field.key.value)
+            if (field.key.value && name == field.key.value)
             {
                 if (field.target.location || field.asLocation || !field.target.local)
                     return;
@@ -1016,7 +1016,7 @@ void generateImportAllFieldsAction(const lsp::DocumentUri& uri, const lsp::CodeA
         bool bound = std::any_of(pattern.fields.begin(), pattern.fields.end(),
             [&](const auto& field)
             {
-                return name == field.key.value;
+                return field.key.value && name == field.key.value;
             });
         bool withType = bringsAType(prop->readTy, builtinTypes);
         if (bound || nameIsTaken(name, withType, nullptr, module, facts))
@@ -1856,8 +1856,8 @@ struct FindGuardAt : Luau::AstVisitor
         if (!node->location.containsClosed(position))
             return false;
 
-        bool guardShape = !node->elsebody && node->clauses.size == 0 && !node->isWhenGuard && node->thenbody->body.size == 1 &&
-                          leaveKeyword(node->thenbody->body.data[0]);
+        bool guardShape = !node->elsebody && node->clauses.size == 0 && !node->isWhenGuard && !node->isLeaveGuard &&
+                          node->thenbody->body.size == 1 && leaveKeyword(node->thenbody->body.data[0]);
         if (guardShape)
             result = node;
         return true;
@@ -2001,10 +2001,8 @@ void generateAppendSwitches(const lsp::DocumentUri& uri, Luau::AstStatBlock* roo
     }
 }
 
-// Luwu Do Expressions: `if not x then return y end` -> `x or return y`, and `if x then return y end` -> `x and return y`.
-// An `if` with several conditions gets one guard per condition. A guard stays on one line. When that line is too long,
-// the InlineOrLeave lint's fix moves the exit to the next line.
-void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* node, const Luau::SourceModule& sourceModule,
+// Luwu Guards (rfcs/control-flow/guards.md): `if not x then return y end` -> `return y if not x`, on one line
+void generateLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* node, const Luau::SourceModule& sourceModule,
     const TextDocument& textDocument, std::vector<lsp::CodeAction>& result)
 {
     // an `elseif` is part of the `if` before it
@@ -2020,32 +2018,12 @@ void generateOrLeaveGuardRewrite(const lsp::DocumentUri& uri, Luau::AstStatIf* n
             return;
     }
 
-    std::vector<Luau::LanguageServer::LintFixes::GuardCondition> conditions =
-        Luau::LanguageServer::LintFixes::guardConditions(node->condition, textDocument);
-    if (conditions.empty())
+    // `return a, b if c` could read as `return a, (if c then b else nil)`
+    if (auto ret = node->thenbody->body.data[0]->as<Luau::AstStatReturn>(); ret && ret->list.size > 1)
         return;
 
-    Luau::AstStat* leave = node->thenbody->body.data[0];
-    std::string leaveText = textDocument.getText(textDocument.convertLocation(leave->location));
-    // a bare `return` needs a `;` and several values need parentheses, or the parser would read on past them
-    if (auto ret = leave->as<Luau::AstStatReturn>())
-    {
-        if (ret->list.size == 0)
-            leaveText = "return;";
-        else if (ret->list.size > 1)
-            leaveText = "(" + leaveText + ")";
-    }
-
-    std::string indent = getLineIndentation(textDocument, node->location.begin.line);
-    std::string newText;
-    for (const auto& condition : conditions)
-    {
-        newText += newText.empty() ? "" : "\n" + indent;
-        newText += condition.tested + " " + condition.joiner + " " + leaveText;
-    }
-
-    std::string title = conditions.size() == 1 ? std::string("Rewrite as '") + conditions[0].joiner + " " + leaveKeyword(leave) + "' guard"
-                                               : "Rewrite as one guard per condition";
+    std::string newText = Luau::LanguageServer::LintFixes::leaveGuardText(node, textDocument);
+    std::string title = std::string("Rewrite as '") + leaveKeyword(node->thenbody->body.data[0]) + " if' guard";
     addSingleEditAction(uri, title, lsp::CodeActionKind::RefactorRewrite, false, {{textDocument.convertLocation(node->location), newText}},
         std::nullopt, result);
 }
@@ -2209,7 +2187,9 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
             generateImportFieldAction(params.textDocument.uri, params.context, requestRange.begin, *sourceModule, *module, builtinTypes, facts,
                 *textDocument, importActions);
 
-            if (destructureFinder.result && destructureFinder.result->pattern && !destructureFinder.result->pattern->positional)
+            // Positional `.(a, b)` and array `.[a, b]` patterns bind fields with no key to import or qualify
+            const Luau::AstDestructurePattern* found = destructureFinder.result ? destructureFinder.result->pattern : nullptr;
+            if (found && !found->positional && !found->array)
             {
                 const Luau::AstDestructurePattern& pattern = *destructureFinder.result->pattern;
                 generateQualifyFieldAction(params.textDocument.uri, params.context, requestRange.begin, pattern, *module, builtinTypes, facts,
@@ -2289,6 +2269,7 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         }
 
         generateRemoveAllUnusedImportsFix(params.textDocument.uri, cr.lintResult, requestRange, sourceModule->root, *textDocument, result);
+        appendExternalFixes(params.textDocument.uri, *textDocument, requestRange, result);
 
         UnknownSymbolFixContext unknownSymbolCtx{
             params.textDocument.uri,
@@ -2530,13 +2511,13 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         if (bindingFinder.result)
             generateBindingKeywordToggle(params.textDocument.uri, bindingFinder.result, *textDocument, result);
 
-        // Luwu: `if not x then return end` -> `x or return`
+        // Luwu Guards (rfcs/control-flow/guards.md): `if not x then return end` -> `return if not x`
         if (FFlag::LuwuDoExpr)
         {
             FindGuardAt guardFinder(requestRange.begin);
             sourceModule->root->visit(&guardFinder);
             if (guardFinder.result)
-                generateOrLeaveGuardRewrite(params.textDocument.uri, guardFinder.result, *sourceModule, *textDocument, result);
+                generateLeaveGuardRewrite(params.textDocument.uri, guardFinder.result, *sourceModule, *textDocument, result);
         }
     }
 

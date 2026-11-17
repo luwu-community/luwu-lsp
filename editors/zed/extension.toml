@@ -18,11 +18,14 @@ languages = ["Luwu", "Luau"]
 
 # Stopgap until a tree-sitter grammar for Luwu exists: both languages parse with tree-sitter-luau, and the Luwu
 # highlights color Luwu's keywords by their text (see languages/luwu/highlights.scm). The fork's `luwu-zed` branch
-# carries three changes on top of upstream 5c70864, each its own commit: the `end` token is named `end_keyword`
+# carries these changes on top of upstream 5c70864, each its own commit: the `end` token is named `end_keyword`
 # (Zed can't match a WASM grammar's token named `end`, so every query here says `end_keyword`); the scanner no
 # longer lexes code as string or comment content while recovering from an error, which keeps doc comments in
-# class bodies readable; and a block comment's content is one node per line without its indentation, which lets
-# languages/*/injections.scm hand the lines to Markdown.
+# class bodies readable; a block comment's content is one node per line without its indentation, which lets
+# languages/*/injections.scm hand the lines to Markdown; Luwu's bundles parse: `.(a, b)` values, `b.1` positions
+# and `.(string, number)` types; and Luwu's type tests parse, patterns included (`c is Cat(name, age is number)`).
+# Regenerating the parser renames the `end` token back to "end", so src/parser.c needs
+# `[anon_sym_end] = "end_keyword"` edited in again after every `tree-sitter generate`.
 [grammars.luau]
 repository = "https://github.com/luwu-community/tree-sitter-luau"
-rev = "cfbcece6620b978bcd6f326eb03e2d10a0740639"
+rev = "d51d5c8ca2fcd6911692d65be40bfc91d03b57d8"

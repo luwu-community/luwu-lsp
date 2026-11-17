@@ -14,9 +14,10 @@ struct SemanticToken
 };
 
 /// `grammarHighlightsNone`: the document is a Luwu file, whose grammar already scopes `none` as a
-/// language constant, so it gets no semantic token.
+/// language constant, so it gets no semantic token. `textDocument` is the source, which a read the parser made up is
+/// checked against: without it, those reads get no token.
 std::vector<SemanticToken> getSemanticTokens(const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule,
-    bool grammarHighlightsNone = false);
+    bool grammarHighlightsNone = false, const TextDocument* textDocument = nullptr);
 
 /// Luwu: Moonwave tags starting doc comment lines, and the names `@param`/`@field`/`@prop` give (Luau files only; the
 /// caller decides).

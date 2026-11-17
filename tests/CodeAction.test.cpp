@@ -1473,6 +1473,23 @@ TEST_CASE_FIXTURE(Fixture, "positional_patterns_are_left_out_of_field_imports")
     codeActionsAt(*this, uri, 4, 23);
 }
 
+TEST_CASE_FIXTURE(Fixture, "array_patterns_are_left_out_of_field_imports")
+{
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ENABLE_NEW_SOLVER();
+
+    // An array element has no key to qualify it or import it by either
+    auto uri = newDocument("test.luau", "const list = { name = \"hi\", 1, 2 }\n"
+                                        "const .{ name } = list\n"
+                                        "const .[a, b] = list\n"
+                                        "print(name, a, b, list.name)\n");
+
+    CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 2, 8), "Qualify 'a' as 'list.a'"));
+
+    // Importing `list.name` looks through every pattern on `list`
+    codeActionsAt(*this, uri, 3, 22);
+}
+
 TEST_CASE_FIXTURE(Fixture, "append_switches_between_push_and_table_insert")
 {
     ScopedFastFlag poperators{FFlag::DebugLuwuPoperators, true};
@@ -1527,13 +1544,12 @@ TEST_CASE_FIXTURE(Fixture, "append_switch_to_push_needs_the_operator_and_a_luwu_
     CHECK_FALSE(findCodeAction(codeActionsAt(*this, uri, 1, 3), "Switch this append to '<+'"));
 }
 
-static std::optional<lsp::TextEdit> orLeaveGuardRewrite(Fixture& fixture, const lsp::DocumentUri& uri, size_t line, size_t column)
+static std::optional<lsp::TextEdit> leaveGuardRewrite(Fixture& fixture, const lsp::DocumentUri& uri, size_t line, size_t column)
 {
     auto actions = codeActionsAt(fixture, uri, line, column, {lsp::CodeActionKind::RefactorRewrite});
     for (const auto& action : actions)
     {
-        bool guard = action.title.rfind("Rewrite as 'or ", 0) == 0 || action.title.rfind("Rewrite as 'and ", 0) == 0 ||
-                     action.title == "Rewrite as one guard per condition";
+        bool guard = action.title.rfind("Rewrite as '", 0) == 0 && action.title.find(" if' guard") != std::string::npos;
         if (guard)
         {
             REQUIRE(action.edit);
@@ -1545,7 +1561,7 @@ static std::optional<lsp::TextEdit> orLeaveGuardRewrite(Fixture& fixture, const 
     return std::nullopt;
 }
 
-TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_if_not_return")
+TEST_CASE_FIXTURE(Fixture, "leave_guard_rewrites_if_not_return")
 {
     ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
 
@@ -1559,17 +1575,17 @@ end
 )");
 
     auto actions = codeActionsAt(*this, uri, 2, 8, {lsp::CodeActionKind::RefactorRewrite});
-    auto action = findCodeAction(actions, "Rewrite as 'or return' guard");
+    auto action = findCodeAction(actions, "Rewrite as 'return if' guard");
     REQUIRE(action);
     CHECK_EQ(action->kind, lsp::CodeActionKind::RefactorRewrite);
 
-    auto edit = orLeaveGuardRewrite(*this, uri, 3, 12);
+    auto edit = leaveGuardRewrite(*this, uri, 3, 12);
     REQUIRE(edit);
     CHECK_EQ(edit->range, lsp::Range{{2, 4}, {4, 7}});
-    CHECK_EQ(edit->newText, "value:is(\"singleton\") or return error(\"Library name must be a stringleton\")");
+    CHECK_EQ(edit->newText, "return error(\"Library name must be a stringleton\") if not value:is(\"singleton\")");
 }
 
-TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_conditions_and_leaves")
+TEST_CASE_FIXTURE(Fixture, "leave_guard_rewrites_conditions_and_leaves")
 {
     ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
 
@@ -1584,25 +1600,23 @@ for _, v in {} do
 end
 )");
 
-    auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
+    auto edit = leaveGuardRewrite(*this, uri, 2, 6);
     REQUIRE(edit);
-    // a condition without `not` is kept as written, with `and`
-    CHECK_EQ(edit->newText, "typeof(v) ~= \"string\" and continue");
+    CHECK_EQ(edit->newText, "continue if typeof(v) ~= \"string\"");
 
-    edit = orLeaveGuardRewrite(*this, uri, 3, 6);
+    edit = leaveGuardRewrite(*this, uri, 3, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v == nil and break");
+    CHECK_EQ(edit->newText, "break if v == nil");
 
-    edit = orLeaveGuardRewrite(*this, uri, 4, 6);
+    edit = leaveGuardRewrite(*this, uri, 4, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v.a and v.b or return;");
+    CHECK_EQ(edit->newText, "return if not (v.a and v.b)");
 
-    edit = orLeaveGuardRewrite(*this, uri, 7, 6);
-    REQUIRE(edit);
-    CHECK_EQ(edit->newText, "v or (return 1, 2)");
+    // `return 1, 2 if not v` could read as `return 1, (if not v then 2 else nil)`
+    CHECK_FALSE(leaveGuardRewrite(*this, uri, 7, 6));
 }
 
-TEST_CASE_FIXTURE(Fixture, "or_leave_guard_not_offered_when_it_would_not_parse_or_lose_code")
+TEST_CASE_FIXTURE(Fixture, "leave_guard_not_offered_when_it_would_lose_code")
 {
     ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
 
@@ -1631,27 +1645,34 @@ end
     for (size_t line = 2; line <= 18; ++line)
     {
         INFO("line " << line);
-        if (line == 2 || line == 4 || line == 5)
+        if (line >= 2 && line <= 6)
             continue;
-        CHECK_FALSE(orLeaveGuardRewrite(*this, uri, line, 6));
+        CHECK_FALSE(leaveGuardRewrite(*this, uri, line, 6));
     }
 
-    // a comparison is kept as written, and a statement can start with `#`
-    auto edit = orLeaveGuardRewrite(*this, uri, 2, 6);
+    // the condition is kept as written, whatever it starts or ends with
+    auto edit = leaveGuardRewrite(*this, uri, 2, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "a < b and return;");
+    CHECK_EQ(edit->newText, "return if a < b");
 
-    edit = orLeaveGuardRewrite(*this, uri, 4, 6);
+    edit = leaveGuardRewrite(*this, uri, 3, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "#a or return;");
+    CHECK_EQ(edit->newText, "return if not (a)(b)");
 
-    // a parenthesized if-then-else is its own operand
-    edit = orLeaveGuardRewrite(*this, uri, 5, 6);
+    edit = leaveGuardRewrite(*this, uri, 4, 6);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "a == (if b then c else nil) and return;");
+    CHECK_EQ(edit->newText, "return if not #a");
+
+    edit = leaveGuardRewrite(*this, uri, 5, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "return if a == (if b then c else nil)");
+
+    edit = leaveGuardRewrite(*this, uri, 6, 6);
+    REQUIRE(edit);
+    CHECK_EQ(edit->newText, "return if a ~= if b then c else nil");
 }
 
-TEST_CASE_FIXTURE(Fixture, "or_leave_guard_rewrites_each_condition_as_its_own_guard")
+TEST_CASE_FIXTURE(Fixture, "leave_guard_keeps_the_condition_whole")
 {
     ScopedFastFlag doExpr{FFlag::LuwuDoExpr, true};
 
@@ -1665,14 +1686,14 @@ end
 )");
 
     auto actions = codeActionsAt(*this, uri, 2, 8, {lsp::CodeActionKind::RefactorRewrite});
-    REQUIRE(findCodeAction(actions, "Rewrite as one guard per condition"));
+    REQUIRE(findCodeAction(actions, "Rewrite as 'return if' guard"));
 
-    auto edit = orLeaveGuardRewrite(*this, uri, 2, 8);
+    auto edit = leaveGuardRewrite(*this, uri, 2, 8);
     REQUIRE(edit);
-    CHECK_EQ(edit->newText, "r.ok or return nil\n    r.out == \"\" and return nil");
+    CHECK_EQ(edit->newText, "return nil if not r.ok or r.out == \"\"");
 }
 
-TEST_CASE_FIXTURE(Fixture, "or_leave_guard_needs_the_do_expression_flag")
+TEST_CASE_FIXTURE(Fixture, "leave_guard_needs_the_do_expression_flag")
 {
     ScopedFastFlag doExpr{FFlag::LuwuDoExpr, false};
 
@@ -1682,7 +1703,7 @@ local function f(a)
 end
 )");
 
-    CHECK_FALSE(orLeaveGuardRewrite(*this, uri, 2, 6));
+    CHECK_FALSE(leaveGuardRewrite(*this, uri, 2, 6));
 }
 TEST_CASE_FIXTURE(Fixture, "unknown_name_is_imported_through_a_destructuring")
 {
@@ -1698,6 +1719,32 @@ TEST_CASE_FIXTURE(Fixture, "unknown_name_is_imported_through_a_destructuring")
         "local chimera = { elements = { Heading = 1, Paragraph = 2 } }\n"
         "const .{ elements.{ Heading, Paragraph } } = chimera\n"
         "print(Paragraph)\n");
+}
+
+// Luwu Classes (rfcs/classes): a class's statics are destructured like a table's fields
+TEST_CASE_FIXTURE(Fixture, "unknown_name_is_imported_through_a_class_destructuring")
+{
+    ScopedFastFlag flags[2]{{FFlag::LuwuDestructuring, true}, {FFlag::LuwuClasses, true}};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "class Heading\n"
+                         "    function h1(): number\n"
+                         "        return 1\n"
+                         "    end\n"
+                         "    function h2(): number\n"
+                         "        return 2\n"
+                         "    end\n"
+                         "    function h3(): number\n"
+                         "        return 3\n"
+                         "    end\n"
+                         "end\n"
+                         "const .{ h1, h2 } = Heading\n"
+                         "print(h1(), h2(), h3())\n";
+    auto uri = newDocument("test.luwu", source);
+
+    std::string expected = source;
+    expected.replace(expected.find("const .{ h1, h2 }"), 17, "const .{ h1, h2, h3 }");
+    CHECK_EQ(applyCodeAction(codeActionsAt(*this, uri, 12, 18), "Import 'h3' from 'Heading'", uri, source), expected);
 }
 
 TEST_CASE_FIXTURE(Fixture, "unused_destructured_fields_leave_their_pattern")

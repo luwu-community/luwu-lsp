@@ -135,6 +135,7 @@
                 "DuplicateKey": { "type": "boolean" },
                 "DuplicateProperty": { "type": "boolean" },
                 "DuplicateReadWrite": { "type": "boolean" },
+                "ExtraArguments": { "type": "boolean" },
                 "ReturnSelf": { "type": "boolean" },
                 "ReturnOnNextLine": { "type": "boolean" },
                 "OrContinue": { "type": "boolean" },
@@ -148,11 +149,12 @@
                 "LuaGuard": { "type": "boolean" },
                 "OrReturnComma": { "type": "boolean" },
                 "MisleadingIndentation": { "type": "boolean" },
-                "LuaStringHelper": { "type": "boolean" },
-                "StringOperations": { "type": "boolean" },
                 "AmbiguousContinuation": { "type": "boolean" },
                 "UnflippedGuard": { "type": "boolean" },
-                "UncaughtErrors": { "type": "boolean" }
+                "LuaStringHelper": { "type": "boolean" },
+                "StringOperations": { "type": "boolean" },
+                "UncaughtErrors": { "type": "boolean" },
+                "ConfusingGuard": { "type": "boolean" }
             }
         }
     }

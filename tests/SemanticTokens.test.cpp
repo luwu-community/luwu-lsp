@@ -12,6 +12,8 @@ LUAU_FASTFLAG(LuwuInLuwuDocs)
 LUAU_FASTFLAG(LuwuDestructuring)
 LUAU_FASTFLAG(LuwuDeclareStatements)
 LUAU_FASTFLAG(DebugLuwuMatchExpressions)
+LUAU_FASTFLAG(DebugLuwuBundles)
+LUAU_FASTFLAG(LuwuGenericNominals)
 
 TEST_SUITE_BEGIN("SemanticTokens");
 
@@ -75,8 +77,8 @@ TEST_CASE_FIXTURE(Fixture, "references_of_self_within_a_method_have_semantic_tok
 
     auto token = getSemanticToken(tokens, Luau::Position{3, 12});
     REQUIRE(token);
-    CHECK_EQ(token->tokenType, lsp::SemanticTokenTypes::Property);
-    CHECK_EQ(token->tokenModifiers, lsp::SemanticTokenModifiers::DefaultLibrary);
+    CHECK_EQ(token->tokenType, lsp::SemanticTokenTypes::SelfKeyword);
+    CHECK_EQ(token->tokenModifiers, lsp::SemanticTokenModifiers::None);
 }
 
 TEST_CASE_FIXTURE(Fixture, "references_of_explicitly_declared_self_in_a_non_method_function_definition_have_semantic_token")
@@ -93,13 +95,13 @@ TEST_CASE_FIXTURE(Fixture, "references_of_explicitly_declared_self_in_a_non_meth
 
     auto parameter = getSemanticToken(tokens, Luau::Position{2, 23});
     REQUIRE(parameter);
-    CHECK_EQ(parameter->tokenType, lsp::SemanticTokenTypes::Property);
-    CHECK_EQ(parameter->tokenModifiers, lsp::SemanticTokenModifiers::DefaultLibrary);
+    CHECK_EQ(parameter->tokenType, lsp::SemanticTokenTypes::SelfKeyword);
+    CHECK_EQ(parameter->tokenModifiers, lsp::SemanticTokenModifiers::None);
 
     auto usage = getSemanticToken(tokens, Luau::Position{3, 12});
     REQUIRE(usage);
-    CHECK_EQ(usage->tokenType, lsp::SemanticTokenTypes::Property);
-    CHECK_EQ(usage->tokenModifiers, lsp::SemanticTokenModifiers::DefaultLibrary);
+    CHECK_EQ(usage->tokenType, lsp::SemanticTokenTypes::SelfKeyword);
+    CHECK_EQ(usage->tokenModifiers, lsp::SemanticTokenModifiers::None);
 }
 
 TEST_CASE_FIXTURE(Fixture, "explicitly_declared_self_parameter_does_not_have_semantic_token_modifier_in_method_function_definition")
@@ -521,6 +523,39 @@ TEST_CASE_FIXTURE(Fixture, "type_test_is_not_coloured_as_the_call_it_parses_to")
     CHECK_EQ(point->tokenType, lsp::SemanticTokenTypes::Class);
 }
 
+TEST_CASE_FIXTURE(Fixture, "type_test_pattern_colours_only_the_tested_name")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    // The test of `node is Add {left, right}` reads `node` from a made-up local read located on the whole test
+    std::string source = "class Add(public left: number, public right: number) end\n"
+                         "local function eval(node: unknown): number\n"
+                         "    if node is Add {left, right} then\n"
+                         "        return left + right\n"
+                         "    end\n"
+                         "    return 0\n"
+                         "end\n";
+    auto uri = newDocument("main.luwu", source);
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+    workspace.frontend.check(moduleName);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getModule(moduleName), workspace.frontend.getSourceModule(moduleName),
+        /* grammarHighlightsNone= */ true, workspace.fileResolver.getTextDocument(uri));
+
+    auto node = getSemanticToken(tokens, wordPosition(source, 2, "node"));
+    REQUIRE(node);
+    CHECK_EQ(node->tokenType, lsp::SemanticTokenTypes::Parameter);
+    CHECK_EQ(node->end.column, wordPosition(source, 2, " is").column);
+
+    CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 2, "is")));
+
+    auto add = getSemanticToken(tokens, wordPosition(source, 2, "Add"));
+    REQUIRE(add);
+    CHECK_EQ(add->tokenType, lsp::SemanticTokenTypes::Class);
+}
+
 TEST_CASE_FIXTURE(Fixture, "moonwave_tags_at_the_start_of_doc_lines")
 {
     auto source = R"(
@@ -596,6 +631,90 @@ TEST_CASE_FIXTURE(Fixture, "doc_reference_code_is_highlighted_like_code")
     // a markdown link is prose
     CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 4, "a link")));
     CHECK_FALSE(getSemanticToken(tokens, wordPosition(source, 2, "uses")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "bundle_made_up_callee_is_not_coloured")
+{
+    ScopedFastFlag bundles{FFlag::DebugLuwuBundles, true};
+
+    // `.(1, 2)` is parsed as `bundle.pack(1, 2)` with the callee on the `.`
+    check("local pair = .(1, 2)\n");
+
+    auto tokens = getSemanticTokens(workspace.frontend, getMainModule(), getMainSourceModule());
+    CHECK_FALSE(getSemanticToken(tokens, Luau::Position{0, 13}));
+}
+
+TEST_CASE_FIXTURE(Fixture, "self_and_Self_in_classes_and_traits_are_self_keywords")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuTraits{FFlag::LuwuTraits, true};
+    ScopedFastFlag luwuGenericNominals{FFlag::LuwuGenericNominals, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "class Box<T>(public inner: T)\n"
+                         "    function is_empty(self: Box<T>): boolean\n"
+                         "        return self.inner == nil\n"
+                         "    end\n"
+                         "    function copy(self): Self\n"
+                         "        return Self(self.inner)\n"
+                         "    end\n"
+                         "end\n";
+    auto uri = newDocument("main.luwu", source);
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+    workspace.frontend.check(moduleName);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getModule(moduleName), workspace.frontend.getSourceModule(moduleName));
+
+    auto expectSelf = [&](unsigned int line, const std::string& word, size_t occurrence = 0)
+    {
+        auto token = getSemanticToken(tokens, wordPosition(source, line, word, occurrence));
+        REQUIRE_MESSAGE(token, word);
+        CHECK_EQ(token->tokenType, lsp::SemanticTokenTypes::SelfKeyword);
+        CHECK_EQ(token->tokenModifiers, lsp::SemanticTokenModifiers::None);
+    };
+    expectSelf(1, "self");
+    expectSelf(2, "self");
+    expectSelf(4, "self");
+    expectSelf(4, "Self");
+    expectSelf(5, "Self");
+    expectSelf(5, "self");
+}
+
+TEST_CASE_FIXTURE(Fixture, "match_arm_binding_does_not_colour_the_subject_over_it")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    // `case found is Found` reads the subject `outcome` on `found` (binding it) and on `is` (testing it)
+    std::string source = "class Found(public x: number) end\n"
+                         "class LookupFailed(public y: number) end\n"
+                         "local function note(outcome: Found | LookupFailed): string\n"
+                         "    return match outcome\n"
+                         "        case found is Found then tostring(found)\n"
+                         "        case failed is LookupFailed then tostring(failed)\n"
+                         "        else \"x\"\n"
+                         "end\n";
+    auto uri = newDocument("main.luwu", source);
+    auto moduleName = workspace.fileResolver.getModuleName(uri);
+    workspace.frontend.check(moduleName);
+
+    auto tokens = getSemanticTokens(workspace.frontend, getModule(moduleName), workspace.frontend.getSourceModule(moduleName),
+        /* grammarHighlightsNone= */ true, workspace.fileResolver.getTextDocument(uri));
+
+    for (unsigned int line : {4u, 5u})
+    {
+        for (const auto& token : tokens)
+            CHECK_MESSAGE(!(token.start.line == line && token.tokenType == lsp::SemanticTokenTypes::Parameter), "line ", line);
+    }
+
+    auto found = getSemanticToken(tokens, wordPosition(source, 4, "Found"));
+    REQUIRE(found);
+    CHECK_EQ(found->tokenType, lsp::SemanticTokenTypes::Class);
+
+    auto lookupFailed = getSemanticToken(tokens, wordPosition(source, 5, "LookupFailed"));
+    REQUIRE(lookupFailed);
+    CHECK_EQ(lookupFailed->tokenType, lsp::SemanticTokenTypes::Class);
 }
 
 TEST_SUITE_END();

@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "Luau/AstQuery.h"
+#include "Luau/Parser.h"
 
 static Luau::AstExprConstantString* findStringNodeAtPosition(const Luau::SourceModule& sourceModule, const Luau::Position& position)
 {
@@ -167,11 +168,76 @@ static std::optional<std::vector<lsp::TextEdit>> bracketAttributeArguments(const
     return edits;
 }
 
+// Finds a table element whose value starts before `cursor` and ends at `end`
+struct TableElementEndingAt : Luau::AstVisitor
+{
+    Luau::Position cursor;
+    Luau::Position end;
+    bool found = false;
+
+    TableElementEndingAt(const Luau::Position& cursor, const Luau::Position& end)
+        : cursor(cursor)
+        , end(end)
+    {
+    }
+
+    bool visit(Luau::AstExprTable* table) override
+    {
+        for (const auto& item : table->items)
+        {
+            if (item.value->location.begin < cursor && item.value->location.end == end)
+                found = true;
+        }
+        return !found;
+    }
+};
+
+// Typing `(`, `{` or a quote at the end of a table element (`Paragraph()` or `""` on its own line) leaves the element
+// without the comma that separates it from the next one, once the editor auto-closes the bracket or quote. Inserts
+// that comma after the closing brackets when they end a table element. Call arguments don't get one.
+static std::optional<std::vector<lsp::TextEdit>> insertMissingComma(
+    const TextDocument* textDocument, const Luau::Position& position, const Luau::ParseOptions& options)
+{
+    const std::string lineText = textDocument->getLine(position.line);
+    if (position.column == 0 || position.column >= lineText.size())
+        return std::nullopt;
+
+    const char open = lineText[position.column - 1];
+    const char close = open == '(' ? ')' : open == '{' ? '}' : open;
+    if ((open != '(' && open != '{' && open != '"' && open != '\'' && open != '`') || lineText[position.column] != close)
+        return std::nullopt;
+
+    // The rest of the line holds only the auto-closed bracket and the brackets it sits in, and maybe a comment
+    size_t commaColumn = position.column + 1;
+    while (commaColumn < lineText.size() && (lineText[commaColumn] == ')' || lineText[commaColumn] == '}' || lineText[commaColumn] == ']'))
+        ++commaColumn;
+
+    const size_t restBegin = lineText.find_first_not_of(" \t\r\n", commaColumn);
+    if (restBegin != std::string::npos && lineText.compare(restBegin, 2, "--") != 0)
+        return std::nullopt;
+
+    const std::string source = textDocument->getText();
+    Luau::Allocator allocator;
+    Luau::AstNameTable names(allocator);
+    Luau::ParseResult result = Luau::Parser::parse(source.data(), source.size(), names, allocator, options);
+    if (!result.root)
+        return std::nullopt;
+
+    const Luau::Position commaPosition{position.line, static_cast<unsigned int>(commaColumn)};
+    TableElementEndingAt finder{position, commaPosition};
+    result.root->visit(&finder);
+    if (!finder.found)
+        return std::nullopt;
+
+    const lsp::Position lspCommaPosition = textDocument->convertPosition(commaPosition);
+    return std::vector<lsp::TextEdit>{lsp::TextEdit{{lspCommaPosition, lspCommaPosition}, ","}};
+}
+
 lsp::DocumentOnTypeFormattingResult WorkspaceFolder::onTypeFormatting(const lsp::DocumentOnTypeFormattingParams& params)
 {
     auto config = client->getConfiguration(rootUri);
 
-    if (params.ch != "{")
+    if (params.ch != "{" && params.ch != "(" && params.ch != "\"" && params.ch != "'" && params.ch != "`")
         return std::nullopt;
 
     auto moduleName = fileResolver.getModuleName(params.textDocument.uri);
@@ -180,6 +246,21 @@ lsp::DocumentOnTypeFormattingResult WorkspaceFolder::onTypeFormatting(const lsp:
         return std::nullopt;
 
     auto position = textDocument->convertPosition(params.position);
+
+    if (config.format.insertMissingComma)
+    {
+        const Luau::Config& luauConfig = frontend.configResolver->getConfig(moduleName, limits);
+        Luau::ParseOptions options = luauConfig.parseOptions;
+        options.language = luauConfig.language;
+        options.luwon = params.textDocument.uri.extension() == ".luwon";
+        options.noErrorLimit = true;
+
+        if (auto edits = insertMissingComma(textDocument, position, options))
+            return edits;
+    }
+
+    if (params.ch != "{")
+        return std::nullopt;
 
     if (config.format.bracketAttributeArguments)
     {

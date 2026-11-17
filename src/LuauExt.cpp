@@ -423,7 +423,8 @@ std::string formatLongFunctionTypeLines(const std::string& typeString)
     return result;
 }
 
-// The `collections` library's classes are declared by Luwu's builtin definitions, whose module is `@luau`
+// Luwu's builtin classes (`Ok`, `Err`, `Some` and the `collections` library's) are declared by its builtin definitions,
+// whose module is `@luau`
 static bool isCollectionsClassNamed(const Luau::ExternType* et, const char* name)
 {
     return et && et->name == name && et->definitionModuleName == "@luau";
@@ -435,7 +436,7 @@ bool isCollectionsClass(Luau::TypeId ty)
     if (!et || et->definitionModuleName != "@luau")
         return false;
 
-    static constexpr const char* kClasses[] = {"ok", "err", "some", "pair", "triple", "quad", "orderedmap", "vec", "vecdeque"};
+    static constexpr const char* kClasses[] = {"Ok", "Err", "Some", "Pair", "Triple", "Quad", "OrderedMap", "Vec", "VecDeque"};
     return std::any_of(std::begin(kClasses), std::end(kClasses), [&](const char* name) { return et->name == name; });
 }
 
@@ -448,7 +449,7 @@ static std::optional<Luau::TypeId> firstTypeArgument(const Luau::ExternType* et)
 
 namespace
 {
-// The `ok<T> | err<E>` and `some<T> | none` unions in a type, outermost first
+// The `Ok<T> | Err<E>` and `Some<T> | none` unions in a type, outermost first
 struct CollectionsUnionFinder : Luau::TypeOnceVisitor
 {
     struct Found
@@ -468,7 +469,7 @@ struct CollectionsUnionFinder : Luau::TypeOnceVisitor
 
     bool visit(Luau::TypeId ty, const Luau::ExternType& et) override
     {
-        // A class's members aren't printed, only its type arguments (`some<result<T, E>>`)
+        // A class's members aren't printed, only its type arguments (`Some<Result<T, E>>`)
         for (Luau::TypeId argument : et.instantiatedTypeParams)
             traverse(argument);
         return false;
@@ -487,11 +488,11 @@ struct CollectionsUnionFinder : Luau::TypeOnceVisitor
         {
             option = Luau::follow(option);
             const auto* et = Luau::get<Luau::ExternType>(option);
-            if (isCollectionsClassNamed(et, "ok") && !ok)
+            if (isCollectionsClassNamed(et, "Ok") && !ok)
                 ok = et, okTy = option;
-            else if (isCollectionsClassNamed(et, "err") && !err)
+            else if (isCollectionsClassNamed(et, "Err") && !err)
                 err = et, errTy = option;
-            else if (isCollectionsClassNamed(et, "some") && !some)
+            else if (isCollectionsClassNamed(et, "Some") && !some)
                 some = et, someTy = option;
             else if (Luau::isNone(option))
                 none = true;
@@ -506,12 +507,12 @@ struct CollectionsUnionFinder : Luau::TypeOnceVisitor
             auto value = firstTypeArgument(ok);
             auto error = firstTypeArgument(err);
             if (value && error)
-                found.push_back(Found{ty, "result", {*value, *error}, {okTy, errTy}, optional});
+                found.push_back(Found{ty, "Result", {*value, *error}, {okTy, errTy}, optional});
         }
         else if (others == 0 && some && none && !ok && !err)
         {
             if (auto value = firstTypeArgument(some))
-                found.push_back(Found{ty, "option", {*value}, {someTy}, optional});
+                found.push_back(Found{ty, "Option", {*value}, {someTy}, optional});
         }
 
         return true;

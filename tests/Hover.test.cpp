@@ -12,7 +12,7 @@ LUAU_FASTFLAG(LuwuTraits)
 LUAU_FASTFLAG(LuwuTableFunctionFields)
 LUAU_FASTFLAG(DebugLuwuUserDefinedRefinements)
 LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
-LUAU_FASTFLAG(DebugLuwuCollections)
+LUAU_FASTFLAG(DebugLuwuBuiltinClasses)
 LUAU_FASTFLAG(DebugLuwuTryExpressions)
 LUAU_FASTFLAG(LuwuNonePrimitive)
 LUAU_FASTFLAG(LuwuDeclareStatements)
@@ -201,10 +201,10 @@ TEST_CASE_FIXTURE(Fixture, "type_test_operands_and_bindings_in_a_condition_hover
 
     auto uri = newDocument("main.luwu", "class Point(public x: number) end\n"
                                         "local p: unknown = Point(1)\n"
-                                        "if p is Point.(px) then\n"
+                                        "if p is Point(px) then\n"
                                         "    print(px)\n"
                                         "end\n"
-                                        "if p is Point.{x as py} then\n"
+                                        "if p is Point {x as py} then\n"
                                         "    print(py)\n"
                                         "end\n"
                                         "if p is Point then\n"
@@ -228,7 +228,7 @@ TEST_CASE_FIXTURE(Fixture, "type_test_operands_and_bindings_in_a_condition_hover
     }
 
     // Each binding, where the pattern declares it
-    std::string px = hoverAt(2, 15);
+    std::string px = hoverAt(2, 14);
     CHECK_MESSAGE(px.find("px: number") != std::string::npos, px);
     std::string py = hoverAt(5, 20);
     CHECK_MESSAGE(py.find("py: number") != std::string::npos, py);
@@ -2381,7 +2381,7 @@ print(add(1, 2))
 // The collections library is declared with the builtins, so its flags are on before the Fixture is built
 struct CollectionsFlags : ClassFlags
 {
-    ScopedFastFlag collections{FFlag::DebugLuwuCollections, true};
+    ScopedFastFlag collections{FFlag::DebugLuwuBuiltinClasses, true};
     ScopedFastFlag tryExpressions{FFlag::DebugLuwuTryExpressions, true};
     ScopedFastFlag nonePrimitive{FFlag::LuwuNonePrimitive, true};
     ScopedFastFlag declareStatements{FFlag::LuwuDeclareStatements, true};
@@ -2405,13 +2405,13 @@ const result = try reader("main.luau")
 
     std::string hover = hoverAt(*this, source, {4, 8});
     INFO(hover);
-    CHECK(hover.find("const result: result<string, Problem | unknown>") != std::string::npos);
-    CHECK(hover.find("ok<string> |") == std::string::npos);
-    CHECK(hover.find("| ok<string>") == std::string::npos);
+    CHECK(hover.find("const result: Result<string, Problem | unknown>") != std::string::npos);
+    CHECK(hover.find("Ok<string> |") == std::string::npos);
+    CHECK(hover.find("| Ok<string>") == std::string::npos);
 
     // The user's own type comes before the note on the builtin classes, which elides their functions
     size_t problem = hover.find("type Problem = ");
-    size_t note = hover.find("-- result<string, Problem | unknown> is one of the builtin collections classes");
+    size_t note = hover.find("-- Result<string, Problem | unknown> is one of the builtin classes");
     REQUIRE(problem != std::string::npos);
     REQUIRE(note != std::string::npos);
     CHECK(problem < note);
@@ -2423,7 +2423,7 @@ const result = try reader("main.luau")
 TEST_CASE_FIXTURE(CollectionsFixture, "hover_names_an_option_in_a_signature")
 {
     std::string source = R"(type Thing = { name: string }
-const function finder(name: string): collections.option<Thing>
+const function finder(name: string): Option<Thing>
     return none
 end
 const found = finder("x")
@@ -2431,13 +2431,13 @@ const found = finder("x")
 
     std::string signature = hoverAt(*this, source, {1, 16});
     INFO(signature);
-    CHECK(signature.find("function finder(name: string): option<Thing>") != std::string::npos);
+    CHECK(signature.find("function finder(name: string): Option<Thing>") != std::string::npos);
 
     std::string hover = hoverAt(*this, source, {4, 7});
     INFO(hover);
-    CHECK(hover.find("const found: option<Thing>") != std::string::npos);
-    CHECK(hover.find("-- option<Thing> is none or the builtin collections class some") != std::string::npos);
-    CHECK(hover.find("type Thing = ") < hover.find("-- option<Thing>"));
+    CHECK(hover.find("const found: Option<Thing>") != std::string::npos);
+    CHECK(hover.find("-- Option<Thing> is none or the builtin class Some") != std::string::npos);
+    CHECK(hover.find("type Thing = ") < hover.find("-- Option<Thing>"));
 }
 
 TEST_SUITE_END();

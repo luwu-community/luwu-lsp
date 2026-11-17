@@ -126,6 +126,9 @@ in `luwu.types.documentationFiles`. Require-by-string (`require("./module")`) wo
 
 LSP platform defaults to `standard` mode.
 
+Other programs (a seal script, a build tool) can post their own diagnostics to luwu-lsp over HTTP on a local port.
+*See [External diagnostics](docs/external-diagnostics.md).*
+
 Roblox platform support is inherited from luau-lsp and enabled with `luwu.platform.type: "roblox"`; see the
 [luau-lsp README](https://github.com/JohnnyMorganz/luau-lsp#readme) for how it is configured.
 

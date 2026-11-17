@@ -460,6 +460,22 @@ static const Luau::TableType* tableOf(std::optional<Luau::TypeId> ty)
     return ty ? Luau::get<Luau::TableType>(Luau::follow(*ty)) : nullptr;
 }
 
+// Luwu Classes (rfcs/classes): what a destructuring can read from a value of type `ty`: a table's fields, or a class's
+// members (its statics, for the class itself: `const .{ h1, h2 } = Heading`)
+static const Luau::TableType::Props* membersOf(std::optional<Luau::TypeId> ty)
+{
+    if (const Luau::TableType* table = tableOf(ty))
+        return &table->props;
+    const Luau::ExternType* cls = ty ? Luau::get<Luau::ExternType>(Luau::follow(*ty)) : nullptr;
+    return cls ? &cls->props() : nullptr;
+}
+
+// A class's private members and special names (`__init`, metamethods) can't be destructured from outside it
+static bool offeredFromOutside(const std::string& name, const Luau::Property& prop)
+{
+    return !prop.isPrivate && name.rfind("__", 0) != 0;
+}
+
 // Completion filters by what's typed, and its first character has to match, so nothing else is worth sending
 static bool startsLike(const std::string& name, const std::string& typed)
 {
@@ -647,18 +663,20 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
 
     // A field of `table` and, through it, the fields of a table it holds, two levels down: `name` or `name.{ inner }`
     auto offerFields =
-        [&](const Luau::TableType* table, const std::string& from, const std::function<std::optional<lsp::TextEdit>(const std::string&)>& add)
+        [&](const Luau::TableType::Props* members, const std::string& from, const std::function<std::optional<lsp::TextEdit>(const std::string&)>& add)
     {
-        for (const auto& [name, prop] : table->props)
+        for (const auto& [name, prop] : *members)
         {
+            if (!offeredFromOutside(name, prop))
+                continue;
             if (auto edit = add(name))
                 offer(name, from, prop.readTy, *edit);
 
-            const Luau::TableType* inner = tableOf(prop.readTy);
+            const Luau::TableType::Props* inner = membersOf(prop.readTy);
             if (!inner || !available(name, false))
                 continue;
-            for (const auto& [innerName, innerProp] : inner->props)
-                if (startsLike(innerName, typed))
+            for (const auto& [innerName, innerProp] : *inner)
+                if (startsLike(innerName, typed) && offeredFromOutside(innerName, innerProp))
                     if (auto edit = add(name + ".{ " + innerName + " }"))
                         offer(innerName, from + "." + name, innerProp.readTy, *edit);
         }
@@ -675,9 +693,9 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
         if (!holder->is<Luau::AstStatLocal>() || !atTopBeforeCursor(holder))
             continue;
 
-        const Luau::TableType* table = tableOf(typeOfLocal(pattern->local, module, facts));
+        const Luau::TableType::Props* members = membersOf(typeOfLocal(pattern->local, module, facts));
         auto split = splitDestructurePattern(textDocument.getText(textDocument.convertLocation(*pattern->location)));
-        if (!table || !split)
+        if (!members || !split)
             continue;
 
         std::string from;
@@ -689,12 +707,12 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
         auto field = [&](const std::string& key) -> const Luau::AstDestructureField*
         {
             for (const auto& f : pattern->fields)
-                if (key == f.key.value)
+                if (f.key.value && key == f.key.value)
                     return &f;
             return nullptr;
         };
 
-        offerFields(table, from,
+        offerFields(members, from,
             [&](const std::string& text) -> std::optional<lsp::TextEdit>
             {
                 std::string key = text.substr(0, text.find(".{"));
@@ -732,14 +750,14 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
             {
                 return patternQualifier(*entry.first, facts) == var;
             });
-        const Luau::TableType* table = tableOf(typeOfLocal(var, module, facts));
-        if (destructured || !table)
+        const Luau::TableType::Props* members = membersOf(typeOfLocal(var, module, facts));
+        if (destructured || !members)
             continue;
 
         lsp::Position after = textDocument.convertPosition(var->location.end);
         lsp::Position below{declaration->location.end.line + 1, 0};
         std::string keyword = declaration->isConst ? "const " : "local ";
-        offerFields(table, var->name.value,
+        offerFields(members, var->name.value,
             [&](const std::string& text) -> std::optional<lsp::TextEdit>
             {
                 if (!var->annotation)
@@ -758,11 +776,11 @@ std::vector<ImportCandidate> importCandidates(const Luau::SourceModule& sourceMo
 
     for (const auto& candidate : unimported)
     {
-        const Luau::TableType* table = tableOf(candidate.type);
-        if (!table || facts.requirePaths.count(candidate.requirePath))
+        const Luau::TableType::Props* members = membersOf(candidate.type);
+        if (!members || facts.requirePaths.count(candidate.requirePath))
             continue;
 
-        offerFields(table, candidate.requirePath,
+        offerFields(members, candidate.requirePath,
             [&](const std::string& text) -> std::optional<lsp::TextEdit>
             {
                 if (requirable.count(candidate.requirePath + "/" + text.substr(0, text.find(".{"))))

@@ -74,6 +74,14 @@ static bool namesTrait(const Luau::TypeId ty)
     return (et && et->traitInfo) || isTraitValue(ty);
 }
 
+// Luwu Classes and Traits: what `Self` resolves to in a class or trait: the class, the trait, or the generic standing for
+// the class that implements a trait
+static bool namesSelf(const Luau::TypeId ty, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
+{
+    const auto* generic = Luau::get<Luau::GenericType>(Luau::follow(ty));
+    return (generic && generic->name == "Self") || namesTrait(ty) || namesUserDefinedClass(ty, builtinTypes);
+}
+
 static lsp::SemanticTokenTypes inferTokenType(const Luau::TypeId ty, lsp::SemanticTokenTypes base, Luau::NotNull<Luau::BuiltinTypes> builtinTypes)
 {
     if (!ty)
@@ -119,18 +127,36 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals;
     Luau::NotNull<Luau::BuiltinTypes> builtinTypes;
     bool grammarHighlightsNone;
+    // The source, to check where a read the parser made up is written. Without it such reads get no token.
+    const TextDocument* textDocument;
     std::vector<SemanticToken> tokens{};
     std::unordered_map<Luau::AstLocal*, AstLocalInfo> localMap{};
     std::unordered_set<Luau::AstType*> syntheticTypes{};
 
     explicit SemanticTokensVisitor(
         const Luau::ModulePtr& module, const std::unordered_map<Luau::AstName, Luau::TypeId>& builtinGlobals,
-        Luau::NotNull<Luau::BuiltinTypes> builtinTypes, bool grammarHighlightsNone)
+        Luau::NotNull<Luau::BuiltinTypes> builtinTypes, bool grammarHighlightsNone, const TextDocument* textDocument)
         : module(module)
         , builtinGlobals(builtinGlobals)
         , builtinTypes(builtinTypes)
         , grammarHighlightsNone(grammarHighlightsNone)
+        , textDocument(textDocument)
     {
+    }
+
+    // Whether `name` is written at `position`, as a whole word
+    bool nameWrittenAt(const Luau::Position& position, const char* name) const
+    {
+        if (!textDocument || position.line >= textDocument->lineCount())
+            return false;
+
+        std::string line = textDocument->getLine(position.line);
+        size_t length = strlen(name);
+        if (position.column > line.size() || line.compare(position.column, length, name) != 0)
+            return false;
+
+        size_t after = position.column + length;
+        return after >= line.size() || !(isalnum(static_cast<unsigned char>(line[after])) || line[after] == '_');
     }
 
     // HACK: Luau introduces some synthetic tokens in the AST for types
@@ -183,7 +209,11 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         // Highlight name -- as a class when the annotation names one, so `userid: UserId` colors
         // `UserId` the same way its `class UserId` declaration is colored
         auto tokenType = lsp::SemanticTokenTypes::Type;
-        if (auto resolvedTy = module->astResolvedTypes.find(ref); resolvedTy && namesTrait(*resolvedTy))
+        auto resolvedTy = module->astResolvedTypes.find(ref);
+        // Luwu Classes and Traits: `Self` is the class or trait, or in a trait method the class implementing it
+        if (!ref->prefix && ref->name == "Self" && resolvedTy && namesSelf(*resolvedTy, builtinTypes))
+            tokenType = lsp::SemanticTokenTypes::SelfKeyword;
+        else if (resolvedTy && namesTrait(*resolvedTy))
             tokenType = lsp::SemanticTokenTypes::Interface;
         else if (resolvedTy && namesUserDefinedClass(*resolvedTy, builtinTypes))
             tokenType = lsp::SemanticTokenTypes::Class;
@@ -287,10 +317,11 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         bool first = true;
         for (auto arg : func->args)
         {
-            if (first && !func->self && arg->name == "self")
+            // Luwu: a first parameter named `Self` is the class a class function is called on
+            if (first && !func->self && (arg->name == "self" || arg->name == "Self"))
             {
-                tokens.emplace_back(SemanticToken{
-                    arg->location.begin, arg->location.end, lsp::SemanticTokenTypes::Property, lsp::SemanticTokenModifiers::DefaultLibrary});
+                tokens.emplace_back(
+                    SemanticToken{arg->location.begin, arg->location.end, lsp::SemanticTokenTypes::SelfKeyword, lsp::SemanticTokenModifiers::None});
                 localMap.insert_or_assign(arg, AstLocalInfo::Self);
             }
             else
@@ -366,14 +397,30 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
 
     bool visit(Luau::AstExprLocal* local) override
     {
+        // Luwu Pattern Matching: a local the parser made up (the `(matched)` subject of a `match`) isn't written anywhere
+        if (local->local->name.value[0] == '(')
+            return true;
+
+        // Luwu Pattern Matching: the parser makes up reads located wherever the pattern needs them. `node is Sub
+        // {left, right}` reads `node` on the whole test, and `case found is Found` reads the `match` subject on `found`
+        // and on `is`. Only a read whose name is written at its start is coloured, and only over the name.
+        Luau::Location location = local->location;
+        unsigned int nameLength = static_cast<unsigned int>(strlen(local->local->name.value));
+        if (location.begin.line != location.end.line || location.end.column - location.begin.column != nameLength)
+        {
+            if (!nameWrittenAt(location.begin, local->local->name.value))
+                return true;
+            location.end = Luau::Position{location.begin.line, location.begin.column + nameLength};
+        }
+
         auto defaultType = lsp::SemanticTokenTypes::Variable;
         if (localMap.find(local->local) != localMap.end())
         {
             auto localInfo = localMap.at(local->local);
             if (localInfo == AstLocalInfo::Self)
             {
-                tokens.emplace_back(SemanticToken{
-                    local->location.begin, local->location.end, lsp::SemanticTokenTypes::Property, lsp::SemanticTokenModifiers::DefaultLibrary});
+                tokens.emplace_back(
+                    SemanticToken{location.begin, location.end, lsp::SemanticTokenTypes::SelfKeyword, lsp::SemanticTokenModifiers::None});
 
                 return true;
             }
@@ -390,7 +437,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         if (type == lsp::SemanticTokenTypes::Variable)
             return true;
 
-        tokens.emplace_back(SemanticToken{local->location.begin, local->location.end, type, lsp::SemanticTokenModifiers::None});
+        tokens.emplace_back(SemanticToken{location.begin, location.end, type, lsp::SemanticTokenModifiers::None});
         return true;
     }
 
@@ -416,8 +463,25 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         }
     }
 
+    // Luwu Traits: `Self` in a trait method is the class of the object it's called on. The parser replaces it with a
+    // `class.of(self)` call located on `Self`, and only `Self` is written.
+    bool visit(Luau::AstExprSelfClass* selfClass) override
+    {
+        tokens.emplace_back(
+            SemanticToken{selfClass->location.begin, selfClass->location.end, lsp::SemanticTokenTypes::SelfKeyword, lsp::SemanticTokenModifiers::None});
+        return false;
+    }
+
     bool visit(Luau::AstExprGlobal* global) override
     {
+        // Luwu Classes and Traits: `Self` in a class or trait body is parsed as the global it names
+        if (global->writtenAsSelf)
+        {
+            tokens.emplace_back(
+                SemanticToken{global->location.begin, global->location.end, lsp::SemanticTokenTypes::SelfKeyword, lsp::SemanticTokenModifiers::None});
+            return true;
+        }
+
         auto it = builtinGlobals.find(global->name);
         if (it != builtinGlobals.end() && strlen(global->name.value) > 0)
         {
@@ -446,9 +510,11 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     // Luwu match expressions: `x is Point` is parsed as `class.isinstance(x, Point)` (and `x is string` as
     // `type(x) == "string"`). The made-up callee is located on the whole test, so colouring it would paint the test as
     // a function. Only the operands are written in the source.
+    // Luwu bundles: `.(a, b)` is parsed as `bundle.pack(a, b)`, with the made-up callee on the `.`. Colouring it would
+    // paint the dot as a function, so only the values are visited.
     bool visit(Luau::AstExprCall* call) override
     {
-        if (!call->fromTypeTest)
+        if (!call->fromTypeTest && !call->fromDotPositional)
             return true;
 
         for (Luau::AstExpr* arg : call->args)
@@ -541,6 +607,32 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             if (clause.whenLocation)
                 addKeywordToken(*clause.whenLocation, 4);
 
+        return true;
+    }
+
+    // Luwu Pattern Matching: an arm's `when`s, including the one that opens an arm without `case`
+    void addMatchArmTokens(const Luau::AstArray<Luau::AstMatchArm>& arms)
+    {
+        for (const Luau::AstMatchArm& arm : arms)
+        {
+            if (arm.kind == Luau::AstMatchArm::When)
+                addKeywordToken(arm.keywordLocation, 4);
+
+            for (const auto& clause : arm.clauses)
+                if (clause.whenLocation)
+                    addKeywordToken(*clause.whenLocation, 4);
+        }
+    }
+
+    bool visit(Luau::AstExprMatch* match) override
+    {
+        addMatchArmTokens(match->arms);
+        return true;
+    }
+
+    bool visit(Luau::AstStatMatch* match) override
+    {
+        addMatchArmTokens(match->arms);
         return true;
     }
 
@@ -910,7 +1002,7 @@ struct DocRefTokens
             {
                 if (it->second == AstLocalInfo::Self)
                 {
-                    addToken(global->location, lsp::SemanticTokenTypes::Property, lsp::SemanticTokenModifiers::DefaultLibrary);
+                    addToken(global->location, lsp::SemanticTokenTypes::SelfKeyword);
                     return;
                 }
                 base = lsp::SemanticTokenTypes::Parameter;
@@ -1026,12 +1118,13 @@ struct DocRefTokens
 };
 
 std::vector<SemanticToken> getSemanticTokens(
-    const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule, bool grammarHighlightsNone)
+    const Luau::Frontend& frontend, const Luau::ModulePtr& module, const Luau::SourceModule* sourceModule, bool grammarHighlightsNone,
+    const TextDocument* textDocument)
 {
     std::unordered_map<Luau::AstName, Luau::TypeId> builtinGlobals{};
     fillBuiltinGlobals(builtinGlobals, *sourceModule->names, frontend.globals.globalScope);
 
-    SemanticTokensVisitor visitor{module, builtinGlobals, frontend.builtinTypes, grammarHighlightsNone};
+    SemanticTokensVisitor visitor{module, builtinGlobals, frontend.builtinTypes, grammarHighlightsNone, textDocument};
     visitor.visit(sourceModule->root);
 
     DocRefTokens docRefs{visitor, frontend, *sourceModule};
@@ -1101,7 +1194,7 @@ std::optional<lsp::SemanticTokens> WorkspaceFolder::semanticTokens(
     if (!sourceModule || !module)
         return std::nullopt;
 
-    auto tokens = getSemanticTokens(frontend, module, sourceModule, /* grammarHighlightsNone= */ isLuwuFile(*textDocument));
+    auto tokens = getSemanticTokens(frontend, module, sourceModule, /* grammarHighlightsNone= */ isLuwuFile(*textDocument), textDocument);
     // Luwu: Moonwave can't parse Luwu, so its tags are only coloured in Luau files
     if (!isLuwuFile(*textDocument) && client->getConfiguration(rootUri).documentation.highlightMoonwaveTags)
         addMoonwaveTagTokens(tokens, sourceModule, textDocument);
