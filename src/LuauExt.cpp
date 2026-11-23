@@ -1133,6 +1133,17 @@ lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::Fi
     return diagnostic;
 }
 
+lsp::Diagnostic createCompileErrorDiagnostic(const Luau::Location& location, const std::string& message, const TextDocument* textDocument)
+{
+    lsp::Diagnostic diagnostic;
+    diagnostic.source = "Luwu";
+    diagnostic.code = "CompileError";
+    diagnostic.message = "CompileError: " + message;
+    diagnostic.severity = lsp::DiagnosticSeverity::Error;
+    diagnostic.range = toUTF16Range(textDocument, location);
+    return diagnostic;
+}
+
 lsp::Diagnostic createNoteDiagnostic(const Luau::DiagnosticNote& note, const TextDocument* textDocument)
 {
     lsp::Diagnostic diagnostic;
@@ -1196,6 +1207,38 @@ lsp::Diagnostic createParseErrorDiagnostic(const Luau::ParseError& error, const 
     diagnostic.range = {toUTF16(textDocument, error.getLocation().begin), toUTF16(textDocument, error.getLocation().end)};
     diagnostic.codeDescription = {Uri::parse("https://luau.org/syntax")};
     return diagnostic;
+}
+
+// The bindings in `pattern`'s fields, at any depth
+static void forEachDestructureBinding(const Luau::AstDestructurePattern& pattern, const std::function<void(Luau::AstLocal*)>& f)
+{
+    for (const Luau::AstDestructureField& field : pattern.fields)
+    {
+        Luau::AstLocal* local = field.target.local;
+        if (local && local->name != Luau::kDestructuredLocalName)
+            f(local);
+        forEachDestructureBinding(field.target, f);
+    }
+}
+
+void forEachPatternBinding(const Luau::AstExprMatchPattern& pattern, const std::function<void(Luau::AstLocal*)>& f)
+{
+    for (const Luau::AstPatternAlternative& alternative : pattern.alternatives)
+    {
+        if (alternative.fields)
+            forEachDestructureBinding(*alternative.fields, f);
+        if (alternative.rest)
+            f(alternative.rest);
+    }
+}
+
+void forEachArmBinding(const Luau::AstArray<Luau::AstMatchArm>& arms, const std::function<void(Luau::AstLocal*)>& f)
+{
+    for (const Luau::AstMatchArm& arm : arms)
+    {
+        if (arm.binding)
+            f(arm.binding);
+    }
 }
 
 // Based on upstream, except we use containsClosed
@@ -1293,6 +1336,31 @@ struct FindExprOrLocalClosed : public Luau::AstVisitor
     bool visit(Luau::AstStatClass* classStat) override
     {
         visitLocal(classStat->name);
+        return true;
+    }
+
+    // Luwu Pattern Matching: a pattern's and a `case` arm's names are declared where they're written
+    bool visit(Luau::AstExprMatchPattern* pattern) override
+    {
+        if (!visit(static_cast<Luau::AstExpr*>(pattern)))
+            return false;
+
+        forEachPatternBinding(*pattern, [&](Luau::AstLocal* local) { visitLocal(local); });
+        return true;
+    }
+
+    bool visit(Luau::AstExprMatch* match) override
+    {
+        if (!visit(static_cast<Luau::AstExpr*>(match)))
+            return false;
+
+        forEachArmBinding(match->arms, [&](Luau::AstLocal* local) { visitLocal(local); });
+        return true;
+    }
+
+    bool visit(Luau::AstStatMatch* match) override
+    {
+        forEachArmBinding(match->arms, [&](Luau::AstLocal* local) { visitLocal(local); });
         return true;
     }
 };
@@ -1431,6 +1499,31 @@ struct FindSymbolReferences : public Luau::AstVisitor
         {
             result.push_back(classStat->name->location);
         }
+        return true;
+    }
+
+    // Luwu Pattern Matching: the names a pattern and a `case` arm declare
+    void addDeclaration(Luau::AstLocal* local)
+    {
+        if (visitLocal(local))
+            result.push_back(local->location);
+    }
+
+    bool visit(Luau::AstExprMatchPattern* pattern) override
+    {
+        forEachPatternBinding(*pattern, [&](Luau::AstLocal* local) { addDeclaration(local); });
+        return true;
+    }
+
+    bool visit(Luau::AstExprMatch* match) override
+    {
+        forEachArmBinding(match->arms, [&](Luau::AstLocal* local) { addDeclaration(local); });
+        return true;
+    }
+
+    bool visit(Luau::AstStatMatch* match) override
+    {
+        forEachArmBinding(match->arms, [&](Luau::AstLocal* local) { addDeclaration(local); });
         return true;
     }
 };

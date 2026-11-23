@@ -1,6 +1,8 @@
 #include "LSP/Workspace.hpp"
 
 #include "Luau/AstQuery.h"
+#include "Luau/BuiltinTypeFunctions.h"
+#include "Luau/TypeUtils.h"
 #include "LSP/LuauExt.hpp"
 #include "LSP/Destructure.hpp"
 
@@ -48,12 +50,9 @@ static std::optional<LocationInformation> valueDefinition(Luau::TypeId value, co
     return std::nullopt;
 }
 
-static std::vector<LocationInformation> findLocationsForIndex(const Luau::ModulePtr& module, const Luau::AstExpr* base, const Luau::Name& name)
+static std::vector<LocationInformation> findLocationsForProp(Luau::TypeId baseTy, const Luau::Name& name)
 {
-    auto baseTy = module->astTypes.find(base);
-    if (!baseTy)
-        return {};
-    auto baseTyFollowed = Luau::follow(*baseTy);
+    auto baseTyFollowed = Luau::follow(baseTy);
 
     std::vector<LocationInformation> results;
     for (const auto& [realBaseTy, prop] : lookupProp(baseTyFollowed, name))
@@ -79,6 +78,14 @@ static std::vector<LocationInformation> findLocationsForIndex(const Luau::Module
     }
 
     return results;
+}
+
+static std::vector<LocationInformation> findLocationsForIndex(const Luau::ModulePtr& module, const Luau::AstExpr* base, const Luau::Name& name)
+{
+    auto baseTy = module->astTypes.find(base);
+    if (!baseTy)
+        return {};
+    return findLocationsForProp(*baseTy, name);
 }
 
 static std::vector<LocationInformation> findLocationsForExpr(const Luau::ModulePtr& module, const Luau::AstExpr* expr, const Luau::Position& position)
@@ -120,6 +127,58 @@ static const Luau::AstExpr* destructuredFieldRead(const Luau::SourceModule& sour
             return index;
     }
     return expr;
+}
+
+// Luwu Pattern Matching (rfcs/control-flow/pattern-matching.md): the class field a field of a class pattern reads, by its
+// key in `Pod {x}`, or by the primary constructor parameter at its place in `Cat(name)`
+static std::optional<Luau::Name> patternFieldNameAt(const Luau::AstDestructurePattern& fields, Luau::TypeId object, const Luau::Position& position)
+{
+    const Luau::ClassFieldUserData* data = fields.positional ? Luau::getClassFieldUserData(object) : nullptr;
+    for (size_t i = 0; i < fields.fields.size; ++i)
+    {
+        const Luau::AstDestructureField& field = fields.fields.data[i];
+        if (!fields.positional)
+        {
+            if (field.key.value && field.keyLocation.containsClosed(position))
+                return Luau::Name(field.key.value);
+            continue;
+        }
+
+        bool onBinding = field.target.local && field.target.local->location.containsClosed(position);
+        if (onBinding && data && data->positionalFields && i < data->positionalFields->size())
+            return (*data->positionalFields)[i];
+    }
+    return std::nullopt;
+}
+
+static std::vector<LocationInformation> findLocationsForPatternField(
+    const Luau::ModulePtr& module,
+    Luau::NotNull<Luau::BuiltinTypes> builtinTypes,
+    const std::vector<Luau::AstNode*>& ancestry,
+    const Luau::Position& position
+)
+{
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+    {
+        const auto* pattern = (*it)->as<Luau::AstExprMatchPattern>();
+        if (!pattern)
+            continue;
+
+        for (const Luau::AstPatternAlternative& alternative : pattern->alternatives)
+        {
+            if (alternative.kind != Luau::AstPatternAlternative::Class || !alternative.fields || !alternative.location.containsClosed(position))
+                continue;
+
+            const Luau::TypeId* classValue = module->astTypes.find(alternative.operand);
+            std::optional<Luau::TypeId> object = classValue ? Luau::objectTypeOfClassValue(builtinTypes, *classValue) : std::nullopt;
+            if (!object)
+                continue;
+
+            if (std::optional<Luau::Name> name = patternFieldNameAt(*alternative.fields, *object, position))
+                return findLocationsForProp(*object, *name);
+        }
+    }
+    return {};
 }
 
 lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParams& params, const LSPCancellationToken& cancellationToken)
@@ -167,6 +226,35 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
         return result;
     }
 
+    auto addLocations = [&](const std::vector<LocationInformation>& locations)
+    {
+        for (const auto& [definitionModuleName, location, _] : locations)
+        {
+            if (!location)
+                continue;
+
+            if (!definitionModuleName)
+            {
+                result.emplace_back(lsp::Location{
+                    params.textDocument.uri, lsp::Range{textDocument->convertPosition(location->begin), textDocument->convertPosition(location->end)}});
+                continue;
+            }
+
+            auto uri = platform->resolveToRealPath(*definitionModuleName);
+            if (!uri)
+                continue;
+            if (auto document = fileResolver.getOrCreateTextDocumentFromModuleName(*definitionModuleName))
+                result.emplace_back(lsp::Location{*uri, lsp::Range{document->convertPosition(location->begin), document->convertPosition(location->end)}});
+        }
+    };
+
+    std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position);
+    if (auto fieldLocations = findLocationsForPatternField(module, frontend.builtinTypes, ancestry, position); !fieldLocations.empty())
+    {
+        addLocations(fieldLocations);
+        return result;
+    }
+
     auto binding = Luau::findBindingAtPosition(*module, *sourceModule, position);
     if (binding)
     {
@@ -200,28 +288,7 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
     if (auto nodeExpr = node->asExpr())
     {
         const Luau::AstExpr* expr = destructuredFieldRead(*sourceModule, nodeExpr, position);
-        for (const auto& [definitionModuleName, location, _] : findLocationsForExpr(module, expr, position))
-        {
-            if (location)
-            {
-                if (definitionModuleName)
-                {
-                    if (auto uri = platform->resolveToRealPath(*definitionModuleName))
-                    {
-                        if (auto document = fileResolver.getOrCreateTextDocumentFromModuleName(*definitionModuleName))
-                        {
-                            result.emplace_back(lsp::Location{
-                                *uri, lsp::Range{document->convertPosition(location->begin), document->convertPosition(location->end)}});
-                        }
-                    }
-                }
-                else
-                {
-                    result.emplace_back(lsp::Location{params.textDocument.uri,
-                        lsp::Range{textDocument->convertPosition(location->begin), textDocument->convertPosition(location->end)}});
-                }
-            }
-        }
+        addLocations(findLocationsForExpr(module, expr, position));
     }
     else if (auto reference = node->as<Luau::AstTypeReference>())
     {
@@ -269,7 +336,6 @@ lsp::DefinitionResult WorkspaceFolder::gotoDefinition(const lsp::DefinitionParam
     // Fallback: if no results found so far, we can try checking if this is within a require statement
     if (result.empty())
     {
-        auto ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position);
         if (ancestry.size() >= 2)
         {
             if (auto call = ancestry[ancestry.size() - 2]->as<Luau::AstExprCall>(); call && types::matchRequire(*call))

@@ -989,6 +989,18 @@ std::optional<LintFix> fixLuaGuard(const Luau::LintWarning& lint, const FixConte
     return singleEdit("Replace with '" + replacement + "'", context.replace(guard->location, replacement));
 }
 
+// IsComparison: `x is "meow"` as `x == "meow"`, and `x is not LIMIT` as `x ~= LIMIT`
+std::optional<LintFix> fixIsComparison(const Luau::LintWarning& lint, const FixContext& context)
+{
+    Luau::AstExprMatchPattern* pattern = context.find<Luau::AstExprMatchPattern>(lint.location);
+    if (!pattern || !pattern->value || pattern->alternatives.size != 1 || !pattern->alternatives.data[0].operand)
+        return std::nullopt;
+
+    std::string op = pattern->negated ? "~=" : "==";
+    std::string comparison = context.text(pattern->value) + " " + op + " " + context.text(pattern->alternatives.data[0].operand);
+    return singleEdit("Use '" + op + "'", context.replace(lint.location, comparison));
+}
+
 // ConfusingGuard's condition for an `if`: `x` for `x and <leave>`, and `x` negated for `x or <leave>`. Equality flips, a `not`
 // comes off, and anything that binds looser than `not` gets parentheses.
 std::string confusingGuardIfCondition(Luau::AstExprBinary* guard, const FixContext& context)
@@ -1621,6 +1633,8 @@ std::vector<LintFix> computeFixes(const Luau::LintWarning& lint, const FixContex
         return one(fixUnflippedGuard(lint, context));
     case Luau::LintWarning::Code_ConfusingGuard:
         return one(fixConfusingGuard(lint, context));
+    case Luau::LintWarning::Code_IsComparison:
+        return one(fixIsComparison(lint, context));
     case Luau::LintWarning::Code_LuaStringHelper:
         return one(fixLuaStringHelper(lint, context));
     case Luau::LintWarning::Code_ExtraArguments:
@@ -1685,6 +1699,7 @@ std::optional<std::string> fixAllTitle(Luau::LintWarning::Code code)
         Luau::LintWarning::Code_AmbiguousContinuation,
         Luau::LintWarning::Code_UnflippedGuard,
         Luau::LintWarning::Code_ConfusingGuard,
+        Luau::LintWarning::Code_IsComparison,
         Luau::LintWarning::Code_LoopConcat,
         Luau::LintWarning::Code_ExtraArguments,
     };

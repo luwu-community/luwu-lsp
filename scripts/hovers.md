@@ -102,6 +102,42 @@ Separates a `match` arm's pattern and conditions from its value or block.
 Starts a `match`'s last arm, which runs when no arm before it matched.
 <!-- /keyword -->
 
+<!-- keyword: is_pattern -->
+`value is <pattern>` is true when the value matches the pattern, and narrows it in the branch the pattern guards.
+A pattern can be a literal, `nil`, `none`, a type like `string`, a class, or a bundle, and `|` joins alternatives:
+
+```luwu
+if animal is Cat(name is string, age) then
+    print(`{name} is {age}`)
+end
+if code is 200 | 204 then
+    print("ok")
+end
+```
+
+A class pattern's fields can nest patterns and bind names, which are in scope wherever the pattern holds.
+<!-- /keyword -->
+
+<!-- keyword: is_not_pattern -->
+`value is not <pattern>` is true when the value matches none of the pattern's alternatives. Unlike `is`, `is not` can't
+bind names, because a value that matched nothing has no fields to read them from:
+
+```luwu
+return nil if path is not string | FilePath
+```
+<!-- /keyword -->
+
+<!-- keyword: implements_pattern -->
+`value implements <traits>` is true when the value is an object whose class implements one of the traits, and narrows
+it in the branch the pattern guards:
+
+```luwu
+if file implements Readable | Seekable then
+    file:read()
+end
+```
+<!-- /keyword -->
+
 <!-- keyword: if -->
 Branch on a conditional expression.
 Most values are considered `truthy`, including all strings, numbers, complex types, etc.

@@ -48,7 +48,7 @@ static uint32_t flagsForType(BytecodeOutputType type)
     {
     case BytecodeOutputType::Textual:
         return Luau::BytecodeBuilder::Dump_Code | Luau::BytecodeBuilder::Dump_Source | Luau::BytecodeBuilder::Dump_Locals |
-               Luau::BytecodeBuilder::Dump_Remarks | Luau::BytecodeBuilder::Dump_Types;
+               Luau::BytecodeBuilder::Dump_Remarks | Luau::BytecodeBuilder::Dump_Types | Luau::BytecodeBuilder::Dump_Pretty;
     case BytecodeOutputType::CompilerRemarks:
         return Luau::BytecodeBuilder::Dump_Source | Luau::BytecodeBuilder::Dump_Remarks;
     case BytecodeOutputType::CodeGen:
@@ -77,6 +77,18 @@ static Luau::CodeGen::AssemblyOptions::Target getCodeGenTarget(const lsp::CodeGe
     return Luau::CodeGen::AssemblyOptions::Target::Host;
 }
 
+static Luau::CompileOptions compileOptionsFor(const ClientConfiguration& config, int optimizationLevel)
+{
+    Luau::CompileOptions options = {};
+    options.optimizationLevel = optimizationLevel;
+    options.debugLevel = config.bytecode.debugLevel;
+    options.typeInfoLevel = config.bytecode.typeInfoLevel;
+    options.vectorLib = config.bytecode.vectorLib.empty() ? nullptr : config.bytecode.vectorLib.c_str();
+    options.vectorCtor = config.bytecode.vectorCtor.empty() ? nullptr : config.bytecode.vectorCtor.c_str();
+    options.vectorType = config.bytecode.vectorType.empty() ? nullptr : config.bytecode.vectorType.c_str();
+    return options;
+}
+
 static std::string computeBytecodeOutput(const Luau::ModuleName& moduleName, const std::string& source, const ClientConfiguration& config,
     int optimizationLevel, BytecodeOutputType type, lsp::CodeGenTarget codeGenTarget = lsp::CodeGenTarget::Host)
 {
@@ -93,15 +105,7 @@ static std::string computeBytecodeOutput(const Luau::ModuleName& moduleName, con
         if (!result.errors.empty())
             throw Luau::ParseErrors(result.errors);
 
-        Luau::CompileOptions options = {};
-        options.optimizationLevel = optimizationLevel;
-        options.debugLevel = config.bytecode.debugLevel;
-        options.typeInfoLevel = config.bytecode.typeInfoLevel;
-        options.vectorLib = config.bytecode.vectorLib.empty() ? nullptr : config.bytecode.vectorLib.c_str();
-        options.vectorCtor = config.bytecode.vectorCtor.empty() ? nullptr : config.bytecode.vectorCtor.c_str();
-        options.vectorType = config.bytecode.vectorType.empty() ? nullptr : config.bytecode.vectorType.c_str();
-
-        Luau::compileOrThrow(bcb, result, names, options);
+        Luau::compileOrThrow(bcb, result, names, compileOptionsFor(config, optimizationLevel));
 
         if (type == BytecodeOutputType::CodeGen)
         {
@@ -212,4 +216,34 @@ lsp::CodegenResult WorkspaceFolder::codeGen(const lsp::CodegenParams& params)
     auto config = client->getConfiguration(rootUri);
     return computeBytecodeOutput(
         moduleName, textDocument->getText(), config, params.optimizationLevel, BytecodeOutputType::CodeGen, params.codeGenTarget);
+}
+
+const std::optional<CompileFailure>& WorkspaceFolder::compileErrorOf(const Luau::ModuleName& moduleName, const TextDocument& textDocument)
+{
+    auto& [version, result] = compileErrorCache[moduleName];
+    if (version == textDocument.version() && version != 0)
+        return result;
+    version = textDocument.version();
+    result.reset();
+
+    std::string source = textDocument.getText();
+    auto config = client->getConfiguration(rootUri);
+
+    Luau::Allocator allocator;
+    Luau::AstNameTable names(allocator);
+    Luau::ParseResult parsed = Luau::Parser::parse(source.c_str(), source.size(), names, allocator);
+    if (!parsed.errors.empty())
+        return result;
+
+    try
+    {
+        Luau::BytecodeBuilder bcb;
+        Luau::compileOrThrow(bcb, parsed, names, compileOptionsFor(config, /* optimizationLevel= */ 1));
+    }
+    catch (Luau::CompileError& e)
+    {
+        result = CompileFailure{e.getLocation(), e.what()};
+    }
+
+    return result;
 }

@@ -192,7 +192,7 @@ TEST_CASE_FIXTURE(Fixture, "type_test_keyword_does_not_hover_as_the_class_librar
     CHECK_MESSAGE(result->contents.value.find("class Point") != std::string::npos, result->contents.value);
 }
 
-TEST_CASE_FIXTURE(Fixture, "type_test_operands_and_bindings_in_a_condition_hover_with_their_types")
+TEST_CASE_FIXTURE(Fixture, "pattern_values_and_bindings_in_a_condition_hover_with_their_types")
 {
     ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
@@ -209,6 +209,8 @@ TEST_CASE_FIXTURE(Fixture, "type_test_operands_and_bindings_in_a_condition_hover
                                         "end\n"
                                         "if p is Point then\n"
                                         "    print(p)\n"
+                                        "end\n"
+                                        "if p is not Point then\n"
                                         "end\n");
 
     auto hoverAt = [&](size_t line, size_t column) -> std::string
@@ -232,6 +234,17 @@ TEST_CASE_FIXTURE(Fixture, "type_test_operands_and_bindings_in_a_condition_hover
     CHECK_MESSAGE(px.find("px: number") != std::string::npos, px);
     std::string py = hoverAt(5, 20);
     CHECK_MESSAGE(py.find("py: number") != std::string::npos, py);
+
+    // The keyword shows the pattern's docs, not the `class` library
+    std::string keyword = hoverAt(2, 6);
+    CHECK_MESSAGE(keyword.find("matches the pattern") != std::string::npos, keyword);
+
+    // `is not` is one keyword with separate docs, from either word
+    for (size_t column : {6, 9})
+    {
+        std::string negated = hoverAt(11, column);
+        CHECK_MESSAGE(negated.find("matches none") != std::string::npos, column << ": " << negated);
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "read_and_write_in_table_types_hover_as_keywords")

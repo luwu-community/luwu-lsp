@@ -1387,25 +1387,6 @@ std::optional<lsp::Hover> WorkspaceFolder::hoverWithOptions(
 
     auto ancestry = Luau::findAstAncestryOfPosition(*sourceModule, position);
 
-    // Luwu match expressions: `x is Point` is parsed as `class.isinstance(x, Point)`, whose made-up callee is located
-    // on the whole test. Between the operands is the `is`, which shouldn't show the `class` library's hover. The
-    // pattern after the type (`x is Point(px)`) declares its bindings, which hover as locals.
-    for (auto ancestor : ancestry)
-    {
-        auto call = ancestor->as<Luau::AstExprCall>();
-        if (!call || !call->fromTypeTest)
-            continue;
-
-        bool inOperand = std::any_of(call->args.begin(), call->args.end(),
-            [&](Luau::AstExpr* arg)
-            {
-                return arg->location.containsClosed(position);
-            });
-        bool inPattern = call->typeTestPattern && call->typeTestPattern->location && call->typeTestPattern->location->containsClosed(position);
-        if (!inOperand && !inPattern)
-            return std::nullopt;
-    }
-
     // A method's function spans its name (it starts at `function`), so the name finds the function rather than the
     // class it belongs to; the class's members are what know a method's name, visibility and `?`
     if (node->is<Luau::AstExprFunction>() && ancestry.size() >= 2)

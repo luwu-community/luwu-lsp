@@ -6,6 +6,19 @@
 #include <variant>
 #include <exception>
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <iostream>
+#include <thread>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <cerrno>
+#include <csignal>
+#endif
 
 #include "LSP/Uri.hpp"
 #include "LSP/DocumentationParser.hpp"
@@ -24,6 +37,48 @@
 /// The notification the external diagnostics server queues for each report it accepts
 static const char* const EXTERNAL_DIAGNOSTICS_METHOD = "$/luwu/externalDiagnostics";
 
+/// How long `shutdown` waits for the request being handled to finish
+static constexpr std::chrono::seconds SHUTDOWN_TIMEOUT{5};
+
+/// Exits the server once the editor process `processId` is gone. An editor that dies without sending `exit`, or whose
+/// `shutdown` can't finish, would otherwise leave the server running with nothing to answer.
+static void exitWhenEditorExits(int processId)
+{
+    std::thread(
+        [processId]
+        {
+#ifdef _WIN32
+            HANDLE editor = OpenProcess(SYNCHRONIZE, FALSE, DWORD(processId));
+            if (!editor)
+                return;
+            WaitForSingleObject(editor, INFINITE);
+#else
+            while (kill(processId, 0) == 0 || errno != ESRCH)
+                std::this_thread::sleep_for(std::chrono::seconds(3));
+#endif
+            std::cerr << "luwu-lsp: exiting after the editor process " << processId << " exited\n";
+            std::_Exit(1);
+        })
+        .detach();
+}
+
+/// Whether a request answers a keystroke and has to feel instant: the `end` inserted after Enter, and the edits made while
+/// typing (turning a string into an interpolated one when `{` is typed)
+static bool isKeystrokeRequest(const json_rpc::JsonRpcMessage& msg)
+{
+    if (!msg.is_request() || !msg.method)
+        return false;
+
+    if (*msg.method == "textDocument/onTypeFormatting")
+        return true;
+
+    if (*msg.method != "textDocument/completion" || !msg.params || !msg.params->is_object())
+        return false;
+
+    auto context = msg.params->find("context");
+    return context != msg.params->end() && context->is_object() && context->value("triggerCharacter", "") == "\n";
+}
+
 #define ASSERT_PARAMS(params, method) \
     if (!params) \
         throw json_rpc::JsonRpcException(lsp::ErrorCode::InvalidParams, "params not provided for " method);
@@ -38,6 +93,12 @@ LanguageServer::LanguageServer(LSPClient* aClient, std::optional<Luau::Config> a
         {
             while (auto message = popMessage())
                 handleMessage(*message);
+
+            {
+                std::unique_lock guard(messagesMutex);
+                messageProcessorStopped = true;
+            }
+            messageProcessorStoppedCv.notify_all();
         });
 }
 
@@ -629,14 +690,14 @@ std::optional<json_rpc::JsonRpcMessage> LanguageServer::popMessage()
     messagesCv.wait(guard,
         [this]
         {
-            return !messages.empty() || shutdownRequested;
+            return !messages.empty() || shutdownRequested || inputClosed;
         });
 
-    if (shutdownRequested)
+    if (shutdownRequested || inputClosed)
         return std::nullopt;
 
-    auto message = messages.front();
-    messages.pop();
+    auto message = std::move(messages.front());
+    messages.pop_front();
     return message;
 }
 
@@ -684,7 +745,18 @@ void LanguageServer::processInputLoop()
                             client->sendTrace("Processed cancellation for " + msg.params->dump());
                             continue;
                         }
-                        messages.push(std::move(msg));
+                        if (isKeystrokeRequest(msg))
+                        {
+                            // Ahead of every waiting request, but after the edits it reads and earlier keystrokes
+                            auto waitingRequests = std::stable_partition(messages.begin(), messages.end(),
+                                [](const json_rpc::JsonRpcMessage& queued)
+                                {
+                                    return !queued.is_request() || isKeystrokeRequest(queued);
+                                });
+                            messages.insert(waitingRequests, std::move(msg));
+                        }
+                        else
+                            messages.push_back(std::move(msg));
                     }
 
                     messagesCv.notify_one();
@@ -695,6 +767,16 @@ void LanguageServer::processInputLoop()
                 client->sendError(id, JsonRpcException(lsp::ErrorCode::ParseError, e.what()));
             }
         }
+    }
+
+    // An editor that goes away without a shutdown request still stops the server
+    if (!requestedShutdown())
+    {
+        {
+            std::unique_lock lock(messagesMutex);
+            inputClosed = true;
+        }
+        stopMessageProcessor();
     }
 }
 
@@ -755,6 +837,9 @@ lsp::InitializeResult LanguageServer::onInitialize(const lsp::InitializeParams& 
     {
         workspaceFolders.push_back(std::make_shared<WorkspaceFolder>(client, "$ROOT", params.rootUri.value(), defaultConfig));
     }
+
+    if (params.processId)
+        exitWhenEditorExits(*params.processId);
 
     isInitialized = true;
     lsp::InitializeResult result;
@@ -989,8 +1074,30 @@ void LanguageServer::shutdown()
         shutdownRequested = true;
     }
 
+    stopMessageProcessor();
+}
+
+void LanguageServer::stopMessageProcessor()
+{
     messagesCv.notify_all();
-    messageProcessorThread.join();
+
+    // Waiting on a handler stuck in a loop would keep the server running after the editor is gone
+    {
+        std::unique_lock lock(messagesMutex);
+        bool stopped = messageProcessorStoppedCv.wait_for(lock, SHUTDOWN_TIMEOUT,
+            [this]
+            {
+                return messageProcessorStopped;
+            });
+        if (!stopped)
+        {
+            std::cerr << "luwu-lsp: exiting with a request still running " << SHUTDOWN_TIMEOUT.count() << "s after shutdown\n";
+            std::_Exit(1);
+        }
+    }
+
+    if (messageProcessorThread.joinable())
+        messageProcessorThread.join();
 }
 
 void LanguageServer::postNotification(const std::string& method, const json& params)
@@ -1003,7 +1110,7 @@ void LanguageServer::postNotification(const std::string& method, const json& par
         json_rpc::JsonRpcMessage message;
         message.method = method;
         message.params = params;
-        messages.push(std::move(message));
+        messages.push_back(std::move(message));
     }
 
     messagesCv.notify_one();

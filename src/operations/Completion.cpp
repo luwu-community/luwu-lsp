@@ -515,6 +515,39 @@ static bool canUseSnippets(const lsp::ClientCapabilities& capabilities)
            capabilities.textDocument->completion->completionItem->snippetSupport;
 }
 
+// Escapes `text` for a snippet, where `$`, `}` and `\` are syntax
+static std::string escapeSnippet(std::string_view text)
+{
+    std::string result;
+    for (char c : text)
+    {
+        if (c == '$' || c == '}' || c == '\\')
+            result += '\\';
+        result += c;
+    }
+    return result;
+}
+
+// Luwu Attributes: an attribute that needs arguments inserts them (`inline("reason")`, `[lint()]`). As a snippet, the
+// first string's text is a placeholder to type over, or the cursor goes inside empty parentheses.
+static std::string attributeSnippet(const std::string& insertText)
+{
+    size_t open = insertText.find('"');
+    size_t close = open == std::string::npos ? std::string::npos : insertText.find('"', open + 1);
+    if (close != std::string::npos)
+    {
+        std::string_view text = insertText;
+        return escapeSnippet(text.substr(0, open + 1)) + "${1:" + escapeSnippet(text.substr(open + 1, close - open - 1)) + "}" +
+               escapeSnippet(text.substr(close));
+    }
+
+    size_t parens = insertText.find("()");
+    if (parens != std::string::npos)
+        return escapeSnippet(std::string_view(insertText).substr(0, parens + 1)) + "$1" + escapeSnippet(std::string_view(insertText).substr(parens + 1));
+
+    return escapeSnippet(insertText);
+}
+
 static bool deprecated(const Luau::AutocompleteEntry& entry, std::optional<lsp::MarkupContent> documentation)
 {
     if (entry.deprecated)
@@ -1197,6 +1230,18 @@ std::vector<lsp::CompletionItem> WorkspaceFolder::completion(const lsp::Completi
         // whole declaration (`public name: string`, or a `function ... end`)
         if (entry.kind == Luau::AutocompleteEntryKind::Property && entry.insertText && result.context == Luau::AutocompleteContext::Keyword)
             item.insertText = entry.insertText;
+
+        // Luwu Attributes: only an attribute is a keyword with text to insert, its required arguments
+        if (entry.kind == Luau::AutocompleteEntryKind::Keyword && entry.insertText)
+        {
+            if (canUseSnippets(client->capabilities))
+            {
+                item.insertText = attributeSnippet(*entry.insertText);
+                item.insertTextFormat = lsp::InsertTextFormat::Snippet;
+            }
+            else
+                item.insertText = entry.insertText;
+        }
 
         if (entry.kind == Luau::AutocompleteEntryKind::RequirePath)
         {

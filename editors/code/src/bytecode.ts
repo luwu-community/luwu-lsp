@@ -129,11 +129,11 @@ export const getCodeGenTarget = async (): Promise<CodeGenTarget> => {
 let optimizationLevel = OptimizationLevel.O2;
 let codeGenTarget: CodeGenTarget = "host";
 
-// Based off https://github.com/rust-lang/rust-analyzer/blob/a24ede2066778f66b5b5e5aa7aa57a6d1be2063a/editors/code/src/commands.ts
-// Licensed under MIT
-const sleep = (ms: number) => {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-};
+/**
+ * How long typing has to stop before an open view recompiles. A compile holds
+ * up every request behind it in the server's queue.
+ */
+const EDIT_SETTLE_MS = 500;
 
 const isLuauDocument = (document: vscode.TextDocument) => {
   return utils.isSourceDocument(document) && document.uri.scheme === "file";
@@ -153,7 +153,9 @@ const getBytecodeInfo = (
   client: LanguageClient,
   command: string,
   scheme: string,
-  fileName: string,
+  documentName: string,
+  /** The language the view is highlighted as */
+  language: string,
   requestType: RequestType<
     CompilerRemarksParams | BytecodeParams | CodeGenParams,
     string,
@@ -161,8 +163,9 @@ const getBytecodeInfo = (
   >,
 ) => {
   const tdcp = new (class implements vscode.TextDocumentContentProvider {
-    readonly uri = vscode.Uri.parse(`${scheme}://bytecode/${fileName}.luau`);
+    readonly uri = vscode.Uri.parse(`${scheme}://bytecode/${documentName}`);
     readonly eventEmitter = new vscode.EventEmitter<vscode.Uri>();
+    private settleTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor() {
       vscode.workspace.onDidChangeTextDocument(
@@ -175,18 +178,46 @@ const getBytecodeInfo = (
         this,
         context.subscriptions,
       );
+      context.subscriptions.push({
+        dispose: () => clearTimeout(this.settleTimer),
+      });
+    }
+
+    /** Whether this view is showing in an editor */
+    private isVisible(): boolean {
+      return vscode.window.visibleTextEditors.some(
+        (editor) => editor.document.uri.toString() === this.uri.toString(),
+      );
     }
 
     private onDidChangeTextDocument(event: vscode.TextDocumentChangeEvent) {
-      if (isLuauDocument(event.document)) {
-        // We need to order this after language server updates, but there's no API for that.
-        // Hence, good old sleep().
-        void sleep(10).then(() => this.eventEmitter.fire(this.uri));
+      if (
+        event.contentChanges.length === 0 ||
+        !isLuauDocument(event.document) ||
+        !this.isVisible()
+      ) {
+        return;
       }
+
+      clearTimeout(this.settleTimer);
+      this.settleTimer = setTimeout(() => {
+        this.settleTimer = undefined;
+        this.eventEmitter.fire(this.uri);
+      }, EDIT_SETTLE_MS);
     }
     private onDidChangeActiveTextEditor(editor: vscode.TextEditor | undefined) {
-      if (editor && isLuauEditor(editor)) {
+      if (editor && isLuauEditor(editor) && this.isVisible()) {
         this.eventEmitter.fire(this.uri);
+      }
+    }
+
+    /** Gives the view its language */
+    async applyLanguage(): Promise<void> {
+      const view = vscode.workspace.textDocuments.find(
+        (document) => document.uri.toString() === this.uri.toString(),
+      );
+      if (view && view.languageId !== language) {
+        await vscode.languages.setTextDocumentLanguage(view, language);
       }
     }
 
@@ -225,6 +256,7 @@ const getBytecodeInfo = (
           }
 
           const doc = await vscode.workspace.openTextDocument(tdcp.uri);
+          await tdcp.applyLanguage();
           tdcp.eventEmitter.fire(tdcp.uri);
           await vscode.window.showTextDocument(doc, {
             viewColumn: vscode.ViewColumn.Two,
@@ -246,6 +278,7 @@ export const registerComputeBytecode = (
     "luwu.computeBytecode",
     BYTECODE_SCHEME,
     "bytecode",
+    "luwu-bytecode",
     BytecodeRequest,
   );
 };
@@ -259,7 +292,10 @@ export const registerComputeCompilerRemarks = (
     client,
     "luwu.computeCompilerRemarks",
     COMPILER_REMARKS_SCHEME,
-    "compiler-remarks",
+    // the source with a comment for each remark, highlighted as Luwu (a
+    // superset of Luau) with the remarks marked
+    "compiler-remarks.luwu",
+    "luwu-remarks",
     ComputeCompilerRemarksRequest,
   );
 };
@@ -274,6 +310,7 @@ export const registerComputeCodeGen = (
     "luwu.computeCodeGen",
     CODEGEN_SCHEME,
     "codeGen",
+    "plaintext",
     ComputeCodeGenRequest,
   );
 };

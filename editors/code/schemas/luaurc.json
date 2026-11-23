@@ -154,7 +154,8 @@
                 "LuaStringHelper": { "type": "boolean" },
                 "StringOperations": { "type": "boolean" },
                 "UncaughtErrors": { "type": "boolean" },
-                "ConfusingGuard": { "type": "boolean" }
+                "ConfusingGuard": { "type": "boolean" },
+                "IsComparison": { "type": "boolean" }
             }
         }
     }

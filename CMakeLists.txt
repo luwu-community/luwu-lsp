@@ -191,6 +191,7 @@ target_sources(Luwu.LanguageServer.Test PRIVATE
         tests/RequireGraph.test.cpp
         tests/OnTypeFormatting.test.cpp
         tests/MatchingKeyword.test.cpp
+        tests/DocumentSymbol.test.cpp
         tests/FileOperations.test.cpp
         tests/AnalyzeCli.test.cpp
         tests/CodeAction.test.cpp

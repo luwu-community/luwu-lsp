@@ -35,6 +35,13 @@ struct Reference
     }
 };
 
+// Luwu: an error compiling a document, where it is and what it says
+struct CompileFailure
+{
+    Luau::Location location;
+    std::string message;
+};
+
 class WorkspaceFolder
 {
 public:
@@ -180,6 +187,8 @@ private:
 
     // Luwu: each document's compiler remarks, with the version they were compiled from (compilerRemarksByLine)
     std::unordered_map<Luau::ModuleName, std::pair<size_t, std::unordered_map<size_t, std::vector<std::string>>>> compilerRemarksCache;
+    // Luwu: each document's compile error, with the version it was compiled from (compileErrorOf)
+    std::unordered_map<Luau::ModuleName, std::pair<size_t, std::optional<CompileFailure>>> compileErrorCache;
 
 public:
     std::vector<std::string> getComments(const Luau::ModuleName& moduleName, const Luau::Location& node);
@@ -266,6 +275,10 @@ public:
     // document is compiled, once per version of it.
     const std::unordered_map<size_t, std::vector<std::string>>& compilerRemarksByLine(
         const Luau::ModuleName& moduleName, const TextDocument& textDocument);
+    // Luwu: the error compiling an open document raises, compiled like compilerRemarksByLine compiles it, for errors only
+    // the compiler finds (an `@[inline]` call it can't inline). Nothing when it compiles, or when it doesn't parse: its
+    // syntax errors are reported already. Compiled once per version of the document.
+    const std::optional<CompileFailure>& compileErrorOf(const Luau::ModuleName& moduleName, const TextDocument& textDocument);
     lsp::CodegenResult codeGen(const lsp::CodegenParams& params);
     lsp::RequireGraphResult requireGraph(const lsp::RequireGraphParams& params);
 

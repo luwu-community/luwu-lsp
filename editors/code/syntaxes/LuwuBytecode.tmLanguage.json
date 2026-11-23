@@ -1,0 +1,187 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Luwu Bytecode",
+  "scopeName": "source.luwu-bytecode",
+  "comment": "The text dump of Luwu bytecode that the compute bytecode view shows (BytecodeBuilder::dumpFunction and dumpEverything in luwu's Bytecode/src/BytecodeBuilder.cpp)",
+  "patterns": [
+    { "include": "#function-header" },
+    { "include": "#function-type" },
+    { "include": "#source-line" },
+    { "include": "#remark" },
+    { "include": "#slot-type" },
+    { "include": "#local" },
+    { "include": "#instruction" },
+    { "include": "#load-luwu" }
+  ],
+  "repository": {
+    "function-header": {
+      "match": "^(Function)\\s+(\\d+)\\s+(\\()([^)]*)(\\))(:)",
+      "captures": {
+        "1": { "name": "keyword.other.function.luwu-bytecode" },
+        "2": { "name": "constant.numeric.integer.luwu-bytecode" },
+        "3": { "name": "punctuation.definition.parameters.begin.luwu-bytecode" },
+        "4": { "name": "entity.name.function.luwu-bytecode" },
+        "5": { "name": "punctuation.definition.parameters.end.luwu-bytecode" },
+        "6": { "name": "punctuation.separator.luwu-bytecode" }
+      }
+    },
+    "function-type": {
+      "match": "^\\s*(\\d+)(:)\\s+(function)(\\(.*\\))$",
+      "captures": {
+        "1": { "name": "constant.numeric.integer.luwu-bytecode" },
+        "2": { "name": "punctuation.separator.luwu-bytecode" },
+        "3": { "name": "keyword.other.function.luwu-bytecode" },
+        "4": { "name": "support.type.luwu-bytecode" }
+      }
+    },
+    "source-line": {
+      "comment": "A line of the source above the instructions it compiled to, printed as `%5d: %s`. The code is highlighted in a capture so that a bracket or string it leaves open ends with the line.",
+      "match": "^\\s*(\\d+)(:) (.*)$",
+      "captures": {
+        "1": { "name": "constant.numeric.line-number.luwu-bytecode comment.line.number.luwu-bytecode" },
+        "2": { "name": "punctuation.separator.luwu-bytecode comment.line.number.luwu-bytecode" },
+        "3": {
+          "name": "meta.embedded.line.luwu",
+          "patterns": [{ "include": "#luwu" }]
+        }
+      }
+    },
+    "luwu": {
+      "patterns": [{ "include": "source.luwu" }]
+    },
+    "load-luwu": {
+      "comment": "Never matches. vscode-textmate only loads the grammars that ordinary patterns include, not those included from captures, so this makes it load source.luwu for #source-line.",
+      "begin": "(?!)",
+      "end": "(?!)",
+      "patterns": [{ "include": "#luwu" }]
+    },
+    "remark": {
+      "match": "^\\s*(REMARK)\\s+(.*)$",
+      "captures": {
+        "1": { "name": "keyword.other.remark.luwu-bytecode" },
+        "2": {
+          "name": "comment.line.remark.luwu-bytecode",
+          "patterns": [{ "include": "#remark-text" }]
+        }
+      }
+    },
+    "remark-text": {
+      "comment": "A remark's text. Whether a call inlined or a loop unrolled is marked as an inserted (green) or deleted (red) line in most themes, and so is the function the remark names.",
+      "patterns": [
+        {
+          "match": "(?<=REMARK |-- remark: )((?:primary constructor )?inlining (?:succeeded|forced by @inline|past the cost model)|loop unroll succeeded)(?:(:) ([\\w.:]+(?=\\s|$))?)?",
+          "captures": {
+            "1": { "name": "markup.inserted.remark.luwu-bytecode" },
+            "2": { "name": "punctuation.separator.luwu-bytecode" },
+            "3": { "name": "markup.inserted.remark.luwu-bytecode entity.name.function.luwu-bytecode" }
+          }
+        },
+        {
+          "match": "(?<=REMARK |-- remark: )((?:primary constructor )?inlining failed|loop unroll failed)(?:(:) ([\\w.:]+(?= is | would | may not | is marked |'s ))?)?",
+          "captures": {
+            "1": { "name": "markup.deleted.remark.luwu-bytecode" },
+            "2": { "name": "punctuation.separator.luwu-bytecode" },
+            "3": { "name": "markup.deleted.remark.luwu-bytecode entity.name.function.luwu-bytecode" }
+          }
+        }
+      ]
+    },
+    "slot-type": {
+      "comment": "The type of a register or upvalue: `R0: string [argument]`, `R5: any from 28 to 37`, `U0: class`",
+      "match": "^\\s*(?:(R\\d+)|(U\\d+))(:)\\s+(\\S+)(.*)$",
+      "captures": {
+        "1": { "name": "variable.parameter.register.luwu-bytecode" },
+        "2": { "name": "variable.other.upvalue.luwu-bytecode" },
+        "3": { "name": "punctuation.separator.luwu-bytecode" },
+        "4": { "name": "support.type.luwu-bytecode" },
+        "5": { "name": "comment.line.luwu-bytecode" }
+      }
+    },
+    "local": {
+      "match": "^\\s*(local)\\s+(\\d+)(:)(.*)$",
+      "captures": {
+        "1": { "name": "keyword.other.local.luwu-bytecode" },
+        "2": { "name": "constant.numeric.integer.luwu-bytecode" },
+        "3": { "name": "punctuation.separator.luwu-bytecode" },
+        "4": { "name": "comment.line.luwu-bytecode" }
+      }
+    },
+    "instruction": {
+      "begin": "^\\s*(?:(L\\d+)(:)\\s+)?(?=[A-Z])",
+      "beginCaptures": {
+        "1": { "name": "entity.name.tag.label.luwu-bytecode" },
+        "2": { "name": "punctuation.separator.luwu-bytecode" }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "match": "\\G(?:JUMP[A-Z0-9]*|RETURN|CALL[A-Z0-9]*|FOR[A-Z0-9]+|BREAK)\\b",
+          "name": "keyword.control.opcode.luwu-bytecode"
+        },
+        {
+          "match": "\\G[A-Z][A-Z0-9_]*\\b",
+          "name": "keyword.other.opcode.luwu-bytecode"
+        },
+        { "include": "#annotation" },
+        { "include": "#operand" }
+      ]
+    },
+    "annotation": {
+      "comment": "What a constant or import operand holds, in brackets at the end of the line. Strings aren't escaped, so a string runs to the last quote.",
+      "begin": "\\[(?=.*\\]\\s*$)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.annotation.begin.luwu-bytecode" } },
+      "end": "\\](?=\\s*$)",
+      "endCaptures": { "0": { "name": "punctuation.definition.annotation.end.luwu-bytecode" } },
+      "patterns": [
+        {
+          "match": "\\G'.*'(?:\\.\\.\\.)?(?=\\]\\s*$)",
+          "name": "string.quoted.single.luwu-bytecode"
+        },
+        {
+          "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?\\b",
+          "name": "constant.numeric.luwu-bytecode"
+        },
+        {
+          "match": "\\b(?:nil|true|false)\\b",
+          "name": "constant.language.luwu-bytecode"
+        },
+        {
+          "match": "\\b(?:class|function)\\b(?=\\s)",
+          "name": "keyword.other.luwu-bytecode"
+        },
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "entity.name.luwu-bytecode"
+        }
+      ]
+    },
+    "operand": {
+      "patterns": [
+        {
+          "match": "\\bR\\d+\\b",
+          "name": "variable.parameter.register.luwu-bytecode"
+        },
+        {
+          "match": "\\bU\\d+\\b",
+          "name": "variable.other.upvalue.luwu-bytecode"
+        },
+        {
+          "match": "\\bK\\d+\\b",
+          "name": "variable.other.constant.luwu-bytecode"
+        },
+        {
+          "match": "\\bL\\d+\\b",
+          "name": "entity.name.tag.label.luwu-bytecode"
+        },
+        {
+          "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?\\b",
+          "name": "constant.numeric.luwu-bytecode"
+        },
+        {
+          "match": "\\b[A-Z][A-Z_]+\\b",
+          "name": "storage.modifier.luwu-bytecode"
+        }
+      ]
+    }
+  }
+}

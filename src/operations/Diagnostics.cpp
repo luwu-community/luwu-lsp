@@ -200,6 +200,10 @@ lsp::DocumentDiagnosticReport WorkspaceFolder::documentDiagnostics(
     for (auto& error : cr.lintResult.warnings)
         report.items.emplace_back(createLintDiagnostic(error, *textDocument));
 
+    // Luwu: an error only the compiler finds, such as an `@[inline]` call it can't inline
+    if (const std::optional<CompileFailure>& compileError = compileErrorOf(moduleName, **textDocument))
+        report.items.emplace_back(createCompileErrorDiagnostic(compileError->location, compileError->message, *textDocument));
+
     reportLuwuOnlyDirectives(*sourceModule, *textDocument, report.items);
     appendExternalDiagnostics(params.textDocument.uri, *textDocument, report.items);
 

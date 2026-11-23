@@ -225,6 +225,17 @@ std::optional<KeywordHoverMatch> findKeywordDocKeyAtPosition(const std::vector<L
         return std::nullopt;
     };
 
+    // Luwu Pattern Matching: a pattern's `is` or `implements`
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+    {
+        auto pattern = (*it)->as<Luau::AstExprMatchPattern>();
+        if (!pattern || !contains(pattern->keywordLocation))
+            continue;
+        if (pattern->implements)
+            return match("implements_pattern", pattern->keywordLocation);
+        return match(pattern->negated ? "is_not_pattern" : "is_pattern", pattern->keywordLocation);
+    }
+
     if (auto stat = node->as<Luau::AstStatIf>(); stat && whenIn(stat->clauses))
         return match("when", *whenIn(stat->clauses));
     if (auto expr = node->as<Luau::AstExprIfElse>(); expr && whenIn(expr->clauses))

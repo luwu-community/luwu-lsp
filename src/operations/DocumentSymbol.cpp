@@ -4,6 +4,14 @@
 #include "Luau/PrettyPrinter.h"
 #include "Protocol/LanguageFeatures.hpp"
 
+// Luwu Pattern Matching (rfcs/control-flow/pattern-matching.md): a `match` spanning at least this many lines is listed
+// as a symbol. Editors that pin the enclosing symbols to the top of the view (VS Code's sticky scroll) then keep its
+// header in view, the way they keep a long function's.
+static constexpr unsigned int kMatchSymbolMinLines = 20;
+
+// The longest subject text a `match` symbol's name shows before it's cut off with "..."
+static constexpr size_t kMatchSubjectMaxLength = 60;
+
 struct DocumentSymbolsVisitor : public Luau::AstVisitor
 {
     const TextDocument* textDocument;
@@ -47,6 +55,80 @@ struct DocumentSymbolsVisitor : public Luau::AstVisitor
             createLocalSymbol(local->vars.data[i], local->location);
             // TODO: if the value assigned is a table, should we include its properties?
         }
+
+        // A long `match` expression assigned to the local (`const label = match ...`) is listed too
+        for (Luau::AstExpr* value : local->values)
+        {
+            if (auto* match = Luau::withoutGroups(value)->as<Luau::AstExprMatch>())
+                match->visit(this);
+        }
+        return false;
+    }
+
+    // `match` followed by the subject's name in `match const name = value`, or else by the subject as written
+    std::string matchSymbolName(const Luau::AstMatchSubject& subject)
+    {
+        bool named = subject.declaration && subject.declaration->keywordLocation;
+        if (named)
+            return std::string("match ") + subject.local->name.value;
+
+        std::string text = textDocument->getText(textDocument->convertLocation(subject.value->location));
+        std::string collapsed;
+        for (char c : text)
+        {
+            bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+            if (!space)
+                collapsed += c;
+            else if (!collapsed.empty() && collapsed.back() != ' ')
+                collapsed += ' ';
+        }
+        if (collapsed.size() > kMatchSubjectMaxLength)
+            collapsed = collapsed.substr(0, kMatchSubjectMaxLength) + "...";
+        return "match " + collapsed;
+    }
+
+    // Lists a long `match` as a symbol holding the symbols in its arms. A shorter one only has its arms visited, so
+    // what's in them is still listed under the enclosing symbol.
+    void visitMatch(const Luau::Location& location, const Luau::AstMatchSubject& subject, const Luau::AstArray<Luau::AstMatchArm>& arms)
+    {
+        const auto visitArms = [&]()
+        {
+            for (const Luau::AstMatchArm& arm : arms)
+            {
+                if (arm.body)
+                    arm.body->visit(this);
+                if (arm.value)
+                    arm.value->visit(this);
+            }
+        };
+
+        bool isLong = location.end.line - location.begin.line + 1 >= kMatchSymbolMinLines;
+        if (!isLong)
+        {
+            visitArms();
+            return;
+        }
+
+        lsp::DocumentSymbol symbol =
+            makeSymbol(matchSymbolName(subject), lsp::SymbolKind::Operator, location, Luau::Location(location.begin, subject.value->location.end));
+
+        auto oldParent = parent;
+        parent = &symbol;
+        visitArms();
+        parent = oldParent;
+
+        addSymbol(symbol);
+    }
+
+    bool visit(Luau::AstStatMatch* match) override
+    {
+        visitMatch(match->location, match->subject, match->arms);
+        return false;
+    }
+
+    bool visit(Luau::AstExprMatch* match) override
+    {
+        visitMatch(match->location, match->subject, match->arms);
         return false;
     }
 

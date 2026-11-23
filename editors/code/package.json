@@ -96,6 +96,19 @@
           "light": "./assets/file-icon-luwu-config-light.svg",
           "dark": "./assets/file-icon-luwu-config-dark.svg"
         }
+      },
+      {
+        "id": "luwu-bytecode",
+        "aliases": [
+          "Luwu Bytecode"
+        ]
+      },
+      {
+        "id": "luwu-remarks",
+        "aliases": [
+          "Luwu Compiler Remarks"
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -128,6 +141,19 @@
           "meta.template.expression string": "string",
           "meta.template.expression comment": "comment"
         }
+      },
+      {
+        "language": "luwu-bytecode",
+        "scopeName": "source.luwu-bytecode",
+        "path": "./syntaxes/LuwuBytecode.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.line.luwu": "luwu"
+        }
+      },
+      {
+        "language": "luwu-remarks",
+        "scopeName": "source.luwu-remarks",
+        "path": "./syntaxes/LuwuRemarks.tmLanguage.json"
       },
       {
         "scopeName": "markdown.luau.codeblock",

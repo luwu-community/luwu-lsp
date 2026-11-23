@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <optional>
 #include "Luau/AstQuery.h"
 #include "Luau/Frontend.h"
@@ -124,6 +125,12 @@ Luau::AstStatClass* findClassStatFromExternType(Luau::AstStatBlock* root, Luau::
 // TODO: should upstream this
 Luau::AstNode* findNodeOrTypeAtPosition(const Luau::SourceModule& source, Luau::Position pos);
 Luau::AstNode* findNodeOrTypeAtPositionClosed(const Luau::SourceModule& source, Luau::Position pos);
+/// Luwu Pattern Matching: each name `pattern` binds (`Cat(name)`, `Pod {x}`, `.(a, .. as rest)`), declared where it's
+/// written in the pattern. Nested patterns are their own AstExprMatchPattern, which a visitor reaches on its own.
+void forEachPatternBinding(const Luau::AstExprMatchPattern& pattern, const std::function<void(Luau::AstLocal*)>& f);
+/// Luwu Pattern Matching: the name in each `case name ...` arm of `arms`
+void forEachArmBinding(const Luau::AstArray<Luau::AstMatchArm>& arms, const std::function<void(Luau::AstLocal*)>& f);
+
 Luau::ExprOrLocal findExprOrLocalAtPositionClosed(const Luau::SourceModule& source, Luau::Position pos);
 std::vector<Luau::Location> findSymbolReferences(const Luau::SourceModule& source, Luau::Symbol symbol);
 std::vector<Luau::Location> findTypeReferences(const Luau::SourceModule& source, const Luau::Name& typeName, std::optional<const Luau::Name> prefix);
@@ -189,6 +196,8 @@ std::optional<Luau::ModuleName> lookupImportedModule(const Luau::Scope& deepScop
 lsp::Position toUTF16(const TextDocument* textDocument, const Luau::Position& position);
 
 lsp::Diagnostic createTypeErrorDiagnostic(const Luau::TypeError& error, Luau::FileResolver* fileResolver, const TextDocument* textDocument = nullptr);
+// Luwu: an error compiling the document, labeled CompileError
+lsp::Diagnostic createCompileErrorDiagnostic(const Luau::Location& location, const std::string& message, const TextDocument* textDocument);
 // Luwu: a note (Module::notes) on code an error elsewhere explains, shown less prominently than an error
 lsp::Diagnostic createNoteDiagnostic(const Luau::DiagnosticNote& note, const TextDocument* textDocument);
 // Luwu: links an error's diagnostic to the notes about it (`notes` whose origin is the error's location), such as where

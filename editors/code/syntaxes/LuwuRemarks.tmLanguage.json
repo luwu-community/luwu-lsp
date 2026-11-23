@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Luwu Compiler Remarks",
+  "scopeName": "source.luwu-remarks",
+  "comment": "The compiler remarks view: the source, with a `-- remark: ...` comment above each line the compiler has remarks for (BytecodeBuilder::dumpSourceRemarks in luwu's Bytecode/src/BytecodeBuilder.cpp)",
+  "patterns": [{ "include": "source.luwu" }, { "include": "#load-remark-text" }],
+  "injections": {
+    "L:source.luwu-remarks -string -comment.block": {
+      "patterns": [{ "include": "#remark-comment" }]
+    }
+  },
+  "repository": {
+    "remark-comment": {
+      "match": "(--) (remark:) (.*)$",
+      "captures": {
+        "1": { "name": "comment.line.remark.luwu-remarks punctuation.definition.comment.luwu-remarks" },
+        "2": { "name": "comment.line.remark.luwu-remarks keyword.other.remark.luwu-remarks" },
+        "3": {
+          "name": "comment.line.remark.luwu-remarks",
+          "patterns": [{ "include": "source.luwu-bytecode#remark-text" }]
+        }
+      }
+    },
+    "load-remark-text": {
+      "comment": "Never matches. vscode-textmate only loads the grammars that ordinary patterns include, not those included from captures, so this makes it load source.luwu-bytecode for #remark-comment.",
+      "begin": "(?!)",
+      "end": "(?!)",
+      "patterns": [{ "include": "source.luwu-bytecode#remark-text" }]
+    }
+  }
+}

@@ -3,6 +3,8 @@
 
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuTraits)
+LUAU_FASTFLAG(LuwuDestructuring)
+LUAU_FASTFLAG(DebugLuwuMatchExpressions)
 
 TEST_SUITE_BEGIN("Rename");
 
@@ -920,6 +922,66 @@ local x: lib.wrap<string> = "hi"
         CHECK_EQ(renamedPositions(result, lib), std::vector{positionOf(libSource, "wrap")});
         CHECK_EQ(renamedPositions(result, user), std::vector{positionOf(userSource, "wrap")});
     }
+}
+
+TEST_CASE_FIXTURE(Fixture, "rename_match_header_and_case_names")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+local function describe(value: unknown): string
+    return match const subject = value
+        case is string then subject
+        when subject == nil then "nothing"
+        case other then tostring(other)
+end
+)";
+    auto uri = newDocument("main.luwu", source);
+
+    for (const char* name : {"subject", "other"})
+    {
+        std::vector<lsp::Position> uses = name == std::string("subject")
+                                              ? std::vector{positionOf(source, name, 0), positionOf(source, name, 1), positionOf(source, name, 2)}
+                                              : std::vector{positionOf(source, name, 0), positionOf(source, name, 1)};
+        // from the declaration and from the last use
+        for (const lsp::Position& from : {uses.front(), uses.back()})
+        {
+            lsp::RenameParams params;
+            params.textDocument = lsp::TextDocumentIdentifier{uri};
+            params.position = from;
+            params.newName = "renamed";
+
+            auto result = workspace.rename(params, nullptr);
+            CHECK_EQ(renamedPositions(result, uri), uses);
+        }
+    }
+}
+
+TEST_CASE_FIXTURE(Fixture, "rename_a_pattern_binding")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = R"(
+class Point(public x: number) end
+local p: unknown = Point(1)
+if p is Point(px) then
+    print(px)
+end
+)";
+    auto uri = newDocument("main.luwu", source);
+
+    lsp::RenameParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = positionOf(source, "px", 1);
+    params.newName = "renamed";
+
+    auto result = workspace.rename(params, nullptr);
+    CHECK_EQ(renamedPositions(result, uri), std::vector{positionOf(source, "px", 0), positionOf(source, "px", 1)});
 }
 
 TEST_SUITE_END();

@@ -3,6 +3,10 @@
 
 #include "LSP/IostreamHelpers.hpp"
 
+LUAU_FASTFLAG(LuwuClasses)
+LUAU_FASTFLAG(LuwuDestructuring)
+LUAU_FASTFLAG(DebugLuwuMatchExpressions)
+
 TEST_SUITE_BEGIN("GoToDefinition");
 
 TEST_CASE_FIXTURE(Fixture, "local_variable_definition")
@@ -761,6 +765,38 @@ TEST_CASE_FIXTURE(Fixture, "go_to_definition_on_original_local_function_definiti
     REQUIRE_EQ(result.size(), 1);
     CHECK_EQ(result[0].uri, document);
     CHECK_EQ(result[0].range, lsp::Range{{1, 23}, {1, 36}});
+}
+
+TEST_CASE_FIXTURE(Fixture, "go_to_definition_on_a_class_pattern_field_goes_to_the_class_field")
+{
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
+    ScopedFastFlag luwuDestructuring{FFlag::LuwuDestructuring, true};
+    ScopedFastFlag matchExpressions{FFlag::DebugLuwuMatchExpressions, true};
+    ENABLE_NEW_SOLVER();
+
+    std::string source = "class Point(public x: number, public y: number) end\n"
+                         "local p: unknown = Point(1, 2)\n"
+                         "if p is Point(px, py) then end\n"
+                         "if p is Point {y} then end\n";
+    auto document = newDocument("main.luwu", source);
+
+    auto definitionAt = [&](lsp::Position position) -> std::optional<lsp::Position>
+    {
+        auto params = lsp::DefinitionParams{};
+        params.textDocument = lsp::TextDocumentIdentifier{document};
+        params.position = position;
+        auto result = workspace.gotoDefinition(params, nullptr);
+        if (result.size() != 1 || result[0].uri != document)
+            return std::nullopt;
+        return result[0].range.start;
+    };
+
+    lsp::Position x{0, 19};
+    lsp::Position y{0, 37};
+    // by position in `Point(px, py)`, and by key in `Point {y}`
+    CHECK_EQ(definitionAt({2, 14}), x);
+    CHECK_EQ(definitionAt({2, 18}), y);
+    CHECK_EQ(definitionAt({3, 15}), y);
 }
 
 TEST_SUITE_END();

@@ -123,6 +123,8 @@ type ClientData = {
     next_id: number,
     --- The text of each open file
     texts: { [string]: string },
+    --- The version of each open file, which goes up with every change
+    versions: { [string]: number },
     --- Published diagnostics by file uri
     published: { [string]: FileDiagnostics },
 }
@@ -286,6 +288,7 @@ end
 function Client.open(self: Client, file: string): string
     const text = fs.readfile(fs.path.join(self.root, file))
     self.texts[file] = text
+    self.versions[file] = 1
 
     const language = if str.endswith(file, ".luwu") then "luwu" else "luau"
     self:notify("textDocument/didOpen", {
@@ -297,6 +300,20 @@ function Client.open(self: Client, file: string): string
         },
     })
     return text
+end
+
+--- Replaces an open file's text in the server, as an editor does after an edit, so its next check sees `text`
+function Client.change(self: Client, file: string, text: string)
+    const version = (self.versions[file] or 1) + 1
+    self.versions[file] = version
+    self.texts[file] = text
+    self:notify("textDocument/didChange", {
+        textDocument = {
+            uri = self:uri(file),
+            version = version,
+        },
+        contentChanges = { { text = text } },
+    })
 end
 
 --- Opens every `.luwu`, `.luau` and `.lua` file directly in the root
@@ -413,6 +430,7 @@ const function start(options: StartOptions): Client
         timeout = options.timeout or DEFAULT_TIMEOUT,
         next_id = 0,
         texts = {},
+        versions = {},
         published = {},
     }, Client)
 

@@ -144,21 +144,6 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     {
     }
 
-    // Whether `name` is written at `position`, as a whole word
-    bool nameWrittenAt(const Luau::Position& position, const char* name) const
-    {
-        if (!textDocument || position.line >= textDocument->lineCount())
-            return false;
-
-        std::string line = textDocument->getLine(position.line);
-        size_t length = strlen(name);
-        if (position.column > line.size() || line.compare(position.column, length, name) != 0)
-            return false;
-
-        size_t after = position.column + length;
-        return after >= line.size() || !(isalnum(static_cast<unsigned char>(line[after])) || line[after] == '_');
-    }
-
     // HACK: Luau introduces some synthetic tokens in the AST for types
     // { T } gets converted to { [number]: T } (where number is an introduced AstTypeReference)
     // string? gets converted to string | nil (where nil is an introduced AstTypeReference)
@@ -243,6 +228,26 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         return true;
     }
 
+    // The token a local's declaration gets from its type, if it needs one
+    void addDeclarationToken(const Luau::Scope& scope, Luau::AstLocal* var)
+    {
+        auto ty = scope.lookup(var);
+        if (!ty)
+            return;
+
+        auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable, builtinTypes);
+        if (type == lsp::SemanticTokenTypes::Variable)
+            return; // No special semantic token needed, fall back to syntax highlighting
+        tokens.emplace_back(SemanticToken{var->location.begin, var->location.end, type, lsp::SemanticTokenModifiers::None});
+    }
+
+    // Luwu Pattern Matching: a name a pattern or a `case` arm declares, in the scope where the code it binds for starts
+    void addBindingToken(Luau::AstLocal* var)
+    {
+        if (auto scope = Luau::findScopeAtPosition(*module, var->location.end))
+            addDeclarationToken(*scope, var);
+    }
+
     bool visit(Luau::AstStatLocal* local) override
     {
         auto scope = Luau::findScopeAtPosition(*module, local->location.begin);
@@ -255,14 +260,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
             if (strcmp(var->name.value, Luau::kDestructuredLocalName) == 0)
                 continue;
 
-            auto ty = scope->lookup(var);
-            if (ty)
-            {
-                auto type = inferTokenType(*ty, lsp::SemanticTokenTypes::Variable, builtinTypes);
-                if (type == lsp::SemanticTokenTypes::Variable)
-                    continue; // No special semantic token needed, fall back to syntax highlighting
-                tokens.emplace_back(SemanticToken{var->location.begin, var->location.end, type, lsp::SemanticTokenModifiers::None});
-            }
+            addDeclarationToken(*scope, var);
         }
 
         if (local->destructure)
@@ -397,21 +395,7 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
 
     bool visit(Luau::AstExprLocal* local) override
     {
-        // Luwu Pattern Matching: a local the parser made up (the `(matched)` subject of a `match`) isn't written anywhere
-        if (local->local->name.value[0] == '(')
-            return true;
-
-        // Luwu Pattern Matching: the parser makes up reads located wherever the pattern needs them. `node is Sub
-        // {left, right}` reads `node` on the whole test, and `case found is Found` reads the `match` subject on `found`
-        // and on `is`. Only a read whose name is written at its start is coloured, and only over the name.
-        Luau::Location location = local->location;
-        unsigned int nameLength = static_cast<unsigned int>(strlen(local->local->name.value));
-        if (location.begin.line != location.end.line || location.end.column - location.begin.column != nameLength)
-        {
-            if (!nameWrittenAt(location.begin, local->local->name.value))
-                return true;
-            location.end = Luau::Position{location.begin.line, location.begin.column + nameLength};
-        }
+        const Luau::Location& location = local->location;
 
         auto defaultType = lsp::SemanticTokenTypes::Variable;
         if (localMap.find(local->local) != localMap.end())
@@ -507,14 +491,11 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
         return true;
     }
 
-    // Luwu match expressions: `x is Point` is parsed as `class.isinstance(x, Point)` (and `x is string` as
-    // `type(x) == "string"`). The made-up callee is located on the whole test, so colouring it would paint the test as
-    // a function. Only the operands are written in the source.
     // Luwu bundles: `.(a, b)` is parsed as `bundle.pack(a, b)`, with the made-up callee on the `.`. Colouring it would
     // paint the dot as a function, so only the values are visited.
     bool visit(Luau::AstExprCall* call) override
     {
-        if (!call->fromTypeTest && !call->fromDotPositional)
+        if (!call->fromDotPositional)
             return true;
 
         for (Luau::AstExpr* arg : call->args)
@@ -627,12 +608,26 @@ struct SemanticTokensVisitor : public Luau::AstVisitor
     bool visit(Luau::AstExprMatch* match) override
     {
         addMatchArmTokens(match->arms);
+        forEachArmBinding(match->arms, [&](Luau::AstLocal* var) { addBindingToken(var); });
         return true;
     }
 
     bool visit(Luau::AstStatMatch* match) override
     {
         addMatchArmTokens(match->arms);
+        forEachArmBinding(match->arms, [&](Luau::AstLocal* var) { addBindingToken(var); });
+        return true;
+    }
+
+    // Luwu Pattern Matching: a pattern's field keys, like a destructuring's, and the names it binds
+    bool visit(Luau::AstExprMatchPattern* pattern) override
+    {
+        for (const Luau::AstPatternAlternative& alternative : pattern->alternatives)
+        {
+            if (alternative.fields)
+                addDestructuredKeyTokens(*alternative.fields);
+        }
+        forEachPatternBinding(*pattern, [&](Luau::AstLocal* var) { addBindingToken(var); });
         return true;
     }
 

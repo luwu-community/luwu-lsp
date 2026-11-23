@@ -1,5 +1,5 @@
 #include <optional>
-#include <queue>
+#include <deque>
 #include <condition_variable>
 
 #include "LSP/JsonRpc.hpp"
@@ -78,6 +78,8 @@ private:
     bool allWorkspacesReceivedConfiguration() const;
     void clearCancellationToken(const json_rpc::JsonRpcMessage& msg);
     std::optional<json_rpc::JsonRpcMessage> popMessage();
+    /// Stops the message processor after its current request, or exits the server when that request runs past SHUTDOWN_TIMEOUT
+    void stopMessageProcessor();
 
     lsp::InitializeResult onInitialize(const lsp::InitializeParams& params);
     void onInitialized([[maybe_unused]] const lsp::InitializedParams& params);
@@ -107,11 +109,16 @@ private:
 private:
     bool isInitialized = false;
     bool shutdownRequested = false;
+    /// Set when stdin closes without a shutdown request
+    bool inputClosed = false;
 
     std::mutex messagesMutex;
     std::condition_variable messagesCv;
-    std::queue<json_rpc::JsonRpcMessage> messages;
+    std::deque<json_rpc::JsonRpcMessage> messages;
     Thread messageProcessorThread;
+    /// Set under `messagesMutex` once the message processor has handled its last message
+    bool messageProcessorStopped = false;
+    std::condition_variable messageProcessorStoppedCv;
     std::unordered_map<id_type, LSPCancellationToken> cancellationTokens;
 
     // Declared last so it's destroyed first: its thread posts to the message queue above
