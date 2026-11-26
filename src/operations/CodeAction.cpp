@@ -1566,6 +1566,59 @@ void addSingleEditAction(const lsp::DocumentUri& uri, std::string title, lsp::Co
     result.push_back(std::move(action));
 }
 
+// Luwu Integers (rfcs/integers.md): the parser asks for `7int` or `7i64` instead of upstream Luau's `7i`
+bool isUpstreamIntegerSuffixSyntaxError(const std::string& message)
+{
+    return message.rfind("Write '", 0) == 0 && message.find("for integers of dynamic size") != std::string::npos;
+}
+
+// The edit replacing the `i` that ends the literal at `location` with `suffix`
+lsp::TextEdit upstreamIntegerSuffixEdit(const Luau::Location& location, const TextDocument& textDocument, const std::string& suffix)
+{
+    lsp::Range range = textDocument.convertLocation(location);
+    range.start = range.end;
+    range.start.character -= 1;
+    return lsp::TextEdit{range, suffix};
+}
+
+// Fixes for one `7i`, and for all of them in the module when there's more than one
+void generateUpstreamIntegerSuffixFixes(const lsp::DocumentUri& uri, const Luau::TypeError& error, const Luau::ErrorVec& errors,
+    const TextDocument& textDocument, const std::optional<lsp::Diagnostic>& diagnostic, bool offerFixAll, std::vector<lsp::CodeAction>& result)
+{
+    std::string literal = textDocument.getText(textDocument.convertLocation(error.location));
+    if (literal.empty() || literal.back() != 'i')
+        return;
+
+    std::string digits = literal.substr(0, literal.size() - 1);
+    addSingleEditAction(uri, "Change to '" + digits + "int'", lsp::CodeActionKind::QuickFix, true,
+        {upstreamIntegerSuffixEdit(error.location, textDocument, "int")}, diagnostic, result);
+    addSingleEditAction(uri, "Change to '" + digits + "i64'", lsp::CodeActionKind::QuickFix, false,
+        {upstreamIntegerSuffixEdit(error.location, textDocument, "i64")}, diagnostic, result);
+
+    if (!offerFixAll)
+        return;
+
+    std::vector<lsp::TextEdit> toInt;
+    std::vector<lsp::TextEdit> toI64;
+    for (const auto& other : errors)
+    {
+        const auto* syntaxError = Luau::get_if<Luau::SyntaxError>(&other.data);
+        if (!syntaxError || !isUpstreamIntegerSuffixSyntaxError(syntaxError->message))
+            continue;
+
+        toInt.push_back(upstreamIntegerSuffixEdit(other.location, textDocument, "int"));
+        toI64.push_back(upstreamIntegerSuffixEdit(other.location, textDocument, "i64"));
+    }
+
+    if (toInt.size() < 2)
+        return;
+
+    addSingleEditAction(uri, "Change all 'i' integer suffixes in this module to 'int'", lsp::CodeActionKind::QuickFix, false, std::move(toInt),
+        diagnostic, result);
+    addSingleEditAction(uri, "Change all 'i' integer suffixes in this module to 'i64'", lsp::CodeActionKind::QuickFix, false, std::move(toI64),
+        diagnostic, result);
+}
+
 // Luwu: ConstLocal: `local` -> `const` on the statement the warning points into
 void generateConstLocalFix(const lsp::DocumentUri& uri, const Luau::LintWarning& lint, const TextDocument& textDocument, Luau::AstStatBlock* root,
     const std::optional<lsp::Diagnostic>& diagnostic, std::vector<lsp::CodeAction>& result)
@@ -2279,6 +2332,7 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
         };
 
         std::unordered_set<Luau::AstStatClass*> fixedAccessSpecifiersForClasses;
+        bool offeredIntegerSuffixFixAll = false;
 
         for (const auto& error : cr.errors)
         {
@@ -2364,6 +2418,12 @@ lsp::CodeActionResult WorkspaceFolder::codeAction(const lsp::CodeActionParams& p
                     if (auto* classStat = types::findEnclosingClassStat(sourceModule->root, error.location.begin);
                         classStat && fixedAccessSpecifiersForClasses.insert(classStat).second)
                         generateClassAccessSpecifierFix(params.textDocument.uri, classStat, *textDocument, diagnostic, result);
+                }
+                else if (isUpstreamIntegerSuffixSyntaxError(syntaxError->message))
+                {
+                    generateUpstreamIntegerSuffixFixes(
+                        params.textDocument.uri, error, cr.errors, *textDocument, diagnostic, !offeredIntegerSuffixFixAll, result);
+                    offeredIntegerSuffixFixAll = true;
                 }
             }
         }

@@ -812,7 +812,7 @@ contexts:
     # Luwu match expressions: `match` before the value it tests (`match x`,
     # `match const v = x`), and `case` starting an arm. Only in those shapes, so a
     # variable named `match` or `case` stays a name.
-    - match: '(?<![.:])\bmatch\b(?=\s+(?:local\b|const\b|not\b|[^\s=.,:;)\]}+*/%^<>~-]))|^\s*\bcase\b(?=\s+(?:is\b|implements\b|nil\b|none\b|true\b|false\b|-?\d|["''`]|[a-zA-Z_][a-zA-Z0-9_]*\s+(?:is|implements|when|then)\b))'
+    - match: '(?<![.:])\bmatch\b(?=\s+(?:local\b|const\b|not\b|[^\s=.,:;)\]}+*/%^<>~-])|\s*$)|(?<![.:])\bcase\b(?=\s+(?:is\b|implements\b|nil\b|none\b|true\b|false\b|-?\d|["''`]|[a-zA-Z_][a-zA-Z0-9_]*\s+(?:is|implements|when|then)\b))'
       scope: keyword.control.luwu
     # Luwu match expressions: the `is` and `implements` type tests (`x is string`,
     # `p is not Point`, `n is 1 | 2`, `o implements Named`). A name, `not`, `nil`,
@@ -1085,11 +1085,13 @@ contexts:
       captures:
         1: punctuation.accessor.luwu
         2: variable.other.property.luwu
-    - match: '\b0_*[xX]_*[\da-fA-F_]*(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+    - match: '\b0_*[xX]_*[\da-fA-F_]*(?:(?:int|[iu](?:8|16|32|64)|i)\b|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
       scope: constant.numeric.hex.luwu
-    - match: '\b0_*[bB][01_]+(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+    - match: '\b0_*[oO][0-7_]+(?:(?:int|[iu](?:8|16|32|64)|i)\b|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+      scope: constant.numeric.octal.luwu
+    - match: '\b0_*[bB][01_]+(?:(?:int|[iu](?:8|16|32|64)|i)\b|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
       scope: constant.numeric.binary.luwu
-    - match: '(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:i|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
+    - match: '(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:(?:int|[iu](?:8|16|32|64)|i)\b|[eE][\+\-]?_*\d[\d_]*(?:\.[\d_]*)?)?'
       scope: constant.numeric.decimal.luwu
 
   operator:
